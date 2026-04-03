@@ -1,6 +1,7 @@
-const sharp = require('sharp');
-const Processor = require('../../pipeline/Processor');
-const logger = require('../../utils/logger');
+import sharp from 'sharp';
+import Processor from '../../pipeline/Processor.js';
+import logger from '../../utils/logger.js';
+import { decodeHeicWithFFmpeg, detectImageFormat } from '../../utils/HeifDecoder.js';
 
 /**
  * Image processor using sharp (libvips)
@@ -157,7 +158,19 @@ class ImageProcessor extends Processor {
 
     onProgress?.(5, 'Loading image');
 
-    let pipeline = sharp(input);
+    // Detect input format
+    const detectedFormat = detectImageFormat(input);
+    onProgress?.(10, `Detected format: ${detectedFormat || 'unknown'}`);
+
+    // Handle HEIC format - libvips can't decode Apple's HEIC, use FFmpeg
+    let processedInput = input;
+    if (detectedFormat === 'heic') {
+      onProgress?.(15, 'Decoding HEIC via FFmpeg');
+      processedInput = await decodeHeicWithFFmpeg(input);
+      onProgress?.(20, 'HEIC decoded, processing image');
+    }
+
+    let pipeline = sharp(processedInput);
 
     // Get metadata for aspect ratio calculation
     const metadata = await pipeline.metadata();
@@ -240,4 +253,4 @@ class ImageProcessor extends Processor {
   }
 }
 
-module.exports = ImageProcessor;
+export default ImageProcessor;

@@ -27,4 +27,4 @@ class Processor {
   }
 }
 
-module.exports = Processor;
+export default Processor;

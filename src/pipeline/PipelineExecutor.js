@@ -1,4 +1,4 @@
-const logger = require('../utils/logger');
+import logger from '../utils/logger.js';
 
 /**
  * Executes a chain of processors in sequence
@@ -66,4 +66,4 @@ class PipelineExecutor {
   }
 }
 
-module.exports = new PipelineExecutor();
+export default new PipelineExecutor();

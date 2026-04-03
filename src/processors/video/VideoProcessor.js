@@ -1,8 +1,8 @@
-const ffmpeg = require('fluent-ffmpeg');
-const { Readable, Writable } = require('stream');
-const Processor = require('../../pipeline/Processor');
-const config = require('../../config/config');
-const logger = require('../../utils/logger');
+import ffmpeg from 'fluent-ffmpeg';
+import { Readable, Writable } from 'stream';
+import Processor from '../../pipeline/Processor.js';
+import config from '../../config/config.js';
+import logger from '../../utils/logger.js';
 
 // Set ffmpeg path
 if (config.ffmpegPath) {
@@ -158,4 +158,4 @@ class VideoProcessor extends Processor {
   }
 }
 
-module.exports = VideoProcessor;
+export default VideoProcessor;

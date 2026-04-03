@@ -1,0 +1,31 @@
+{
+  "server": {
+    "port": 3500,
+    "host": "0.0.0.0"
+  },
+  "media": {
+    "maxFileSizeMb": 9007199254740991,
+    "ffmpegPath": "./bin/ffmpeg.exe",
+    "gpu": {
+      "platform": "nvenc",
+      "device": 0
+    }
+  },
+  "logging": {
+    "level": "info",
+    "logsDir": "./logs",
+    "sessionPrefix": "ms",
+    "retentionDays": 7
+  },
+  "cache": {
+    "dir": "./cache/assets",
+    "ttl": 3600,
+    "maxSize": 10737418240
+  },
+  "workers": {
+    "maxConcurrentTasks": 4
+  },
+  "messaging": {
+    "transport": "sse"
+  }
+}

@@ -1,51 +1,41 @@
-const express = require('express');
-const multer = require('multer');
-const config = require('../../config/config');
-const PipelineExecutor = require('../../pipeline/PipelineExecutor');
-const ProgressReporter = require('../../pipeline/ProgressReporter');
-const logger = require('../../utils/logger');
-
-const router = express.Router();
-
-// Configure multer for memory storage
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: config.maxFileSizeBytes },
-});
+import PipelineExecutor from '../../pipeline/PipelineExecutor.js';
+import ProgressReporter from '../../pipeline/ProgressReporter.js';
+import logger from '../../utils/logger.js';
 
 /**
  * POST /v1/optimize/video
  * Process video (extract audio or keyframes)
  */
-router.post('/video', upload.single('file'), async (req, res) => {
+export async function handleVideo(ctx) {
   try {
     let inputBuffer;
     let originalSize;
 
     // Handle file upload or base64 input
-    if (req.file) {
-      inputBuffer = req.file.buffer;
-      originalSize = req.file.size;
-    } else if (req.body.base64) {
-      const base64Data = req.body.base64.replace(/^data:[^;]+;base64,/, '');
+    if (ctx.file) {
+      inputBuffer = ctx.file.buffer;
+      originalSize = ctx.file.size;
+    } else if (ctx.body?.base64) {
+      const base64Data = ctx.body.base64.replace(/^data:[^;]+;base64,/, '');
       inputBuffer = Buffer.from(base64Data, 'base64');
       originalSize = inputBuffer.length;
     } else {
-      return res.status(400).json({ error: 'No file or base64 data provided' });
+      ctx.error(400, 'No file or base64 data provided');
+      return;
     }
 
     const options = {
-      mode: req.body.mode || 'extract_audio',
-      fps: parseInt(req.body.fps) || 1,
-      format: req.body.format || 'jpeg',
-      max_dimension: parseInt(req.body.max_dimension) || 1024,
-      response_type: req.body.response_type || 'base64',
+      mode: ctx.body.mode || 'extract_audio',
+      fps: parseInt(ctx.body.fps) || 1,
+      format: ctx.body.format || 'jpeg',
+      max_dimension: parseInt(ctx.body.max_dimension) || 1024,
+      response_type: ctx.body.response_type || 'base64',
     };
 
-    const responseType = req.body.response_type || 'base64';
+    const responseType = ctx.body.response_type || 'base64';
 
     // Create SSE connection for progress
-    const jobId = ProgressReporter.createJob(res);
+    const jobId = ctx.createSseJob();
 
     // Execute processing
     const result = await PipelineExecutor.execute('video', inputBuffer, options, ProgressReporter, jobId);
@@ -54,7 +44,7 @@ router.post('/video', upload.single('file'), async (req, res) => {
     if (responseType === 'base64') {
       if (options.mode === 'extract_audio') {
         const base64 = result.buffer.toString('base64');
-        res.json({
+        ctx.json(200, {
           original_size_bytes: originalSize,
           output_size_bytes: result.metadata.outputSize,
           mode: result.metadata.mode,
@@ -62,7 +52,7 @@ router.post('/video', upload.single('file'), async (req, res) => {
           base64: `data:${result.metadata.mimeType};base64,${base64}`,
         });
       } else {
-        res.json({
+        ctx.json(200, {
           original_size_bytes: originalSize,
           frame_count: result.metadata.frameCount,
           mode: result.metadata.mode,
@@ -70,20 +60,28 @@ router.post('/video', upload.single('file'), async (req, res) => {
         });
       }
     } else {
-      res.setHeader('Content-Type', result.metadata.mimeType);
       if (options.mode === 'extract_audio') {
-        res.setHeader('Content-Disposition', 'attachment; filename="audio.mp3"');
+        ctx.send(200, result.buffer, result.metadata.mimeType, 'audio.mp3');
       } else {
-        res.setHeader('Content-Type', 'image/jpeg'); // frames are jpeg
+        ctx.send(200, result.buffer, 'image/jpeg', 'frames.jpg');
       }
-      res.send(result.buffer);
     }
   } catch (error) {
     logger.error('Video processing failed', { error: error.message });
-    if (!res.headersSent) {
-      res.status(500).json({ error: error.message });
-    }
+    ctx.error(500, error.message);
   }
-});
+}
 
-module.exports = router;
+/**
+ * SSE progress endpoint for video jobs.
+ * GET /v1/optimize/progress/:jobId
+ */
+export async function handleVideoProgress(ctx) {
+  const { jobId } = ctx.params;
+
+  // Create SSE connection
+  const actualJobId = ctx.createSseJob();
+
+  // Send initial connection message
+  ProgressReporter.send(actualJobId, 'connected', { jobId: actualJobId });
+}

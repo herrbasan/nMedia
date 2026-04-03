@@ -1,115 +1,253 @@
-# Media Processing Service - Development Plan
+# Media Service - Development Plan
 
-The **Media Processing Service (MPS)** is a standalone, CPU-heavy microservice designed to act as an optimization sidecar for the LLM Gateway. Its sole purpose is to receive large multimodal payloads (images, audio, video), aggressively compress/downscale them, and return LLM-friendly formats. 
-
-By isolating this workload, the core Gateway remains lightweight, pure-JS, and unaffected by the event-loop blocking operations of media crunching.
+The **Media Processing Service (MPS)** is a standalone microservice built on **Node.js** as the orchestration platform. Its purpose is to receive multimodal payloads (images, audio, video), process them efficiently using native bindings, and return optimized outputs. GPU acceleration is utilized when available.
 
 ---
 
 ## 1. Core Objectives
-- **LLM-Targeted Downscaling:** LLMs rarely benefit from resolutions over 1024px or bitrates over 16kHz. MPS crushes massive files into tokens-efficient, VRAM-safe sizes.
-- **Stateless & Synchronous:** The service acts as a pure processing pipeline (Data In -> Data Out). No databases, no persistent storage, no complex session state.
-- **Blazing Fast:** Designed to be highly concurrent and utilize native binary bindings under the hood.
+
+- **Node.js Orchestration:** HTTP server, task management, messaging, and coordination all run on Node.js
+- **Native NAPI Bindings:** Media processing uses in-process native libraries via Node.js NAPI, not CLI tool wrappers
+- **GPU Acceleration:** Utilize NVENC, CUDA, VideoSDK when available for faster encoding/decoding
+- **Hybrid Processing:** Synchronous for quick image ops, asynchronous for heavy video/audio tasks, streaming for real-time processing
+- **Universal Format Support:** HEIC, AVIF, PSD, TIFF, and all formats FFmpeg supports
 
 ---
 
-## 2. Recommended Tech Stack
-Because this service is entirely I/O and CPU bound with native media dependencies, you have three primary options:
+## 2. Technology Stack
 
-1. **Go (Golang):** Highly recommended. Insanely fast, low memory footprint, compiles to a single binary. Use `bimg` (libvips wrapper) for images and `go-fluent-ffmpeg` for media.
-2. **Python:** Standard choice for AI media. Native ecosystem for audio (`librosa`) and images (`Pillow`, `OpenCV`). Slower HTTP handling (FastAPI) but massive library support.
-3. **Node.js (Fat Container):** Quickest to build if you only know JS. Express + `sharp` + `fluent-ffmpeg`. The main issue is the bulky `node_modules` size.
+### Core Platform
+- **Node.js 18+**: HTTP server, orchestration, task queue, messaging
+- **Native HTTP**: Built-in `http` module (no Express)
+- **Native FS**: Built-in `fs` module for file operations
 
-*Assumption for this plan: A fast, stateless API framework (Go Fiber, Python FastAPI, or Node Express).*
+### Bundled Modules (Submodules in `/modules`)
+| Module | Purpose |
+|--------|---------|
+| nLogger | Structured logging with detailed formatting |
+| ffmpeg-napi-interface | FFmpeg NAPI bindings for audio/video |
+| nui_wc2 | Web UI for monitoring and testing |
+
+### Native Media Processing (NAPI)
+
+| Component | Technology | Rationale |
+|-----------|------------|-----------|
+| Image Processing | libvips via Sharp (initial), custom NAPI later | Fastest image processing, minimal memory |
+| Audio/Video Processing | FFmpeg libs via custom NAPI binding | Pattern inspired by `ffmpeg-napi-interface` (SoundApp/libs) |
+
+**GPU Acceleration:** FFmpeg supports hardware acceleration via:
+- **NVENC**: NVIDIA GPUs (preferred for development)
+- **VAAPI**: Intel ARC GPUs (AV1 support)
+- **QSV**: Intel Quick Sync Video
+
+Configured via `config.json` (`media.gpu.platform`). FFmpeg command patterns adjust based on selected platform.
+
+### Why NAPI Over CLI?
+
+CLI tool wrappers (ImageMagick CLI, FFmpeg CLI, fluent-ffmpeg) have inherent limitations:
+
+| CLI Approach | NAPI Approach |
+|--------------|---------------|
+| Process spawn overhead (10-50ms) | Immediate call overhead (<1ms) |
+| Limited streaming (pipes) | Full frame-by-frame streaming |
+| Text parsing for progress | Direct callback access |
+| Memory copying via pipes | Direct buffer access |
+| External binary dependency | Bundled static libs |
 
 ---
 
 ## 3. Supported API Endpoints
 
-### `POST /v1/optimize/image`
-Takes a massive image and returns an LLM-friendly downscaled version.
+### Synchronous (Image)
+
+#### `POST /v1/media/image/process`
+Quick image operations (<500ms response).
 
 * **Accepts:** `multipart/form-data` OR inline `{"base64": "..."}`
-* **Parameters:** 
-  * `max_dimension` (default: 1024)
-  * `quality` (default: 85)
-  * `format` (default: 'jpeg') - WebP is also good, but heavily model-dependent.
-* **Processing Logic:** 
-  1. Detect current aspect ratio.
-  2. If longest edge > `max_dimension`, proportionally resize so longest edge == `max_dimension`.
-  3. Strip EXIF data (privacy + space saving).
-  4. Compress to JPEG/WebP.
-* **Returns:** 
+* **Parameters:**
+  - `max_dimension` (default: 1024)
+  - `quality` (default: 85)
+  - `format` (default: 'jpeg') - jpeg, png, webp, avif, gif, heic
+  - `strip_exif` (default: true)
+* **Returns:**
   ```json
   {
     "original_size_bytes": 5242880,
-    "optimized_size_bytes": 102400,
+    "output_size_bytes": 102400,
     "format": "image/jpeg",
     "base64": "..."
   }
   ```
 
-### `POST /v1/optimize/audio`
-Prepares user microphone recordings or massive WAV files for Speech-to-Text (STT) models like Whisper.
+#### `POST /v1/media/image/crop`
+Advanced cropping operations.
 
-* **Accepts:** `multipart/form-data`
+* **Accepts:** `multipart/form-data` OR inline `{"base64": "..."}`
 * **Parameters:**
-  * `sample_rate` (default: 16000)
-  * `channels` (default: 1)
-* **Processing Logic:**
-  1. Down-mix stereo to mono.
-  2. Resample to 16kHz (Standard Whisper/LLM input resolution).
-  3. Compress to `.mp3` or `.ogg` (if supported by target) or `.wav` for raw uncompressed.
-* **Returns:** Downscaled buffer or base64.
+  - `crop.type`: region, center, or grid
+  - `crop.left/top/right/bottom`: Normalized coordinates (region)
+  - `crop.widthPercent/heightPercent`: Percentage (center)
+  - `crop.grid.cols/rows/cells`: Grid extraction
 
-### `POST /v1/optimize/video` (Future/Phase 2)
-Extracts keyframes or audio tracks from massive video uploads.
+### Asynchronous (Audio/Video)
 
-* **Accepts:** `multipart/form-data`
+#### `POST /v1/tasks`
+Create an async processing task.
+
+* **Accepts:** `multipart/form-data` with file or base64 input
 * **Parameters:**
-  * `mode` (enum: `extract_audio`, `extract_keyframes`)
-  * `fps` (default: 1) - One frame per second.
-* **Processing Logic:**
-  1. Uses `ffmpeg` to strip the audio track or grab frames.
-* **Returns:** An array of base64 images or a single audio track buffer.
+  - `type`: image, audio, or video
+  - `operation`: transcode, resize, crop, extract_audio, extract_keyframes, etc.
+  - `options`: Operation-specific parameters
+  - `ttl`: Cache TTL in seconds (default: 3600)
+
+#### `POST /v1/media/audio`
+Audio transcoding/resampling.
+
+* **Parameters:**
+  - `sample_rate` (default: 16000)
+  - `channels` (default: 1)
+  - `format` (default: 'mp3')
+
+#### `POST /v1/media/video`
+Video processing (async).
+
+* **Parameters:**
+  - `mode`: extract_audio, extract_keyframes, transcode
+  - `fps`: Frames per second for keyframe extraction
+  - `format`: Output format
+
+### Streaming (Real-time)
+
+#### `POST /v1/media/video/stream`
+Real-time video processing with streaming response.
+
+#### `POST /v1/media/audio/stream`
+Real-time audio processing with streaming response.
 
 ---
 
-## 4. Error Handling & Gateway Contract
+## 4. Task System
 
-The Gateway expects the MPS to be robust but occasionally fail (e.g., corrupt file, unsupported format).
+### Task Lifecycle
 
-* **200 OK:** Success, the Gateway swaps the payload.
-* **415 Unsupported Media Type:** E.g., user uploaded a `.TIFF` file but the processor only reads JPEG/PNG. The Gateway should *pass-through* the original and let the upstream LLM provider reject it.
-* **413 Payload Too Large:** The MPS should have hard limits (e.g., `LIMIT_IMAGE_SIZE_MB=25`). If exceeded, Gateway returns 413 to the user.
-* **5XX Errors / Timeout:** The Gateway's internal Circuit Breaker will trip, logging a warning, and bypassing the MPS entirely to maintain service uptime.
+```
+[Create] → [Queued] → [Processing] → [Completed]
+               ↓            ↓
+           [Cancelled]   [Failed]
+```
 
----
-
-## 5. Security & Deployment
-
-* **Authentication:** It is meant to be run in a private subnet (e.g., inside a `docker-compose` network) alongside the Gateway. 
-  * If exposed publicly, require a simple `Authorization: Bearer <shared_secret_token>`.
-* **Hardware:** Needs decent CPU allocation. Image resizing is CPU intensive, but short-lived.
-* **Observability:** Must expose a `GET /health` endpoint that checks if native dependencies (`libvips`, `ffmpeg`) are successfully hooked and accessible.
+### Task Queue
+- In-memory queue with priority support
+- Configurable max concurrent workers
+- Automatic retry with exponential backoff (max 3 attempts)
+- Dead letter handling
 
 ---
 
-## 6. Dockerization Blueprint (`Dockerfile`)
+## 5. Messaging Layer
+
+### Transport Adapters
+
+| Transport | Best For | Endpoint |
+|-----------|----------|----------|
+| SSE | Browser clients | `GET /v1/events` |
+| WebSocket | Low latency, bidirectional | `WS /v1/ws` |
+| REST Polling | Firewalls, simple clients | `GET /v1/tasks/:id/status` |
+
+### Message Types
+- `task_created`, `progress`, `completed`, `error`, `cancelled`
+
+---
+
+## 6. Asset Cache
+
+- **Storage:** Local disk (`./cache/assets/`)
+- **Default TTL:** 1 hour
+- **Max Size:** 10GB (configurable)
+- **Cleanup:** Background job every 5 minutes
+
+### Endpoints
+- `GET /v1/assets/:id` - Download
+- `GET /v1/assets/:id/metadata` - Metadata
+- `DELETE /v1/assets/:id` - Delete
+
+---
+
+## 7. Error Handling & Gateway Contract
+
+| HTTP Status | Meaning | Gateway Action |
+|-------------|---------|----------------|
+| 200 | Success | Swap payload |
+| 400 | Bad request | Return error |
+| 404 | Not found | Return error |
+| 413 | File too large | Return error to client |
+| 415 | Unsupported format | Pass-through original |
+| 5XX | Processing error | Circuit breaker trips, bypass MPS |
+
+---
+
+## 8. Dockerization
 
 ```dockerfile
-# Example setup requiring system dependencies
-FROM debian:alpine
+FROM node:20-alpine
 
-# Install heavy system level media dependencies
-RUN apk add --no-cache vips-dev ffmpeg curl
+# Install build tools for NAPI compilation
+RUN apk add --no-cache python3 make g++
 
-# ... Install language runtime (Node/Go/Python) ...
-# ... Copy code ...
+# Copy package files
+COPY package*.json ./
+RUN npm ci --ignore-scripts
+
+# Copy FFmpeg staticlibs and libvips
+COPY deps/ /deps/
+
+# Build native addons
+RUN npm run build:native
+
+# Copy application code
+COPY src/ ./src/
+COPY cache/ ./cache/
 
 ENV PORT=3500
-ENV MAX_CONCURRENT_WORKERS=4
+ENV MAX_CONCURRENT_TASKS=4
 
 EXPOSE 3500
-CMD ["run-server"]
+CMD ["npm", "start"]
 ```
+
+### Key Considerations
+- FFmpeg and libvips bundled as static libraries, not CLI binaries
+- Custom NAPI bindings link against these static libs
+- No ImageMagick CLI dependency - libvips handles all formats natively
+
+---
+
+## 9. Development Phases
+
+### Phase 1: Core Foundation
+1. ~~Node.js HTTP server with Express~~ → **DONE** (native `http` module + custom multipart parser)
+2. ~~Task system (create, status, queue, workers)~~ → **DONE** (Task, TaskStore, TaskQueue, Worker, TaskManager)
+3. ~~SSE messaging adapter~~ → **DONE** (ProgressReporter decoupled via Sender interface)
+4. ~~Asset cache with TTL~~ → **DONE** (AssetCache class, disk storage, TTL cleanup)
+
+### Phase 2: Image Processing
+1. ~~Sharp for standard image operations~~ → **DONE** (resize, crop, convert, strip_exif)
+2. ~~HEIC format support via FFmpeg pre-decode~~ → **DONE** (HeifDecoder utility)
+3. ~~RAW format support (CR2, ORF) via ImageMagick~~ → **DONE** (ImageMagick external decoder)
+4. Native HEIF/AVIF decoder (future - libvips NAPI binding)
+5. Native RAW decoder (future - dcraw or libraw NAPI binding)
+
+### Phase 3: Audio/Video NAPI
+1. Custom FFmpeg NAPI binding (avcodec, avformat, swresample)
+2. Audio decode/encode/transcode
+3. Video decode/encode/transcode
+4. Frame-level streaming API
+
+### Phase 4: Advanced Features
+1. Video streaming endpoint
+2. Audio streaming endpoint
+3. WebSocket messaging adapter
+4. REST polling adapter
+5. Task retry logic
+6. Cache size management

@@ -2,19 +2,16 @@
   "name": "media-service",
   "version": "1.0.0",
   "description": "Media processing service for images, video, and audio",
+  "type": "module",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
-    "vendor": "node scripts/vendor.js"
+    "dev": "node --watch src/index.js"
   },
   "dependencies": {
-    "dotenv": "^16.4.5",
-    "express": "^4.21.0",
-    "multer": "^1.4.5-lts.1",
-    "sharp": "^0.33.5",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "fluent-ffmpeg": "^2.1.3",
-    "@ffmpeg-installer/ffmpeg": "^1.1.0"
+    "sharp": "^0.33.5"
   },
   "engines": {
     "node": ">=18.0.0"
