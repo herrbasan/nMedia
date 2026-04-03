@@ -4,6 +4,7 @@ cache/
 
 # Dependencies
 node_modules/
+deps/
 
 # Environment
 .env
