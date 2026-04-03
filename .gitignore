@@ -1,5 +1,6 @@
 # Folders
 tests/
+cache/
 
 # Dependencies
 node_modules/
