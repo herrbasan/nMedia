@@ -9,10 +9,10 @@ Media Service is designed as a sidecar service for the LLM Gateway. It receives 
 ## Tech Stack
 
 - **Runtime:** Node.js 18+
-- **HTTP Framework:** Express
-- **Image Processing:** Sharp (libvips)
-- **Audio/Video Processing:** FFmpeg via fluent-ffmpeg
-- **File Upload:** Multer
+- **HTTP Server:** Native Node.js `http` module with custom Router
+- **Image Processing:** nImage (native NAPI with libraw/libheif/ImageMagick)
+- **Audio/Video Processing:** FFmpeg CLI
+- **File Upload:** Custom multipart parser
 
 ## Project Structure
 
@@ -20,7 +20,14 @@ Media Service is designed as a sidecar service for the LLM Gateway. It receives 
 src/
 ├── index.js              # Application entry point
 ├── config/
-│   └── config.js         # Environment configuration
+│   └── config.js         # Configuration loader (config.json)
+├── server/
+│   ├── HttpServer.js     # Native HTTP server with routing
+│   ├── Router.js         # Request routing
+│   ├── Context.js        # Request context handling
+│   ├── MultipartParser.js # File upload parsing
+│   ├── Sender.js         # Response utilities
+│   └── SseConnection.js  # SSE connection management
 ├── pipeline/
 │   ├── PipelineExecutor.js   # Processor registry and execution
 │   ├── Processor.js          # Base processor class
@@ -33,8 +40,11 @@ src/
 │   ├── image.js   # POST /v1/optimize/image, /v1/optimize/image/crop
 │   ├── audio.js   # POST /v1/optimize/audio
 │   └── video.js   # POST /v1/optimize/video
+├── tasks/         # Async task system (Task, TaskQueue, TaskManager, Worker)
+├── cache/         # Asset caching (AssetCache.js)
 └── utils/
-    └── logger.js  # Structured logging
+    ├── logger.js      # Structured logging (nLogger)
+    └── uuid.js        # UUID generation
 ```
 
 ## API Endpoints
@@ -94,14 +104,24 @@ SSE endpoint for real-time job progress (when response_type is not base64).
 
 ## Configuration
 
-Environment variables:
+All configuration is managed via `config.json` in the project root. Required fields will throw an error at startup if missing.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | 3500 | Server port |
-| `MAX_FILE_SIZE_MB` | 300 | Max upload size |
-| `LOG_LEVEL` | info | Logging level: error, warn, info, debug |
-| `FFMPEG_PATH` | auto | Custom FFmpeg path |
+| Field | Required | Description |
+|-------|----------|-------------|
+| `server.port` | Yes | HTTP server port |
+| `server.host` | No | Host to bind (default: 0.0.0.0) |
+| `media.maxFileSizeMb` | No | Max upload size in MB |
+| `media.ffmpegPath` | No | Path to FFmpeg executable |
+| `media.gpu.platform` | Yes | GPU platform: `nvenc`, `vaapi`, `cpu` |
+| `media.gpu.device` | No | GPU device index (default: 0) |
+| `logging.level` | No | Log level: error, warn, info, debug |
+| `logging.logsDir` | Yes | Directory for log files |
+| `logging.sessionPrefix` | No | Log file prefix (default: ms) |
+| `logging.retentionDays` | No | Days to keep logs (default: 7) |
+| `cache.dir` | No | Cache directory (default: ./cache/assets) |
+| `cache.ttl` | No | Asset TTL in seconds (default: 3600) |
+| `cache.maxSize` | No | Max cache size in bytes (default: 10GB) |
+| `workers.maxConcurrentTasks` | No | Max parallel async tasks (default: 4) |
 
 ## Quick Start
 

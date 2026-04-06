@@ -7,9 +7,9 @@ Media Service is a comprehensive media processing microservice built on **Node.j
 ### Platform Decisions
 
 - **Orchestration**: Node.js (HTTP server, task management, messaging)
-- **Image Processing**: Native NAPI bindings to libvips (via Sharp or custom binding)
-- **Audio/Video Processing**: Native NAPI bindings to FFmpeg libraries (inspired by ffmpeg-napi-interface pattern)
-- **Why NAPI over CLI**: In-process native bindings avoid process spawn overhead, enable streaming APIs, and provide better memory management than CLI tool wrappers
+- **Image Processing**: Native NAPI bindings (nImage with libraw/libheif/Sharp/ImageMagick)
+- **Audio/Video Processing**: FFmpeg CLI (fluent-ffmpeg wrapper, future: custom CLI wrapper or NAPI)
+- **Hybrid Architecture**: NAPI for images (fast, universal format support), CLI for A/V (full feature access)
 
 ### Use Cases
 
@@ -62,21 +62,22 @@ Media Service is a comprehensive media processing microservice built on **Node.j
 
 ### 2.3 Native Binding Strategy
 
-#### Image Processing (libvips via NAPI)
-- **Why**: libvips is the fastest image processing library, using minimal memory
-- **Options**:
-  - Sharp: Mature NAPI binding, covers 95% of use cases
-  - Custom binding: For HEIC/AVIF first-class support without ImageMagick fallback
+#### Image Processing (nImage - Native NAPI)
+- **Why**: Native performance with comprehensive format support via NAPI
+- **Architecture**:
+  - **LibRaw**: RAW formats (CR2, NEF, ARW, ORF, DNG, etc.)
+  - **LibHeif**: HEIC/HEIF/AVIF formats  
+  - **Sharp/libvips**: Standard formats (JPEG, PNG, WebP, GIF, TIFF, AVIF) + transforms
+  - **ImageMagick**: 150+ additional formats (PDF, SVG, EXR, HDR, etc.)
 - **Capabilities**: Resize, crop, format conversion, EXIF stripping, region extraction
 
-#### Audio/Video Processing (FFmpeg libs via NAPI)
-- **Why**: Avoid CLI process spawn overhead, enable frame-level streaming
-- **Pattern**: Inspired by `ffmpeg-napi-interface` (see SoundApp/libs)
-- **Libraries used**: avcodec, avformat, avfilter, swresample, swscale
+#### Audio/Video Processing (FFmpeg CLI)
+- **Why**: Full CLI capability access, familiar interface
+- **Current**: FFmpeg CLI via fluent-ffmpeg wrapper
+- **Future**: Custom CLI wrapper for direct command control
 - **Capabilities**:
-  - Decode: Any format FFmpeg supports (including HEIC audio, etc.)
+  - Decode: Any format FFmpeg supports
   - Encode: All major codecs (H264, VP9, Opus, MP3, AAC, etc.)
-  - Stream: Frame-by-frame processing for real-time ops
 
 ---
 
@@ -272,8 +273,8 @@ All transports implement the same message interface:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/v1/media/image/process` | Process image synchronously |
-| `POST` | `/v1/media/image/crop` | Crop image synchronously |
+| `POST` | `/v1/optimize/image` | Process image synchronously |
+| `POST` | `/v1/optimize/image/crop` | Crop image synchronously |
 
 ### 6.3 Streaming Endpoints
 
@@ -332,7 +333,7 @@ Create an async task.
 }
 ```
 
-### 7.2 POST /v1/media/image/process
+### 7.2 POST /v1/optimize/image
 
 Synchronous image processing.
 
@@ -345,14 +346,15 @@ Synchronous image processing.
 |------|------|---------|-------------|
 | `max_dimension` | int | 1024 | Longest edge in pixels |
 | `quality` | int | 85 | Output quality 1-100 |
-| `format` | string | jpeg | jpeg, png, webp, avif, gif, heic |
+| `format` | string | jpeg | jpeg, png, webp, avif, gif |
 | `strip_exif` | bool | true | Remove EXIF data |
+| `response_type` | string | base64 | base64 or file |
 
 **Response (200 OK):**
 ```json
 {
   "original_size_bytes": 5242880,
-  "output_size_bytes": 102400,
+  "optimized_size_bytes": 102400,
   "width": 1024,
   "height": 768,
   "format": "jpeg",
@@ -415,10 +417,10 @@ All configuration via `config.json`. No `.env` defaults are used.
 | `server.host` | No | Host to bind (default: 0.0.0.0) |
 | `media.maxFileSizeMb` | No | Max upload size in MB (default: 300) |
 | `media.ffmpegPath` | No | Custom FFmpeg path |
-| `media.gpu.platform` | Yes | GPU platform: `nvenc`, `vaapi`, `cpu` |
+| `media.gpu.platform` | **Yes** | GPU platform: `nvenc`, `vaapi`, `cpu` |
 | `media.gpu.device` | No | GPU device index (default: 0) |
 | `logging.level` | No | Log level: error, warn, info, debug (default: info) |
-| `logging.logsDir` | Yes | Directory for log files |
+| `logging.logsDir` | **Yes** | Directory for log files |
 | `logging.sessionPrefix` | No | Log file prefix (default: ms) |
 | `logging.retentionDays` | No | Days to keep logs (default: 7) |
 | `cache.dir` | No | Cache directory (default: ./cache/assets) |
@@ -449,41 +451,22 @@ All configuration via `config.json`. No `.env` defaults are used.
 
 ### Core Platform
 - **Node.js 18+**: HTTP server, orchestration, task management
-- **Native HTTP**: Node.js built-in `http` module with custom Router and multipart parser (no Express/Multer)
+- **Native HTTP**: Node.js built-in `http` module with custom Router and multipart parser
 - **Native FS**: Node.js built-in `fs` module for file operations
 - **Custom multipart parser**: Minimal implementation for file uploads
+
+**Note**: No Express or Multer - the service uses a custom lightweight HTTP server implementation.
 
 ### Bundled Modules (Submodules)
 Located in `/modules`:
 - **nLogger**: Structured logging with detailed formatting
-- **ffmpeg-napi-interface**: FFmpeg NAPI bindings for audio/video processing
+- **nImage**: Native image processing (RAW, HEIC, 150+ formats via libraw/libheif/ImageMagick)
+- **ffmpeg-napi-interface**: FFmpeg NAPI bindings for audio/video (future use)
 - **nui_wc2**: Web UI for monitoring and testing
 
-### Native Bindings (NAPI)
-
-#### Image Processing (Hybrid Approach)
-- **Sharp**: Primary libvips binding for standard formats (JPEG, PNG, WebP, GIF)
-- **FFmpeg**: Apple HEIC/HEIF format decoding (Sharp/libvips lacks Apple HEIC decoder)
-- **ImageMagick**: RAW formats (CR2, ORF) decoding (Sharp lacks RAW decoder)
-- **Future**: Custom NAPI binding for unified image format support without external CLI dependencies
-
-#### Audio/Video Processing
-- **Pattern**: Custom NAPI binding to FFmpeg staticlibs (see ffmpeg-napi-interface in SoundApp)
-- **Advantages over fluent-ffmpeg**:
-  - No CLI process spawn overhead
-  - Direct buffer access
-  - Streaming/chunked processing support
-  - Fine-grained progress callbacks
-
 ### External Dependencies
-- **FFmpeg CLI**: `./bin/ffmpeg.exe` - HEIC decoding, video/audio processing
-- **ImageMagick**: `magick` command - RAW format (CR2, ORF) decoding
-
-### Bundled Dependencies (Submodules)
-- **nLogger**: Structured logging
-- **ffmpeg-napi-interface**: FFmpeg NAPI bindings for audio/video
-- **sharp**: Image processing (primary)
-- **nui_wc2**: Web UI for monitoring
+- **FFmpeg CLI**: Video/audio processing
+- **@ffmpeg-installer/ffmpeg**: FFmpeg binary installer
 
 ---
 
@@ -497,9 +480,9 @@ Located in `/modules`:
 - [x] Basic asset caching with TTL
 
 ### Phase 2: Image Processing
-- [x] Sharp for standard image processing (resize, crop, convert, strip_exif)
-- [x] FFmpeg pre-decode for Apple HEIC format (libvips lacks Apple HEIC decoder)
-- [x] ImageMagick pre-decode for RAW formats (CR2, ORF)
+- [x] nImage for all image processing (resize, crop, convert, strip_exif)
+- [x] HEIC/HEIF support via libheif (part of nImage)
+- [x] RAW format support (CR2, ORF, NEF, ARW, DNG, etc.) via nImage/libraw
 - [ ] Custom libvips NAPI binding (future enhancement)
 - [ ] Native HEIF/AVIF decoder without external dependencies (future enhancement)
 

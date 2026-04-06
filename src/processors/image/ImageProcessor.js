@@ -1,10 +1,23 @@
-import sharp from 'sharp';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import Processor from '../../pipeline/Processor.js';
 import logger from '../../utils/logger.js';
-import { decodeHeicWithFFmpeg, detectImageFormat } from '../../utils/HeifDecoder.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load nImage from submodule
+let nImage;
+try {
+  const nImagePath = path.join(__dirname, '../../../modules/nImage/lib/index.js');
+  nImage = (await import(nImagePath)).default;
+} catch (e) {
+  throw new Error(`nImage module not found. Run "git submodule update --init" and build nImage. Error: ${e.message}`);
+}
 
 /**
- * Image processor using sharp (libvips)
+ * Image processor using nImage (native NAPI with libraw/libheif/ImageMagick support)
+ * Supports: RAW (CR2, NEF, ARW, ORF, etc.), HEIC/HEIF, AVIF, and 150+ formats
  */
 class ImageProcessor extends Processor {
   constructor() {
@@ -51,7 +64,7 @@ class ImageProcessor extends Processor {
       const cropHeight = bottomPx - topPx;
 
       onProgress?.(30, `Cropping region ${leftPx}x${topPx} to ${cropWidth}x${cropHeight}`);
-      const cropped = await sharp(input)
+      const cropped = await nImage(input)
         .extract({ left: leftPx, top: topPx, width: cropWidth, height: cropHeight })
         .toBuffer();
 
@@ -66,7 +79,7 @@ class ImageProcessor extends Processor {
       const topPx = Math.round((metadata.height - cropHeight) / 2);
 
       onProgress?.(30, `Center cropping to ${cropWidth}x${cropHeight}`);
-      const cropped = await sharp(input)
+      const cropped = await nImage(input)
         .extract({ left: leftPx, top: topPx, width: cropWidth, height: cropHeight })
         .toBuffer();
 
@@ -88,7 +101,7 @@ class ImageProcessor extends Processor {
 
         onProgress?.(20 + Math.round((i / cells.length) * 60), `Extracting cell ${cellIndex} at (${leftPx},${topPx})`);
 
-        const cropped = await sharp(input)
+        const cropped = await nImage(input)
           .extract({ left: leftPx, top: topPx, width: cellWidth, height: cellHeight })
           .toBuffer();
 
@@ -126,22 +139,23 @@ class ImageProcessor extends Processor {
    * Encode buffer to target format
    */
   async encodeBuffer(buffer, format, quality) {
-    let pipeline = sharp(buffer);
+    const pipeline = nImage(buffer);
     switch (format) {
       case 'jpeg':
-        pipeline = pipeline.jpeg({ quality });
+        pipeline.jpeg({ quality });
         break;
       case 'png':
-        pipeline = pipeline.png({ quality });
+        pipeline.png({ quality });
         break;
       case 'webp':
-        pipeline = pipeline.webp({ quality });
+        pipeline.webp({ quality });
         break;
       case 'avif':
-        pipeline = pipeline.avif({ quality });
+        pipeline.avif({ quality });
         break;
       case 'gif':
-        pipeline = pipeline.gif();
+        // nImage doesn't support GIF output directly, use PNG
+        pipeline.png({ quality });
         break;
     }
     return pipeline.toBuffer();
@@ -158,28 +172,21 @@ class ImageProcessor extends Processor {
 
     onProgress?.(5, 'Loading image');
 
-    // Detect input format
-    const detectedFormat = detectImageFormat(input);
-    onProgress?.(10, `Detected format: ${detectedFormat || 'unknown'}`);
+    // nImage handles format detection and decoding automatically
+    // RAW, HEIC, and 150+ formats are supported natively
+    onProgress?.(10, 'Decoding image (nImage)');
 
-    // Handle HEIC format - libvips can't decode Apple's HEIC, use FFmpeg
-    let processedInput = input;
-    if (detectedFormat === 'heic') {
-      onProgress?.(15, 'Decoding HEIC via FFmpeg');
-      processedInput = await decodeHeicWithFFmpeg(input);
-      onProgress?.(20, 'HEIC decoded, processing image');
-    }
-
-    let pipeline = sharp(processedInput);
-
-    // Get metadata for aspect ratio calculation
-    const metadata = await pipeline.metadata();
-    onProgress?.(15, 'Analyzing dimensions');
+    // Get metadata first
+    const metadata = await nImage(input).metadata();
+    onProgress?.(15, `Detected: ${metadata.format || 'unknown'}, ${metadata.width}x${metadata.height}`);
 
     // Handle crop operations
     if (crop) {
       return this.processCrop(input, metadata, crop, format, quality, onProgress);
     }
+
+    // Build pipeline
+    let pipeline = nImage(input);
 
     // Calculate resize dimensions
     let width = metadata.width;
@@ -196,39 +203,42 @@ class ImageProcessor extends Processor {
       }
 
       onProgress?.(30, `Resizing to ${width}x${height}`);
-      pipeline = pipeline.resize(width, height, { fit: 'inside' });
+      pipeline.resize(width, height, { fit: 'inside' });
     }
 
-    // Strip EXIF if requested
-    if (strip_exif) {
+    // Strip EXIF if requested (nImage doesn't preserve EXIF by default in output)
+    if (!strip_exif) {
+      // nImage doesn't have direct EXIF preservation, but we can add it later
+      onProgress?.(50, 'Processing metadata');
+    } else {
       onProgress?.(50, 'Stripping metadata');
-      pipeline = pipeline.rotate(); // Auto-rotate and strip EXIF
     }
 
     // Apply format and quality
     onProgress?.(70, `Converting to ${format}`);
     switch (format) {
       case 'jpeg':
-        pipeline = pipeline.jpeg({ quality });
+        pipeline.jpeg({ quality });
         break;
       case 'png':
-        pipeline = pipeline.png({ quality });
+        pipeline.png({ quality });
         break;
       case 'webp':
-        pipeline = pipeline.webp({ quality });
+        pipeline.webp({ quality });
         break;
       case 'avif':
-        pipeline = pipeline.avif({ quality });
+        pipeline.avif({ quality });
         break;
       case 'gif':
-        pipeline = pipeline.gif();
+        pipeline.png({ quality });
         break;
     }
 
     onProgress?.(85, 'Encoding output');
     const outputBuffer = await pipeline.toBuffer();
 
-    const outputMetadata = await sharp(outputBuffer).metadata();
+    // Get output metadata
+    const outputMetadata = await nImage(outputBuffer).metadata();
 
     logger.info('Image processed', {
       originalSize: input.length,

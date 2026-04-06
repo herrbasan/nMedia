@@ -19,6 +19,7 @@ All configuration is managed via `config.json` in the project root. No `.env` de
 Required fields:
 - `server.port`
 - `logging.logsDir`
+- `media.gpu.platform`
 
 ## Logging
 
@@ -52,6 +53,7 @@ This project uses git submodules located in `/modules`. These are all **our own 
 | Submodule | Purpose |
 |-----------|---------|
 | `modules/nLogger` | Structured logging |
+| `modules/nImage` | Native image processing (RAW, HEIC, 150+ formats) |
 | `modules/ffmpeg-napi-interface` | FFmpeg NAPI bindings for audio/video |
 | `modules/nui_wc2` | Web UI for monitoring/testing |
 
@@ -70,7 +72,7 @@ This project uses git submodules located in `/modules`. These are all **our own 
 
 | Processor | Technology | Capabilities |
 |-----------|------------|--------------|
-| ImageProcessor | Sharp (libvips) | Resize, format conversion, cropping (region/center/grid), EXIF stripping |
+| ImageProcessor | nImage (native NAPI) | Resize, format conversion, cropping (region/center/grid), EXIF stripping. Supports RAW, HEIC, and 150+ formats |
 | AudioProcessor | FFmpeg | Resampling (8-48kHz), channel conversion, format conversion (mp3/wav/ogg/m4a) |
 | VideoProcessor | FFmpeg | Audio extraction, keyframe extraction at configurable FPS |
 
@@ -79,8 +81,8 @@ This project uses git submodules located in `/modules`. These are all **our own 
 - Provides job lifecycle events: start, progress, complete, error
 
 #### API Routes (`src/api/routes/`)
-- Express routers for `/v1/optimize/image`, `/v1/optimize/audio`, `/v1/optimize/video`
-- Accept file uploads (multipart/form-data) or inline base64
+- Native HTTP routes for `/v1/optimize/image`, `/v1/optimize/audio`, `/v1/optimize/video`
+- Accept file uploads (multipart/form-data via custom parser) or inline base64
 - Support two response modes: base64 (synchronous JSON) or file (streaming)
 
 ### Key Processing Options
@@ -105,7 +107,7 @@ This project uses git submodules located in `/modules`. These are all **our own 
 
 1. Client sends file or base64 payload to `/v1/optimize/{media_type}`
 2. Route handler validates input and extracts buffer
-3. Multer middleware handles multipart upload limits
+3. Custom multipart parser handles upload limits
 4. PipelineExecutor routes to appropriate processor
 5. Processor performs transformation with progress callbacks
 6. Result buffer/metadata returned via JSON (base64) or streaming (file)
