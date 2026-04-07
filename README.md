@@ -37,9 +37,9 @@ src/
 │   ├── audio/AudioProcessor.js    # Audio resampling
 │   └── video/VideoProcessor.js    # Video audio extraction & keyframes
 ├── api/routes/
-│   ├── image.js   # POST /v1/optimize/image, /v1/optimize/image/crop
-│   ├── audio.js   # POST /v1/optimize/audio
-│   └── video.js   # POST /v1/optimize/video
+│   ├── image.js   # POST /v1/process/image, /v1/process/image/crop
+│   ├── audio.js   # POST /v1/process/audio
+│   └── video.js   # POST /v1/process/video
 ├── tasks/         # Async task system (Task, TaskQueue, TaskManager, Worker)
 ├── cache/         # Asset caching (AssetCache.js)
 └── utils/
@@ -53,9 +53,9 @@ src/
 
 Health check endpoint reporting processor status.
 
-### `POST /v1/optimize/image`
+### `POST /v1/process/image`
 
-Optimize/resize an image.
+Process/resize an image.
 
 **Parameters:**
 - `file` (multipart) or `base64` - Input image
@@ -65,7 +65,7 @@ Optimize/resize an image.
 - `strip_exif` (default: true) - Remove EXIF metadata
 - `response_type` (default: base64) - Response format: base64 or file
 
-### `POST /v1/optimize/image/crop`
+### `POST /v1/process/image/crop`
 
 Crop an image by region, center, or grid.
 
@@ -76,9 +76,9 @@ Crop an image by region, center, or grid.
 - `crop.widthPercent/heightPercent` - Percentage for center crop
 - `crop.grid.cols/rows/cells` - Grid crop configuration
 
-### `POST /v1/optimize/audio`
+### `POST /v1/process/audio`
 
-Optimize/resample audio for STT models.
+Process/resample audio for STT models.
 
 **Parameters:**
 - `file` (multipart) or `base64` - Input audio
@@ -87,7 +87,7 @@ Optimize/resample audio for STT models.
 - `format` (default: mp3) - Output format: mp3, wav, ogg, m4a
 - `response_type` (default: base64) - Response format
 
-### `POST /v1/optimize/video`
+### `POST /v1/process/video`
 
 Process video - extract audio or keyframes.
 
@@ -98,7 +98,7 @@ Process video - extract audio or keyframes.
 - `max_dimension` (default: 1024) - Max dimension for extracted frames
 - `response_type` (default: base64) - Response format
 
-### `GET /v1/optimize/progress/:jobId`
+### `GET /v1/process/progress/:jobId`
 
 SSE endpoint for real-time job progress (when response_type is not base64).
 
@@ -133,7 +133,7 @@ npm start
 ## Usage Example
 
 ```bash
-curl -X POST http://localhost:3500/v1/optimize/image \
+curl -X POST http://localhost:3500/v1/process/image \
   -F "file=@photo.jpg" \
   -F "max_dimension=512" \
   -F "format=webp"

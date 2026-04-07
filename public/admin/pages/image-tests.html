@@ -1,0 +1,99 @@
+<header>
+  <h1>Image Processing Tests</h1>
+  <p class="lead">Upload and process images with various options</p>
+</header>
+
+<nui-tabs>
+  <nav>
+    <button data-tab="tab-upload" aria-selected="true">Upload & Process</button>
+    <button data-tab="tab-crop">Crop Tests</button>
+  </nav>
+  
+  <section id="tab-upload">
+    <h2>Upload Image</h2>
+    
+    <div style="position: relative; min-height: 16rem;">
+      <nui-dropzone id="image-dropzone">
+        <div data-drop="images">
+          <nui-icon name="image" style="font-size: 3rem;"></nui-icon>
+          <p>Drop image here</p>
+          <p style="color: var(--color-text-muted);">Supports: JPG, PNG, WebP, AVIF, GIF, HEIC, RAW</p>
+        </div>
+      </nui-dropzone>
+    </div>
+    
+    <nui-card style="margin-top: 1rem;">
+      <nui-input-group>
+        <label>Or select a file:</label>
+        <input type="file" id="image-file" accept="image/*">
+      </nui-input-group>
+    </nui-card>
+    
+    <h2>Processing Options</h2>
+    
+    <nui-card>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+        <nui-input-group>
+          <label for="opt-max-dimension">Max Dimension (px)</label>
+          <nui-input>
+            <input type="number" id="opt-max-dimension" value="1024" min="1" max="10000">
+          </nui-input>
+        </nui-input-group>
+        
+        <nui-input-group>
+          <label for="opt-quality">Quality (1-100)</label>
+          <nui-input>
+            <input type="number" id="opt-quality" value="85" min="1" max="100">
+          </nui-input>
+        </nui-input-group>
+        
+        <nui-input-group>
+          <label for="opt-format">Output Format</label>
+          <nui-select>
+            <select id="opt-format">
+              <option value="jpeg">JPEG</option>
+              <option value="png">PNG</option>
+              <option value="webp">WebP</option>
+              <option value="avif">AVIF</option>
+            </select>
+          </nui-select>
+        </nui-input-group>
+      </div>
+      
+      <nui-button-container style="margin-top: 1rem;">
+        <nui-button data-action="process-image">
+          <button type="button" class="primary">
+            <nui-icon name="play"></nui-icon>
+            Process Image
+          </button>
+        </nui-button>
+      </nui-button-container>
+    </nui-card>
+    
+    <div id="image-results" style="margin-top: 2rem;"></div>
+  </section>
+  
+  <section id="tab-crop" hidden>
+    <h2>Crop Operations</h2>
+    
+    <nui-card>
+      <h3>Region Crop</h3>
+      <p style="color: var(--color-text-muted);">Coming soon - use API directly for crop tests</p>
+    </nui-card>
+  </section>
+</nui-tabs>
+
+<script type="nui/page">
+function init(element, params) {
+  const dropzone = element.querySelector('#image-dropzone');
+  const fileInput = element.querySelector('#image-file');
+  
+  // Handle dropzone file selection
+  dropzone?.addEventListener('nui-dropzone-drop', (e) => {
+    const { dataTransfer } = e.detail;
+    if (dataTransfer.files?.[0] && fileInput) {
+      fileInput.files = dataTransfer.files;
+    }
+  });
+}
+</script>

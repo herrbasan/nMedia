@@ -6,12 +6,13 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "test": "node tests/index.js",
+    "test:e2e": "node tests/e2e-runner.js",
+    "test:e2e:manual": "echo 'Start service with npm start, then run: node tests/e2e.test.js'"
   },
   "dependencies": {
-    "@ffmpeg-installer/ffmpeg": "^1.1.0",
-    "fluent-ffmpeg": "^2.1.3",
-    "sharp": "^0.33.5"
+    "@ffmpeg-installer/ffmpeg": "^1.1.0"
   },
   "engines": {
     "node": ">=18.0.0"

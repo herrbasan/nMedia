@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Media Service is a stateless microservice designed to preprocess multimedia files for Large Language Model (LLM) consumption. It acts as an optimization sidecar service that receives large files and returns downscaled, compressed, LLM-friendly versions. Utilizes GPU acceleration when available (NVENC, CUDA, VideoSDK).
+Media Service is a stateless microservice designed to preprocess multimedia files for Large Language Model (LLM) consumption. It acts as an optimization sidecar service that receives large files and returns downscaled, compressed, LLM-friendly versions. Utilizes GPU acceleration when available (NVENC, VAAPI, QSV).
 
 ## Documentation
 
@@ -11,6 +11,7 @@ Media Service is a stateless microservice designed to preprocess multimedia file
 | Configuration | `config.json` | All configuration settings (server, media, logging, cache, workers) |
 | Specification | `docs/media_service_spec.md` | Detailed technical specification, API design, architecture |
 | Development Plan | `docs/media_service_dev_plan.md` | Implementation roadmap, technology choices, development phases |
+| Task System | `docs/task_system_proposal.md` | Task system architecture and async patterns |
 
 ## Configuration
 
@@ -54,7 +55,7 @@ This project uses git submodules located in `/modules`. These are all **our own 
 |-----------|---------|
 | `modules/nLogger` | Structured logging |
 | `modules/nImage` | Native image processing (RAW, HEIC, 150+ formats) |
-| `modules/ffmpeg-napi-interface` | FFmpeg NAPI bindings for audio/video |
+| `modules/ffmpeg-napi-interface` | FFmpeg NAPI bindings for audio/video (future) |
 | `modules/nui_wc2` | Web UI for monitoring/testing |
 
 **Important:** Before modifying any submodule code, ask the user for permission. Changes to submodules affect other projects that depend on them.
@@ -73,15 +74,38 @@ This project uses git submodules located in `/modules`. These are all **our own 
 | Processor | Technology | Capabilities |
 |-----------|------------|--------------|
 | ImageProcessor | nImage (native NAPI) | Resize, format conversion, cropping (region/center/grid), EXIF stripping. Supports RAW, HEIC, and 150+ formats |
-| AudioProcessor | FFmpeg | Resampling (8-48kHz), channel conversion, format conversion (mp3/wav/ogg/m4a) |
-| VideoProcessor | FFmpeg | Audio extraction, keyframe extraction at configurable FPS |
+| AudioProcessor | FFmpeg CLI | Resampling (8-48kHz), channel conversion, format conversion (mp3/wav/ogg/m4a) |
+| VideoProcessor | FFmpeg CLI | Audio extraction, keyframe extraction at configurable FPS |
+
+#### FFmpeg CLI Wrapper (`src/utils/ffmpeg/`)
+- Custom wrapper around FFmpeg CLI (replaced fluent-ffmpeg)
+- File-based I/O for reliability (temp files in cache dir)
+- Automatic GPU codec selection based on `config.media.gpu.platform`
+- Real-time progress parsing from FFmpeg stderr
+- Process cancellation via AbortController
+
+**Structure:**
+```
+src/utils/ffmpeg/
+├── index.js     # Main API: run(), abort support
+├── parser.js    # Progress parsing from stderr
+└── codecs.js    # GPU platform codec mappings
+```
+
+**GPU Platforms:**
+| Platform | Video Decode | Video Encode |
+|----------|--------------|--------------|
+| `nvenc` | h264_cuvid, hevc_cuvid | h264_nvenc, hevc_nvenc |
+| `vaapi` | h264_vaapi, hevc_vaapi | h264_vaapi, hevc_vaapi |
+| `qsv` | h264_qsv, hevc_qsv | h264_qsv, hevc_qsv |
+| `cpu` | software | libx264, libx265 |
 
 #### ProgressReporter (`src/pipeline/ProgressReporter.js`)
 - Manages Server-Sent Events (SSE) connections for real-time progress
 - Provides job lifecycle events: start, progress, complete, error
 
 #### API Routes (`src/api/routes/`)
-- Native HTTP routes for `/v1/optimize/image`, `/v1/optimize/audio`, `/v1/optimize/video`
+- Native HTTP routes for `/v1/process/image`, `/v1/process/audio`, `/v1/process/video`
 - Accept file uploads (multipart/form-data via custom parser) or inline base64
 - Support two response modes: base64 (synchronous JSON) or file (streaming)
 
@@ -103,9 +127,31 @@ This project uses git submodules located in `/modules`. These are all **our own 
 - `fps`: Frame rate for keyframe extraction (1-30)
 - `max_dimension`: Max frame dimension
 
+## Task System
+
+The task system handles asynchronous processing:
+
+- **TaskManager** (`src/tasks/TaskManager.js`) - Singleton coordinator
+- **TaskQueue** (`src/tasks/TaskQueue.js`) - FIFO queue with concurrency control
+- **Worker** (`src/tasks/Worker.js`) - Processes tasks via PipelineExecutor
+- **AssetCache** (`src/cache/AssetCache.js`) - Stores results with TTL
+
+### Audio/Video Processing Flow
+
+```
+1. Client uploads file
+2. Input written to temp file in cache dir
+3. FFmpeg processes: input → output
+4. Output stored in AssetCache
+5. Input temp file deleted
+6. SSE progress updates sent
+7. Client downloads result from /v1/assets/:id
+8. Asset marked as retrieved (TTL = 0)
+```
+
 ## Data Flow
 
-1. Client sends file or base64 payload to `/v1/optimize/{media_type}`
+1. Client sends file or base64 payload to `/v1/process/{media_type}`
 2. Route handler validates input and extracts buffer
 3. Custom multipart parser handles upload limits
 4. PipelineExecutor routes to appropriate processor

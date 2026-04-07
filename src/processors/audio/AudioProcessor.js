@@ -1,16 +1,14 @@
-import ffmpeg from 'fluent-ffmpeg';
-import { Readable, Writable } from 'stream';
+import fs from 'fs';
+import path from 'path';
+import { v4 as uuidv4 } from '../../utils/uuid.js';
 import Processor from '../../pipeline/Processor.js';
 import config from '../../config/config.js';
 import logger from '../../utils/logger.js';
-
-// Set ffmpeg path
-if (config.ffmpegPath) {
-  ffmpeg.setFfmpegPath(config.ffmpegPath);
-}
+import { processAudio, FORMAT_EXTENSIONS, MIME_TYPES } from '../../utils/ffmpeg/index.js';
 
 /**
- * Audio processor using ffmpeg
+ * Audio processor using FFmpeg CLI wrapper
+ * Processes audio files with file-based I/O for reliability
  */
 class AudioProcessor extends Processor {
   constructor() {
@@ -31,91 +29,124 @@ class AudioProcessor extends Processor {
     }
   }
 
-  process(input, options = {}, onProgress) {
-    return new Promise((resolve, reject) => {
-      const {
-        sample_rate = 16000,
-        channels = 1, // mono for STT
-        format = 'mp3',
-      } = options;
+  async process(input, options = {}, onProgress) {
+    const {
+      sample_rate = 16000,
+      channels = 1,
+      format = 'mp3',
+    } = options;
 
-      onProgress?.(5, 'Processing audio');
+    const inputId = uuidv4();
+    const outputId = uuidv4();
+    
+    const inputExt = this._detectInputExtension(input);
+    const inputPath = path.join(config.cacheDir, `input-${inputId}.${inputExt}`);
+    const outputExt = FORMAT_EXTENSIONS[format] || format;
+    const outputPath = path.join(config.cacheDir, `output-${outputId}.${outputExt}`);
 
-      let command = ffmpeg()
-        .input(Readable.from(input))
-        .audioChannels(channels)
-        .audioFrequency(sample_rate);
+    try {
+      onProgress?.(5, 'Preparing audio');
 
-      // Set output format
-      switch (format) {
-        case 'mp3':
-          command = command.audioCodec('libmp3lame').audioBitrate('128k');
-          break;
-        case 'wav':
-          command = command.audioCodec('pcm_s16le');
-          break;
-        case 'ogg':
-          command = command.audioCodec('libvorbis').audioBitrate('128k');
-          break;
-        case 'm4a':
-          command = command.audioCodec('aac').audioBitrate('128k');
-          break;
+      // Write input buffer to temp file
+      fs.writeFileSync(inputPath, input);
+      
+      onProgress?.(10, 'Processing audio');
+
+      // Process with FFmpeg
+      const result = await processAudio({
+        inputPath,
+        outputPath,
+        format,
+        sampleRate: sample_rate,
+        channels,
+        onProgress: (percent, metadata) => {
+          // Map FFmpeg progress (0-100) to our range (10-90)
+          const mappedPercent = 10 + Math.round(percent * 0.8);
+          onProgress?.(mappedPercent, `Processing: ${Math.round(percent)}%`);
+        },
+      });
+
+      onProgress?.(90, 'Reading output');
+
+      // Read output file
+      const outputBuffer = fs.readFileSync(outputPath);
+
+      // Clean up input file immediately
+      try {
+        fs.unlinkSync(inputPath);
+      } catch (err) {
+        logger.debug('Failed to clean up input file', { error: err.message });
       }
 
-      onProgress?.(30, `Converting to ${format}`);
+      // Clean up output file (caller will cache it)
+      try {
+        fs.unlinkSync(outputPath);
+      } catch (err) {
+        logger.debug('Failed to clean up output file', { error: err.message });
+      }
 
-      const chunks = [];
+      onProgress?.(100, 'Complete');
 
-      command
-        .on('progress', (progress) => {
-          const percent = Math.min(90, 30 + Math.round((progress.percent || 0) * 0.6));
-          onProgress?.(percent, `Processing: ${Math.round(progress.percent || 0)}%`);
-        })
-        .on('error', (err) => {
-          logger.error('Audio processing error', { error: err.message });
-          reject(err);
-        })
-        .on('end', () => {
-          onProgress?.(100, 'Complete');
-          const outputBuffer = Buffer.concat(chunks);
+      logger.info('Audio processed', {
+        originalSize: input.length,
+        outputSize: outputBuffer.length,
+        sampleRate: sample_rate,
+        channels,
+        format,
+      });
 
-          logger.info('Audio processed', {
-            originalSize: input.length,
-            outputSize: outputBuffer.length,
-            sampleRate: sample_rate,
-            channels,
-            format,
-          });
+      return {
+        buffer: outputBuffer,
+        metadata: {
+          originalSize: input.length,
+          outputSize: outputBuffer.length,
+          sampleRate: sample_rate,
+          channels,
+          format,
+          mimeType: this.getMimeType(format),
+        },
+      };
+    } catch (error) {
+      // Clean up temp files on error
+      try { fs.unlinkSync(inputPath); } catch {}
+      try { fs.unlinkSync(outputPath); } catch {}
+      
+      logger.error('Audio processing error', { error: error.message });
+      throw error;
+    }
+  }
 
-          resolve({
-            buffer: outputBuffer,
-            metadata: {
-              originalSize: input.length,
-              outputSize: outputBuffer.length,
-              sampleRate: sample_rate,
-              channels,
-              format,
-              mimeType: this.getMimeType(format),
-            },
-          });
-        })
-        .pipe(new Writable({
-          write(chunk, enc, cb) {
-            chunks.push(chunk);
-            cb();
-          },
-        }));
-    });
+  /**
+   * Detect input file extension from buffer magic bytes
+   * @param {Buffer} buffer
+   * @returns {string}
+   */
+  _detectInputExtension(buffer) {
+    // Check magic bytes for common formats
+    if (buffer.length < 4) return 'bin';
+    
+    const magic = buffer.slice(0, 4).toString('hex').toUpperCase();
+    
+    // MP3 (ID3 tag or MPEG sync)
+    if (magic.startsWith('494433') || magic.startsWith('FFE')) return 'mp3';
+    
+    // WAV (RIFF....WAVE)
+    if (magic.startsWith('52494646')) return 'wav';
+    
+    // OGG
+    if (magic.startsWith('4F676753')) return 'ogg';
+    
+    // M4A/AAC (ftyp)
+    if (buffer.slice(4, 8).toString('hex').toUpperCase() === '66747970') return 'm4a';
+    
+    // FLAC
+    if (magic.startsWith('664C6143')) return 'flac';
+    
+    return 'bin';
   }
 
   getMimeType(format) {
-    const mimeTypes = {
-      mp3: 'audio/mpeg',
-      wav: 'audio/wav',
-      ogg: 'audio/ogg',
-      m4a: 'audio/mp4',
-    };
-    return mimeTypes[format] || 'audio/mpeg';
+    return MIME_TYPES[format] || 'audio/mpeg';
   }
 }
 

@@ -1,0 +1,96 @@
+<header>
+  <h1>Dashboard</h1>
+  <p class="lead">Media Service status and overview</p>
+</header>
+
+<section id="health-content">
+  <nui-card>
+    <h3>Loading...</h3>
+    <nui-progress indeterminate></nui-progress>
+  </nui-card>
+</section>
+
+<section>
+  <h2>Quick Actions</h2>
+  <nui-button-container>
+    <a href="#page=image-tests">
+      <nui-button>
+        <button type="button">
+          <nui-icon name="image"></nui-icon>
+          Test Image Processing
+        </button>
+      </nui-button>
+    </a>
+    <a href="#page=audio-tests">
+      <nui-button>
+        <button type="button">
+          <nui-icon name="headphones"></nui-icon>
+          Test Audio Processing
+        </button>
+      </nui-button>
+    </a>
+    <a href="#page=video-tests">
+      <nui-button>
+        <button type="button">
+          <nui-icon name="smart_display"></nui-icon>
+          Test Video Processing
+        </button>
+      </nui-button>
+    </a>
+    <a href="#page=task-monitor">
+      <nui-button>
+        <button type="button">
+          <nui-icon name="table_rows"></nui-icon>
+          View Task Monitor
+        </button>
+      </nui-button>
+    </a>
+  </nui-button-container>
+</section>
+
+<script type="nui/page">
+function init(element, params) {
+  const healthContent = element.querySelector('#health-content');
+  
+  async function loadStatus() {
+    try {
+      const api = window.MediaServiceAPI;
+      const health = await api.getHealth();
+      
+      healthContent.innerHTML = `
+        <nui-card>
+          <h3>Service Health</h3>
+          <p><strong>Status:</strong> <nui-badge priority="success">${health.status}</nui-badge></p>
+          <p><strong>Uptime:</strong> ${health.uptime || 'N/A'}</p>
+        </nui-card>
+        <nui-card>
+          <h3>Processors</h3>
+          ${Object.entries(health.processors || {}).map(([name, status]) => `
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0;">
+              <nui-badge priority="${status ? 'success' : 'alert'}">${status ? 'OK' : 'Error'}</nui-badge>
+              <span>${name}</span>
+            </div>
+          `).join('')}
+        </nui-card>
+      `;
+    } catch (err) {
+      healthContent.innerHTML = `
+        <nui-card>
+          <h3>Connection Error</h3>
+          <p>Could not connect to Media Service: ${err.message}</p>
+        </nui-card>
+      `;
+    }
+  }
+  
+  loadStatus();
+  
+  // Refresh every 5 seconds while visible
+  const interval = setInterval(loadStatus, 5000);
+  
+  // Cleanup when page is hidden
+  element.hide = () => {
+    clearInterval(interval);
+  };
+}
+</script>

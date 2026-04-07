@@ -60,10 +60,12 @@ export class Context {
    * Parse request body based on Content-Type.
    */
   async parseBody() {
-    const contentType = (this.headers['content-type'] || '').toLowerCase();
+    const rawContentType = this.headers['content-type'] || '';
+    const contentType = rawContentType.toLowerCase();
 
     if (contentType.includes('multipart/form-data')) {
-      const boundary = extractBoundary(contentType);
+      // Extract boundary from original (non-lowercased) header to preserve case
+      const boundary = extractBoundary(rawContentType);
       if (!boundary) {
         throw new Error('Missing boundary in multipart/form-data');
       }
@@ -113,6 +115,7 @@ export class Context {
       'Content-Type': 'application/json; charset=utf-8',
       'Content-Length': Buffer.byteLength(body),
       'X-Powered-By': 'MediaService',
+      'Access-Control-Allow-Origin': '*',
     });
     this.#res.end(body);
   }
@@ -129,6 +132,7 @@ export class Context {
       'Content-Type': mimeType,
       'Content-Length': buffer.length,
       'X-Powered-By': 'MediaService',
+      'Access-Control-Allow-Origin': '*',
     };
     if (filename) {
       headers['Content-Disposition'] = `attachment; filename="${filename}"`;

@@ -15,7 +15,7 @@ The service decides sync vs async based on **estimated duration**, but the clien
 
 ```javascript
 // Client request - same endpoint works for both
-POST /v1/optimize/video
+POST /v1/process/video
 Content-Type: multipart/form-data
 Prefer: respond-async          // Optional: force async
 Prefer: respond-sync           // Optional: force sync
@@ -49,7 +49,7 @@ function shouldUseAsync(inputSize, type, options) {
 ### Pattern 1: Immediate Sync (Images, Small Audio)
 
 ```javascript
-POST /v1/optimize/image
+POST /v1/process/image
 → 200 OK
 → { base64: "...", metadata: {...} }
 ```
@@ -58,7 +58,7 @@ POST /v1/optimize/image
 
 ```javascript
 // 1. Submit task
-POST /v1/optimize/video
+POST /v1/process/video
 → 202 Accepted
 → { taskId: "550e8400-e29b-41d4-a716-446655440000", status: "queued" }
 
@@ -75,7 +75,7 @@ GET /v1/tasks/550e8400-e29b-41d4-a716-446655440000/result
 
 ```javascript
 // 1. Submit with SSE connection
-POST /v1/optimize/video
+POST /v1/process/video
 → 202 Accepted
 → { 
     taskId: "550e8400-...",
@@ -190,7 +190,7 @@ export async function handleOptimize(ctx) {
 ### Task Lifecycle
 
 ```
-[Client] → POST /v1/optimize/video
+[Client] → POST /v1/process/video
              ↓
 [TaskManager] → Create Task → Store input in AssetCache
              ↓
@@ -289,8 +289,8 @@ WS /v1/ws
 | Sync processing | ✅ Works now | Images, small audio |
 | Async task system | ✅ Implemented | TaskManager, Queue, Workers |
 | Asset caching | ✅ Works now | TTL-based disk cache |
-| SSE progress | ✅ Works now | /v1/optimize/progress/:id |
-| **Task-connected routes** | ⚠️ Need to wire | Connect /v1/optimize/* to TaskManager |
+| SSE progress | ✅ Works now | /v1/process/progress/:id |
+| **Task-connected routes** | ⚠️ Need to wire | Connect /v1/process/* to TaskManager |
 | **WebSocket transport** | ⚠️ Need to add | /v1/ws endpoint |
 | **Adaptive sync/async** | ⚠️ Need to implement | Auto + Prefer header override |
 

@@ -14,6 +14,7 @@ import config from '../config/config.js';
  * @property {string} storagePath - Relative to cache root
  * @property {number} createdAt - Unix timestamp
  * @property {number} expiresAt - Unix timestamp
+ * @property {number|null} retrievedAt - Unix timestamp when first retrieved
  * @property {Object} metadata
  */
 
@@ -194,7 +195,30 @@ export class AssetCache {
       return null;
     }
 
+    // Mark as retrieved (reduces TTL for early cleanup)
+    this.markRetrieved(id);
+
     return fs.readFileSync(asset.storagePath);
+  }
+
+  /**
+   * Mark an asset as retrieved by the client
+   * Sets TTL to 0 so it will be cleaned up on next cycle
+   * @param {string} id
+   * @returns {boolean}
+   */
+  markRetrieved(id) {
+    const asset = this.assets.get(id);
+    if (!asset) return false;
+
+    // Only mark once
+    if (asset.retrievedAt) return true;
+
+    asset.retrievedAt = Date.now();
+    asset.expiresAt = Date.now(); // Expire immediately (will be cleaned on next cycle)
+
+    logger.debug('Asset marked as retrieved', { id, expiresAt: asset.expiresAt });
+    return true;
   }
 
   /**

@@ -1,0 +1,131 @@
+<header>
+  <h1>Task Monitor</h1>
+  <p class="lead">Real-time view of processing tasks and queue status</p>
+</header>
+
+<section id="task-stats">
+  <nui-card>
+    <h3>Loading...</h3>
+    <nui-progress indeterminate></nui-progress>
+  </nui-card>
+</section>
+
+<section>
+  <h2>Active Tasks</h2>
+  
+  <div id="task-list">
+    <p style="text-align: center; padding: 3rem; color: var(--color-text-muted);">Loading tasks...</p>
+  </div>
+</section>
+
+<script type="nui/page">
+function init(element, params) {
+  const taskList = element.querySelector('#task-list');
+  const taskStats = element.querySelector('#task-stats');
+  const api = window.MediaServiceAPI;
+  
+  async function loadTasks() {
+    try {
+      const [tasks, stats] = await Promise.all([
+        api.getTasks(),
+        api.getTaskStats(),
+      ]);
+      
+      renderTaskStats(stats);
+      renderTaskList(tasks);
+    } catch (err) {
+      taskList.innerHTML = `<p style="color: var(--palette-alert)">Error: ${err.message}</p>`;
+    }
+  }
+  
+  function renderTaskStats(stats) {
+    if (!taskStats) return;
+    
+    taskStats.innerHTML = `
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
+        <nui-card>
+          <div style="text-align: center;">
+            <span style="font-size: 2rem; font-weight: 600; color: var(--color-highlight);">${stats.queue?.length || 0}</span>
+            <span style="display: block; font-size: 0.9rem; color: var(--color-text-muted);">Queued</span>
+          </div>
+        </nui-card>
+        <nui-card>
+          <div style="text-align: center;">
+            <span style="font-size: 2rem; font-weight: 600; color: var(--color-highlight);">${stats.queue?.running || 0}</span>
+            <span style="display: block; font-size: 0.9rem; color: var(--color-text-muted);">Running</span>
+          </div>
+        </nui-card>
+        <nui-card>
+          <div style="text-align: center;">
+            <span style="font-size: 2rem; font-weight: 600; color: var(--color-highlight);">${stats.workers?.active || 0}/${stats.workers?.total || 0}</span>
+            <span style="display: block; font-size: 0.9rem; color: var(--color-text-muted);">Workers</span>
+          </div>
+        </nui-card>
+      </div>
+    `;
+  }
+  
+  function renderTaskList(tasks) {
+    if (!taskList) return;
+    
+    if (!tasks || tasks.length === 0) {
+      taskList.innerHTML = '<p style="text-align: center; padding: 3rem; color: var(--color-text-muted);">No tasks found</p>';
+      return;
+    }
+    
+    const getPriority = (status) => {
+      switch (status) {
+        case 'completed': return 'success';
+        case 'failed': return 'alert';
+        case 'running': return 'info';
+        default: return 'default';
+      }
+    };
+    
+    taskList.innerHTML = `
+      <nui-table>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Progress</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tasks.map(task => `
+              <tr>
+                <td><code>${task.id.slice(0, 8)}...</code></td>
+                <td>${task.type}</td>
+                <td><nui-badge priority="${getPriority(task.status)}">${task.status}</nui-badge></td>
+                <td>
+                  <nui-progress value="${task.progress || 0}" max="100" style="width: 100px;"></nui-progress>
+                </td>
+                <td>
+                  ${task.status === 'pending' ? 
+                    `<nui-button data-action="cancel-task:${task.id}" class="small">
+                      <button type="button">Cancel</button>
+                     </nui-button>` : ''}
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </nui-table>
+    `;
+  }
+  
+  // Initial load
+  loadTasks();
+  
+  // Refresh every 2 seconds
+  const interval = setInterval(loadTasks, 2000);
+  
+  // Cleanup
+  element.hide = () => {
+    clearInterval(interval);
+  };
+}
+</script>

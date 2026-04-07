@@ -26,14 +26,29 @@ if (!config.media?.gpu?.platform) {
 }
 
 function getFfmpegPath() {
-  if (!config.media?.ffmpegPath) {
-    return null;
+  // 1. Check config path if explicitly set
+  if (config.media?.ffmpegPath) {
+    const configPath = path.resolve(process.cwd(), config.media.ffmpegPath);
+    if (fs.existsSync(configPath)) {
+      return configPath;
+    }
+    throw new Error(`FFmpeg not found at configured path: ${configPath}`);
   }
-  const fullPath = path.resolve(process.cwd(), config.media.ffmpegPath);
-  if (!fs.existsSync(fullPath)) {
-    throw new Error(`FFmpeg not found at configured path: ${fullPath}`);
+  
+  // 2. Check bundled bin directory
+  const bundledPath = path.join(__dirname, '../../bin/ffmpeg.exe');
+  if (fs.existsSync(bundledPath)) {
+    return bundledPath;
   }
-  return fullPath;
+  
+  // 3. Check non-Windows bundled path
+  const bundledUnixPath = path.join(__dirname, '../../bin/ffmpeg');
+  if (fs.existsSync(bundledUnixPath)) {
+    return bundledUnixPath;
+  }
+  
+  // 4. Return null to use system PATH
+  return null;
 }
 
 export default {

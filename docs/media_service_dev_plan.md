@@ -7,8 +7,8 @@ The **Media Processing Service (MPS)** is a standalone microservice built on **N
 ## 1. Core Objectives
 
 - **Node.js Orchestration:** HTTP server, task management, messaging, and coordination all run on Node.js
-- **Hybrid Processing:** Native NAPI for images (nImage), CLI FFmpeg for audio/video (for full feature access)
-- **GPU Acceleration:** Utilize NVENC, CUDA, VideoSDK when available for faster encoding/decoding
+- **Hybrid Processing:** Native NAPI for images (nImage), CLI FFmpeg for audio/video (custom wrapper with GPU support)
+- **GPU Acceleration:** Utilize NVENC, VAAPI, QSV when available for faster encoding/decoding
 - **Hybrid Processing:** Synchronous for quick image ops, asynchronous for heavy video/audio tasks, streaming for real-time processing
 - **Universal Format Support:** RAW (CR2, NEF, ORF, DNG), HEIC, AVIF, and all formats FFmpeg supports
 
@@ -20,6 +20,7 @@ The **Media Processing Service (MPS)** is a standalone microservice built on **N
 - **Node.js 18+**: HTTP server, orchestration, task queue, messaging
 - **Native HTTP**: Built-in `http` module with custom Router (no Express)
 - **Native FS**: Built-in `fs` module for file operations
+- **Child Process**: `spawn` for FFmpeg CLI execution
 - **Custom Multipart Parser**: Minimal implementation for file uploads (no Multer)
 
 ### Bundled Modules (Submodules in `/modules`)
@@ -35,22 +36,32 @@ The **Media Processing Service (MPS)** is a standalone microservice built on **N
 | Component | Technology | Rationale |
 |-----------|------------|-----------|
 | Image Processing | nImage (native NAPI) | Native libraw + libheif + Sharp/libvips + ImageMagick fallback. Handles all formats in-process. |
-| Audio/Video Processing | FFmpeg CLI via fluent-ffmpeg | Full CLI capability access. Future: custom CLI wrapper for direct command control. |
+| Audio/Video Processing | FFmpeg CLI (custom wrapper) | Direct command control, hardware acceleration, no external dependencies. File-based I/O for reliability. |
 
 **GPU Acceleration:** FFmpeg supports hardware acceleration via:
-- **NVENC**: NVIDIA GPUs (preferred for development)
-- **VAAPI**: Intel ARC GPUs (AV1 support)
-- **QSV**: Intel Quick Sync Video
+- **NVENC**: NVIDIA GPUs (h264_nvenc, hevc_nvenc)
+- **VAAPI**: Intel/AMD GPUs (h264_vaapi, hevc_vaapi)
+- **QSV**: Intel Quick Sync Video (h264_qsv, hevc_qsv)
 
 Configured via `config.json` (`media.gpu.platform`).
 
-### Why This Architecture?
+### FFmpeg CLI Wrapper
 
-| Aspect | Approach | Rationale |
-|--------|----------|-----------|
-| **Images** | nImage NAPI | In-process, fast, handles 150+ formats including RAW/HEIC natively |
-| **Audio/Video** | FFmpeg CLI | Full feature access, well-tested, easy to maintain |
-| **Future A/V** | FFmpeg NAPI | `ffmpeg-napi-interface` submodule ready for when needed |
+Custom wrapper located in `src/utils/ffmpeg/`:
+
+```
+src/utils/ffmpeg/
+├── index.js     # Main API: run(), abort support
+├── parser.js    # Progress parsing from stderr
+└── codecs.js    # GPU platform codec mappings
+```
+
+**Features:**
+- File-based I/O (input/output as file paths)
+- Automatic GPU codec selection based on platform
+- Real-time progress parsing from FFmpeg stderr
+- Process cancellation via AbortController
+- Automatic cleanup of input temp files
 
 ---
 
@@ -58,7 +69,7 @@ Configured via `config.json` (`media.gpu.platform`).
 
 ### Synchronous (Image)
 
-#### `POST /v1/optimize/image`
+#### `POST /v1/process/image`
 Quick image operations (<500ms response). Supports all formats via nImage (JPEG, PNG, WebP, AVIF, GIF, RAW, HEIC, PDF, SVG, etc.).
 
 * **Accepts:** `multipart/form-data` OR inline `{"base64": "..."}`
@@ -80,7 +91,7 @@ Quick image operations (<500ms response). Supports all formats via nImage (JPEG,
   }
   ```
 
-#### `POST /v1/optimize/image/crop`
+#### `POST /v1/process/image/crop`
 Advanced cropping operations.
 
 * **Accepts:** `multipart/form-data` OR inline `{"base64": "..."}`
@@ -92,8 +103,8 @@ Advanced cropping operations.
 
 ### Asynchronous (Audio/Video via Task System)
 
-#### `POST /v1/optimize/audio`
-Audio transcoding/resampling (returns 202, use SSE for progress).
+#### `POST /v1/process/audio`
+Audio transcoding/resampling (synchronous with SSE progress, returns 200).
 
 * **Parameters:**
   - `sample_rate` (default: 16000)
@@ -101,8 +112,8 @@ Audio transcoding/resampling (returns 202, use SSE for progress).
   - `format` (default: 'mp3') - mp3, wav, ogg, m4a
   - `response_type` (default: 'base64') - base64 or file
 
-#### `POST /v1/optimize/video`
-Video processing (async, returns 202, use SSE for progress).
+#### `POST /v1/process/video`
+Video processing (synchronous with SSE progress, returns 200).
 
 * **Parameters:**
   - `mode`: extract_audio, extract_keyframes
@@ -116,20 +127,21 @@ Video processing (async, returns 202, use SSE for progress).
 * `GET /v1/tasks/:id` - Get task status
 * `GET /v1/tasks/:id/result` - Download result
 * `DELETE /v1/tasks/:id` - Cancel pending task
-* `GET /v1/tasks/:id/progress` - SSE progress stream
+* `GET /v1/tasks/stats` - Queue statistics
 
 ### Asset Cache Endpoints
 * `GET /v1/assets` - List assets
 * `GET /v1/assets/:id` - Download asset
 * `GET /v1/assets/:id/metadata` - Get metadata
 * `DELETE /v1/assets/:id` - Delete asset
+* `DELETE /v1/assets` - Clear all assets
 
 ### Streaming (Real-time) - Future
 
-#### `POST /v1/media/video/stream`
+#### `POST /v1/process/video/stream`
 Real-time video processing with streaming response.
 
-#### `POST /v1/media/audio/stream`
+#### `POST /v1/process/audio/stream`
 Real-time audio processing with streaming response.
 
 ---
@@ -147,8 +159,21 @@ Real-time audio processing with streaming response.
 ### Task Queue
 - In-memory queue with priority support
 - Configurable max concurrent workers
-- Automatic retry with exponential backoff (max 3 attempts)
-- Dead letter handling
+- Background cleanup of completed/failed tasks (1 hour TTL)
+
+### Audio/Video Processing Flow
+
+```
+1. Client uploads file to /v1/process/video
+2. Server writes input to temp file in cache dir
+3. FFmpeg wrapper processes: temp_input → temp_output
+4. Output stored in AssetCache
+5. Input temp file deleted immediately
+6. SSE: progress updates sent to client
+7. SSE: completed event with assetId
+8. Client downloads from /v1/assets/:assetId
+9. Asset marked as retrieved (TTL = 0)
+```
 
 ---
 
@@ -158,12 +183,12 @@ Real-time audio processing with streaming response.
 
 | Transport | Best For | Endpoint |
 |-----------|----------|----------|
-| SSE | Browser clients | `GET /v1/optimize/progress/:jobId` or `GET /v1/tasks/:id/progress` |
+| SSE | Browser clients | `GET /v1/process/progress/:jobId` or `GET /v1/tasks/:id/progress` |
 | WebSocket | Low latency, bidirectional | `WS /v1/ws` (future) |
 | REST Polling | Firewalls, simple clients | `GET /v1/tasks/:id` |
 
 ### Message Types
-- `task_created`, `progress`, `completed`, `error`, `cancelled`
+- `start`, `progress`, `complete`, `error`, `cancelled`
 
 ---
 
@@ -171,8 +196,17 @@ Real-time audio processing with streaming response.
 
 - **Storage:** Local disk (`./cache/assets/`)
 - **Default TTL:** 1 hour
+- **Retrieved TTL:** 0 (immediate cleanup on next cycle)
 - **Max Size:** 10GB (configurable)
 - **Cleanup:** Background job every 5 minutes
+
+### TTL Management
+
+| Scenario | TTL Strategy |
+|----------|-------------|
+| Asset created | Default TTL (1 hour) |
+| Asset retrieved | TTL set to 0 (cleanup next cycle) |
+| Explicit delete | Immediate removal |
 
 ### Endpoints
 - `GET /v1/assets/:id` - Download
@@ -209,21 +243,101 @@ Real-time audio processing with streaming response.
 2. ~~RAW format support~~ → **DONE** (CR2, NEF, ARW, ORF, DNG, etc. via libraw)
 3. ~~HEIC/HEIF support~~ → **DONE** (via libheif, no FFmpeg fallback needed)
 4. ~~150+ format support~~ → **DONE** (ImageMagick fallback for PDF, SVG, EXR, HDR, etc.)
+5. ~~ESM Windows import fix~~ → **DONE** (using `pathToFileURL` for nImage import)
 
-### Phase 3: Audio/Video Processing ⚠️ PARTIAL
-1. ~~FFmpeg CLI integration~~ → **DONE** (via fluent-ffmpeg)
-2. Audio transcoding/resampling → **DONE** (MP3, WAV, OGG, M4A)
-3. Video audio extraction → **DONE**
-4. Video keyframe extraction → **DONE**
-5. Connect to task system → **TODO** (make video/audio use async task system)
-6. Custom FFmpeg CLI wrapper → **TODO** (replace fluent-ffmpeg with direct CLI control)
-7. FFmpeg NAPI binding (future) → **PENDING** (use `ffmpeg-napi-interface` submodule)
+### Phase 3: Audio/Video Processing ✅ COMPLETE
+1. ~~FFmpeg CLI wrapper~~ → **DONE** (custom wrapper, replaced fluent-ffmpeg)
+2. ~~Audio transcoding/resampling~~ → **DONE** (MP3, WAV, OGG, M4A)
+3. ~~Video audio extraction~~ → **DONE**
+4. ~~Video keyframe extraction~~ → **DONE**
+5. ~~File-based I/O~~ → **DONE** (temp files in cache dir)
+6. ~~GPU acceleration~~ → **DONE** (NVENC, VAAPI, QSV with auto-selection)
+7. ~~Progress parsing~~ → **DONE** (parse FFmpeg stderr for frame/fps/time/bitrate)
+8. ~~Process cancellation~~ → **DONE** (AbortController support)
 
-### Phase 4: Advanced Features 📋 PLANNED
-1. Adaptive sync/async logic (auto-detect based on file size)
-2. WebSocket messaging adapter
-3. REST polling adapter
-4. Video streaming endpoint
-5. Audio streaming endpoint
-6. Task retry logic
-7. Cache size management (enforce max cache size)
+### Phase 4: Audio/Video Enhancements 📋 CURRENT
+1. **Connect to task system** → **TODO** (make video/audio optionally use async task system for large files)
+2. **Adaptive sync/async logic** → **TODO** (auto-detect based on file size)
+3. **FFmpeg NAPI binding** → **PENDING** (use `ffmpeg-napi-interface` submodule when ready)
+
+### Phase 5: Advanced Features 📋 PLANNED
+1. WebSocket messaging adapter
+2. REST polling adapter
+3. Video streaming endpoint
+4. Audio streaming endpoint
+5. Task retry logic with exponential backoff
+6. Cache size management (enforce max cache size with LRU eviction)
+7. Health check endpoint with detailed processor status
+
+---
+
+## 9. FFmpeg CLI Wrapper Details
+
+### Architecture
+
+```javascript
+// src/utils/ffmpeg/index.js
+export async function run({
+  inputPath,      // Input file path
+  outputPath,     // Output file path
+  args,           // Additional FFmpeg arguments
+  onProgress,     // Progress callback (percent, metadata)
+  signal,         // AbortController signal
+}): Promise<{ exitCode: number, stats: object }>
+```
+
+### GPU Codec Selection
+
+```javascript
+// src/utils/ffmpeg/codecs.js
+const GPU_CODECS = {
+  nvenc: {
+    videoDecode: ['h264_cuvid', 'hevc_cuvid'],
+    videoEncode: { h264: 'h264_nvenc', hevc: 'hevc_nvenc' },
+  },
+  vaapi: {
+    videoDecode: ['h264_vaapi', 'hevc_vaapi'],
+    videoEncode: { h264: 'h264_vaapi', hevc: 'hevc_vaapi' },
+  },
+  qsv: {
+    videoDecode: ['h264_qsv', 'hevc_qsv'],
+    videoEncode: { h264: 'h264_qsv', hevc: 'hevc_qsv' },
+  },
+  cpu: {
+    videoDecode: [],
+    videoEncode: { h264: 'libx264', hevc: 'libx265' },
+  },
+};
+```
+
+### Progress Parsing
+
+FFmpeg outputs progress to stderr in this format:
+```
+frame=  120 fps= 60 q=28.0 size=     256kB time=00:00:04.00 bitrate= 524.3kbits/s speed=  2x
+```
+
+Parsed fields:
+- `frame`: Frame number
+- `fps`: Encoding FPS
+- `q`: Quality factor
+- `size`: Output size
+- `time`: Timestamp
+- `bitrate`: Current bitrate
+- `speed`: Encoding speed multiplier
+
+---
+
+## 10. Recent Changes
+
+### 2026-04-06
+- Fixed nImage ESM import on Windows using `pathToFileURL`
+- All core endpoints functional and tested
+- Image processing verified working with PNG/JPEG/RAW/HEIC
+
+### 2026-04-06 - FFmpeg CLI Wrapper
+- Replaced fluent-ffmpeg with custom CLI wrapper
+- Implemented GPU acceleration (NVENC, VAAPI, QSV)
+- File-based I/O for reliability
+- Real-time progress parsing from FFmpeg stderr
+- Process cancellation support

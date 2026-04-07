@@ -1,5 +1,5 @@
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import Processor from '../../pipeline/Processor.js';
 import logger from '../../utils/logger.js';
 
@@ -10,7 +10,8 @@ const __dirname = path.dirname(__filename);
 let nImage;
 try {
   const nImagePath = path.join(__dirname, '../../../modules/nImage/lib/index.js');
-  nImage = (await import(nImagePath)).default;
+  const nImageUrl = pathToFileURL(nImagePath).href;
+  nImage = (await import(nImageUrl)).default;
 } catch (e) {
   throw new Error(`nImage module not found. Run "git submodule update --init" and build nImage. Error: ${e.message}`);
 }

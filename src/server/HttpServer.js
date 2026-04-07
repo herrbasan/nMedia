@@ -14,6 +14,14 @@ export class HttpServer {
    * @param {Router} router
    */
   static async handle(req, res, router) {
+    // Handle CORS preflight
+    if (req.method === 'OPTIONS') {
+      HttpServer.sendCors(res);
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     const ctx = new Context(req, res);
 
     try {
@@ -48,5 +56,15 @@ export class HttpServer {
 
       ctx.error(500, err.message || 'Internal server error');
     }
+  }
+
+  /**
+   * Send CORS headers
+   */
+  static sendCors(res) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Max-Age', '86400');
   }
 }

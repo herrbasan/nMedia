@@ -3,8 +3,8 @@ import ProgressReporter from '../../pipeline/ProgressReporter.js';
 import logger from '../../utils/logger.js';
 
 /**
- * POST /v1/optimize/audio
- * Optimize/resample audio
+ * POST /v1/process/audio
+ * Process/resample audio
  */
 export async function handleAudio(ctx) {
   try {
@@ -45,17 +45,17 @@ export async function handleAudio(ctx) {
       const mimeType = result.metadata.mimeType;
       ctx.json(200, {
         original_size_bytes: originalSize,
-        optimized_size_bytes: result.metadata.outputSize,
+        processed_size_bytes: result.metadata.outputSize,
         sample_rate: result.metadata.sampleRate,
         channels: result.metadata.channels,
         format: result.metadata.format,
         base64: `data:${mimeType};base64,${base64}`,
       });
     } else {
-      ctx.send(200, result.buffer, result.metadata.mimeType, `optimized.${result.metadata.format}`);
+      ctx.send(200, result.buffer, result.metadata.mimeType, `processed.${result.metadata.format}`);
     }
   } catch (error) {
-    logger.error('Audio optimization failed', { error: error.message });
+    logger.error('Audio processing failed', { error: error.message });
     ctx.error(500, error.message);
   }
 }

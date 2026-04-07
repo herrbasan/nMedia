@@ -3,7 +3,7 @@ import ProgressReporter from '../../pipeline/ProgressReporter.js';
 import logger from '../../utils/logger.js';
 
 /**
- * POST /v1/optimize/video
+ * POST /v1/process/video
  * Process video (extract audio or keyframes)
  */
 export async function handleVideo(ctx) {
@@ -74,7 +74,7 @@ export async function handleVideo(ctx) {
 
 /**
  * SSE progress endpoint for video jobs.
- * GET /v1/optimize/progress/:jobId
+ * GET /v1/process/progress/:jobId
  */
 export async function handleVideoProgress(ctx) {
   const { jobId } = ctx.params;

@@ -1,0 +1,117 @@
+<header>
+  <h1>Audio Processing Tests</h1>
+  <p class="lead">Upload and process audio files for STT optimization</p>
+</header>
+
+<section>
+  <h2>Upload Audio</h2>
+  
+  <div style="position: relative; min-height: 16rem;">
+    <nui-dropzone id="audio-dropzone">
+      <div data-drop="audio">
+        <nui-icon name="headphones" style="font-size: 3rem;"></nui-icon>
+        <p>Drop audio file here</p>
+        <p style="color: var(--color-text-muted);">Supports: MP3, WAV, OGG, M4A, FLAC</p>
+      </div>
+    </nui-dropzone>
+  </div>
+  
+  <nui-card style="margin-top: 1rem;">
+    <nui-input-group>
+      <label>Or select a file:</label>
+      <input type="file" id="audio-file" accept="audio/*">
+    </nui-input-group>
+  </nui-card>
+</section>
+
+<section>
+  <h2>Processing Options</h2>
+  
+  <nui-card>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+      <nui-input-group>
+        <label for="opt-sample-rate">Sample Rate</label>
+        <nui-select>
+          <select id="opt-sample-rate">
+            <option value="8000">8000 Hz (Telephone)</option>
+            <option value="16000" selected>16000 Hz (Whisper/STT)</option>
+            <option value="22050">22050 Hz (Low Quality)</option>
+            <option value="44100">44100 Hz (CD Quality)</option>
+            <option value="48000">48000 Hz (Professional)</option>
+          </select>
+        </nui-select>
+      </nui-input-group>
+      
+      <nui-input-group>
+        <label for="opt-channels">Channels</label>
+        <nui-select>
+          <select id="opt-channels">
+            <option value="1" selected>Mono (1 channel)</option>
+            <option value="2">Stereo (2 channels)</option>
+          </select>
+        </nui-select>
+      </nui-input-group>
+      
+      <nui-input-group>
+        <label for="opt-audio-format">Output Format</label>
+        <nui-select>
+          <select id="opt-audio-format">
+            <option value="mp3" selected>MP3</option>
+            <option value="wav">WAV</option>
+            <option value="ogg">OGG</option>
+            <option value="m4a">M4A</option>
+          </select>
+        </nui-select>
+      </nui-input-group>
+    </div>
+    
+    <nui-button-container style="margin-top: 1rem;">
+      <nui-button data-action="process-audio">
+        <button type="button" class="primary">
+          <nui-icon name="play"></nui-icon>
+          Process Audio
+        </button>
+      </nui-button>
+    </nui-button-container>
+  </nui-card>
+</section>
+
+<section>
+  <h2>Presets</h2>
+  
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem;">
+    <nui-card>
+      <h3>Whisper / STT</h3>
+      <p style="color: var(--color-text-muted);">16kHz, Mono, MP3</p>
+      <p>Optimized for speech-to-text models</p>
+    </nui-card>
+    
+    <nui-card>
+      <h3>Voice / Podcast</h3>
+      <p style="color: var(--color-text-muted);">22.05kHz, Mono, MP3</p>
+      <p>Good balance of quality and size</p>
+    </nui-card>
+    
+    <nui-card>
+      <h3>High Quality</h3>
+      <p style="color: var(--color-text-muted);">44.1kHz, Stereo, WAV</p>
+      <p>Uncompressed archival quality</p>
+    </nui-card>
+  </div>
+</section>
+
+<div id="audio-results" style="margin-top: 2rem;"></div>
+
+<script type="nui/page">
+function init(element, params) {
+  const dropzone = element.querySelector('#audio-dropzone');
+  const fileInput = element.querySelector('#audio-file');
+  
+  dropzone?.addEventListener('nui-dropzone-drop', (e) => {
+    const { dataTransfer } = e.detail;
+    if (dataTransfer.files?.[0] && fileInput) {
+      fileInput.files = dataTransfer.files;
+    }
+  });
+}
+</script>

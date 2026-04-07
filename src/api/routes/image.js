@@ -1,11 +1,17 @@
+import path from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
 import config from '../../config/config.js';
 import PipelineExecutor from '../../pipeline/PipelineExecutor.js';
 import ProgressReporter from '../../pipeline/ProgressReporter.js';
 import logger from '../../utils/logger.js';
+import { verifyFfmpeg } from '../../utils/ffmpeg/index.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
- * POST /v1/optimize/image
- * Optimize/resize an image
+ * POST /v1/process/image
+ * Process/resize an image
  */
 export async function handleImage(ctx) {
   try {
@@ -51,7 +57,7 @@ export async function handleImage(ctx) {
       const mimeType = result.metadata.mimeType;
       ctx.json(200, {
         original_size_bytes: originalSize,
-        optimized_size_bytes: result.metadata.outputSize,
+        processed_size_bytes: result.metadata.outputSize,
         format: result.metadata.format,
         width: result.metadata.width,
         height: result.metadata.height,
@@ -59,16 +65,16 @@ export async function handleImage(ctx) {
       });
     } else {
       // Stream as file
-      ctx.send(200, result.buffer, result.metadata.mimeType, `optimized.${result.metadata.format}`);
+      ctx.send(200, result.buffer, result.metadata.mimeType, `processed.${result.metadata.format}`);
     }
   } catch (error) {
-    logger.error('Image optimization failed', { error: error.message });
+    logger.error('Image processing failed', { error: error.message });
     ctx.error(500, error.message);
   }
 }
 
 /**
- * POST /v1/optimize/image/crop
+ * POST /v1/process/image/crop
  * Crop an image by region, center, or grid
  */
 export async function handleImageCrop(ctx) {
@@ -125,17 +131,19 @@ export async function handleHealth(ctx) {
     },
   };
 
-  // Check if sharp is available
+  // Check if nImage is available
   try {
-    await import('sharp');
+    const nImagePath = path.join(__dirname, '../../../modules/nImage/lib/index.js');
+    const nImageUrl = pathToFileURL(nImagePath).href;
+    await import(nImageUrl);
     health.processors.image = 'ready';
   } catch (e) {
     health.processors.image = 'error';
   }
 
-  // Check ffmpeg (basic check)
+  // Check ffmpeg
   try {
-    await import('fluent-ffmpeg');
+    await verifyFfmpeg();
     health.processors.audio = 'ready';
     health.processors.video = 'ready';
   } catch (e) {
