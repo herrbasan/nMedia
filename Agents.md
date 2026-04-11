@@ -47,6 +47,9 @@ Test assets are located in `/tests/assets/`:
 - **Zero Dependencies:** If we can build it ourselves using raw standard libraries, we build it. Avoid external third-party packages. Evaluate per-case if a dependency is truly necessary.
 - **Fail Fast, Always:** No defensive coding. No mock data. No fallback defaults. No silencing `try/catch`. No optional chaining (`?.`) for required values. Configuration must be explicit - missing required config must throw immediately at startup. When something breaks, let it crash and fix the root cause.
 
+## Service Management
+- **Do Not Start/Restart Service:** Never start, restart, or stop the Media Service on your own. If the service needs to be started or restarted, ask the user to do it.
+
 ## Bundled Submodules
 
 This project uses git submodules located in `/modules`. These are all **our own projects** and can be enhanced if needed:
