@@ -1,0 +1,54 @@
+<header>
+    <h2><nui-icon name="settings">⚙</nui-icon> Settings</h2>
+    <p class="lead">Configure the Media Service Web UI</p>
+</header>
+
+<section>
+    <nui-card>
+        <div class="nui-headline">Service Configuration</div>
+        
+        <nui-input-group>
+            <label>API Base URL</label>
+            <nui-input>
+                <input type="url" id="api-base-url" value="http://localhost:3500" readonly>
+            </nui-input>
+            <span class="description">Media Service endpoint (configured in api.js)</span>
+        </nui-input-group>
+
+        <nui-button-container align="start" style="margin-top: 1rem;">
+            <nui-button variant="primary" id="test-connection-btn">
+                <button type="button">
+                    <nui-icon name="sync">↻</nui-icon> Test Connection
+                </button>
+            </nui-button>
+        </nui-button-container>
+
+        <div id="connection-status" style="margin-top: 1rem; padding: 1rem; border-radius: 8px; display: none;"></div>
+    </nui-card>
+</section>
+
+<section>
+    <nui-card>
+        <div class="nui-headline">About</div>
+        <p><strong>Media Service Web UI</strong></p>
+        <p>A web interface for the Media Service microservice that preprocesses multimedia files for LLM consumption.</p>
+        
+        <h4 style="margin-top: 1.5rem;">Supported Formats</h4>
+        <table style="width: 100%; margin-top: 0.5rem;">
+            <tr>
+                <td><strong>Images:</strong></td>
+                <td>JPEG, PNG, WebP, AVIF, GIF, RAW, HEIC</td>
+            </tr>
+            <tr>
+                <td><strong>Audio:</strong></td>
+                <td>MP3, WAV, OGG, M4A, FLAC</td>
+            </tr>
+            <tr>
+                <td><strong>Video:</strong></td>
+                <td>MP4, MOV, MKV, AVI</td>
+            </tr>
+        </table>
+    </nui-card>
+</section>
+
+<script type="nui/page">function init(element, params, nui) { app.initSettingsPage(element, nui)}</script>

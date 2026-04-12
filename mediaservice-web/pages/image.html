@@ -1,0 +1,120 @@
+<header>
+    <h2><nui-icon name="image">🖼</nui-icon> Image Processor</h2>
+    <p class="lead">Upload and optimize images for LLM consumption</p>
+</header>
+
+<section>
+    <nui-card>
+        <div class="nui-headline">Upload Image</div>
+        <div style="position: relative; min-height: 12rem; margin: 1rem 0;">
+            <nui-dropzone id="image-dropzone">
+                <div data-drop="image">Drop File Here</div>
+            </nui-dropzone>
+        </div>
+        <p style="text-align: center; color: var(--nui-text-muted);">or click to select a file</p>
+        <nui-button-container align="center">
+            <nui-button id="select-image-btn">
+                <input type="file" class="nui-hidden" id="image-file-input">
+                <button type="button">
+                    <nui-icon name="upload">↑</nui-icon> Select Image
+                </button>
+            </nui-button>
+        </nui-button-container>
+    </nui-card>
+</section>
+
+<section id="image-options" style="display: none;">
+    <nui-tabs>
+        <nav>
+            <button>Options</button>
+            <button>Result</button>
+        </nav>
+        
+        <!-- Options Tab -->
+        <div>
+            <nui-card>
+                <div class="nui-headline">File Info</div>
+                <div id="file-info" style="margin-bottom: 1rem; padding: 1rem; background: var(--nui-surface-2); border-radius: 8px;">
+                    <p style="margin: 0; color: var(--nui-text-muted);">No file selected</p>
+                </div>
+            </nui-card>
+            
+            <nui-card style="margin-top: 1rem;">
+                <div class="nui-headline">Processing Options</div>
+                
+                <nui-input-group>
+                    <label>Max Dimension (px)</label>
+                    <nui-input>
+                        <input type="number" id="max-dimension" value="1024" min="64" max="4096" step="64">
+                    </nui-input>
+                    <span class="description">Longest edge constraint (64-4096)</span>
+                </nui-input-group>
+
+                <nui-input-group>
+                    <label>Quality</label>
+                    <nui-slider>
+                        <input type="range" id="quality" min="1" max="100" value="85">
+                    </nui-slider>
+                    <span class="description">Output quality: <span id="quality-value">85</span>%</span>
+                </nui-input-group>
+
+                <nui-input-group>
+                    <label>Output Format</label>
+                    <nui-select id="format-select">
+                        <select>
+                            <option value="jpeg" selected>JPEG</option>
+                            <option value="png">PNG</option>
+                            <option value="webp">WebP</option>
+                            <option value="avif">AVIF</option>
+                            <option value="gif">GIF</option>
+                        </select>
+                    </nui-select>
+                </nui-input-group>
+
+                <nui-checkbox>
+                    <input type="checkbox" id="strip-exif" checked>
+                    <label>Strip EXIF metadata</label>
+                </nui-checkbox>
+
+                <nui-button-container align="end" style="margin-top: 1.5rem;">
+                    <nui-button variant="primary" id="process-image-btn">
+                        <button type="button">
+                            <nui-icon name="play">▶</nui-icon> Process Image
+                        </button>
+                    </nui-button>
+                </nui-button-container>
+            </nui-card>
+        </div>
+
+        <!-- Result Tab -->
+        <div>
+            <nui-card id="result-card" style="display: none;">
+                <div class="nui-headline">Processed Result</div>
+                <div id="processed-result" style="text-align: center; padding: 2rem;"></div>
+                <div id="result-info" style="margin-top: 1rem; font-size: 0.9rem;"></div>
+                <nui-button-container align="center" style="margin-top: 1rem;">
+                    <nui-button variant="primary" id="download-btn">
+                        <button type="button">
+                            <nui-icon name="download">↓</nui-icon> Download
+                        </button>
+                    </nui-button>
+                </nui-button-container>
+            </nui-card>
+            <div id="result-placeholder" style="text-align: center; padding: 3rem; color: var(--nui-text-muted);">
+                Process an image to see results here
+            </div>
+        </div>
+    </nui-tabs>
+</section>
+
+<nui-dialog id="processing-dialog">
+    <dialog>
+        <div style="padding: 2rem; text-align: center;">
+            <nui-progress type="circular-busy" size="3rem" style="margin-bottom: 1rem;"></nui-progress>
+            <div class="nui-headline">Processing...</div>
+            <p>Please wait while your image is being optimized.</p>
+        </div>
+    </dialog>
+</nui-dialog>
+
+<script type="nui/page">function init(element, params, nui) { app.initImagePage(element, nui)}</script>
