@@ -12,7 +12,7 @@ import ImageProcessor from './processors/image/ImageProcessor.js';
 import AudioProcessor from './processors/audio/AudioProcessor.js';
 import VideoProcessor from './processors/video/VideoProcessor.js';
 import { handleImage, handleImageCrop, handleHealth } from './api/routes/image.js';
-import { handleAudio } from './api/routes/audio.js';
+import { handleAudio, handleAudioProbe } from './api/routes/audio.js';
 import { handleVideo } from './api/routes/video.js';
 import {
   handleCreateTask,
@@ -46,6 +46,7 @@ router.addRoute('GET', '/health', handleHealth);
 router.addRoute('POST', '/v1/process/image', handleImage);
 router.addRoute('POST', '/v1/process/image/crop', handleImageCrop);
 router.addRoute('POST', '/v1/process/audio', handleAudio);
+router.addRoute('POST', '/v1/audio/probe', handleAudioProbe);
 router.addRoute('POST', '/v1/process/video', handleVideo);
 
 // Task system routes

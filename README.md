@@ -138,3 +138,24 @@ curl -X POST http://localhost:3500/v1/process/image \
   -F "max_dimension=512" \
   -F "format=webp"
 ```
+
+## Recent Changes
+
+### Audio Probe Endpoint (NEW)
+- `POST /v1/audio/probe` - Extract metadata from audio files without processing
+- Returns: sampleRate, channels, duration, codec, bitrate
+- Uses ffprobe CLI
+
+### Audio Processing Enhancements
+- Added `'source'` option for `sample_rate` and `channels` parameters
+- When `'source'` is specified, preserves original audio properties
+- Returns `source_metadata` in response for comparison
+
+### Web UI (mediaservice-web)
+- Full-featured web interface for testing all processors
+- Real-time file metadata display for audio
+- "Same as source" options for easy transcoding
+- Client-side processing time measurement
+- Responsive layout with NUI components
+
+See `mediaservice-web/README.md` for UI details.
