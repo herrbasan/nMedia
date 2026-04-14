@@ -39,22 +39,26 @@ Replace the FFmpeg CLI wrapper (`src/utils/ffmpeg/`) with the nVideo native N-AP
 
 ## Implementation Phases
 
-### Phase 1: Infrastructure
+### Phase 1: Infrastructure ✅ COMPLETE
 
-1. Add nVideo submodule: `git submodule add https://github.com/herrbasan/nVideo modules/nVideo`
-2. Initialize and build nVideo: `npm run setup && npm run build` (in modules/nVideo)
-3. Add nVideo import to MediaService (follow nImage ESM pattern with `pathToFileURL`)
-4. Verify nVideo loads and `probe()` works with test assets
+1. ✅ Add nVideo submodule: `git submodule add https://github.com/herrbasan/nVideo modules/nVideo`
+2. ✅ Initialize and build nVideo: `npm run setup && npm run build` (in modules/nVideo)
+3. ✅ Add nVideo import to MediaService (follow nImage ESM pattern with `createRequire`)
+4. ✅ Verify nVideo loads and `probe()` works with test assets
+   - 4K H.264/AAC MP4 (755MB) - probed successfully
+   - WAV 44.1kHz stereo (14MB) - probed successfully
 
-### Phase 2: AudioProcessor Rewrite
+**Commit:** `8ab4129` - feat: add nVideo submodule (Phase 1 complete)
+
+### Phase 2: AudioProcessor Rewrite 🔄 IN PROGRESS
 
 Current: FFmpeg CLI → `spawn('ffmpeg', [...])` → parse stderr → read output file
 Target: nVideo `transcode()` or `extractAudio()` → callback progress → output file
 
 **Methods to implement:**
-- `process(buffer, options)` → Use nVideo `transcode()` with temp file I/O
-- `probe(buffer)` → Use nVideo `probe()` directly (no ffprobe spawn)
-- Progress callback → Map nVideo `onProgress` to our `onProgress` interface
+- `process(buffer, options)` → Use nVideo `transcode()` with temp file I/O ✅ DONE
+- `probe(buffer)` → Use nVideo `probe()` directly (no ffprobe spawn) ✅ DONE
+- Progress callback → Map nVideo `onProgress` to our `onProgress` interface ✅ DONE
 
 **Key mapping:**
 | Current Option | nVideo Equivalent |
@@ -62,6 +66,10 @@ Target: nVideo `transcode()` or `extractAudio()` → callback progress → outpu
 | `sample_rate` | `audioOpts.sampleRate` |
 | `channels` | `audioOpts.channels` |
 | `format` (mp3/wav/ogg/m4a) | Output file extension + codec in `audioOpts.codec` |
+
+**Status:** AudioProcessor.js rewritten. Hit nVideo bug: `channel_layout=0x0` in abuffer filter for audio-only files (WAV/PCM). Fix needed in `modules/nVideo/src/processor.cpp`.
+
+**Bug:** When decoder's `ch_layout.u.mask` is 0 (common for WAV files), the abuffer filter receives `channel_layout=0x0` which is invalid. Fix: derive channel layout from channel count when mask is 0.
 
 ### Phase 3: VideoProcessor Rewrite
 
