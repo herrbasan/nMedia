@@ -39,9 +39,7 @@ export function initVideoPage(element, nui) {
 
     selectBtn?.addEventListener('nui-file-selected', (e) => {
         if (e.detail.files.length > 0) {
-            handleFile(e.detail.files[0]).catch(err => {
-                console.error('handleFile error:', err);
-            });
+            handleFile(e.detail.files[0]);
         }
     });
 
