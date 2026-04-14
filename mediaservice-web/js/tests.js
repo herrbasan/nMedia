@@ -72,6 +72,7 @@ export function initTestsPage(element, nui) {
     }
 
     async function runTest(testName, updateSummaryFlag = true) {
+        resultsSection.style.display = 'block';
         const startTime = performance.now();
         try {
             let result;
@@ -261,6 +262,7 @@ export function initTestsPage(element, nui) {
     }
 
     function renderResults() {
+        if (!testResults) return;
         testResults.innerHTML = testResultsData.map(r => {
             const def = TEST_DEFINITIONS[r.name] || {};
             const icon = r.status === 'pass' ? '✓' : r.status === 'fail' ? '✗' : '⟳';
