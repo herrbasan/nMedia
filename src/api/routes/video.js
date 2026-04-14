@@ -133,7 +133,12 @@ async function handleVideoUpload(ctx, options) {
   const result = await PipelineExecutor.execute('video', inputBuffer, options, ProgressReporter, jobId);
 
   // Send final response based on response_type and mode
-  if (responseType === 'base64') {
+  // Force file streaming if buffer is too large for base64 (>400MB)
+  const MAX_BASE64_SIZE = 400 * 1024 * 1024;
+  const forceFileMode = result.buffer.length > MAX_BASE64_SIZE;
+  const effectiveResponseType = forceFileMode ? 'file' : responseType;
+
+  if (effectiveResponseType === 'base64') {
     if (options.mode === 'extract_audio') {
       const base64 = result.buffer.toString('base64');
       ctx.json(200, {
