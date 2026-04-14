@@ -1,26 +1,181 @@
+import fs from 'fs';
+import path from 'path';
+import { v4 as uuidv4 } from '../utils/uuid.js';
+import config from '../config/config.js';
+
 /**
  * Custom multipart/form-data parser.
- * Parses incoming request streams without external dependencies.
- * Uses Buffer operations only - no toString() on large buffers.
+ * Streams file uploads directly to disk to avoid buffering large files in memory.
+ * Uses Buffer operations for header parsing - no toString() on large buffers.
  */
 export class MultipartParser {
   constructor(boundary) {
     this.boundary = boundary;
     this.boundaryMarker = Buffer.from(`--${boundary}`);
-    this.endMarker = Buffer.from(`--${boundary}--`);
   }
 
   async parse(req) {
     return new Promise((resolve, reject) => {
-      const chunks = [];
+      const parts = { fields: {}, files: [] };
+      let state = 'boundary'; // boundary, headers, body
+      let headerBuffer = Buffer.alloc(0);
+      let currentHeaders = null;
+      let currentField = null;
+      let currentFile = null;
+      let fileStream = null;
+      let fileSize = 0;
       
-      req.on('data', (chunk) => chunks.push(chunk));
+      // Boundary detection state
+      let potentialBoundaryStart = 0;
+      let boundaryMatchPos = 0;
+
+      const flushBoundary = Buffer.from('\r\n');
+
+      req.on('data', (chunk) => {
+        try {
+          let offset = 0;
+          
+          while (offset < chunk.length) {
+            if (state === 'boundary') {
+              // Look for boundary marker
+              const remaining = chunk.slice(offset);
+              const idx = remaining.indexOf(this.boundaryMarker);
+              
+              if (idx === -1) {
+                // No boundary found in this chunk, skip most of it
+                // Keep last (boundaryMarker.length - 1) bytes for next chunk
+                const keep = Math.min(remaining.length, this.boundaryMarker.length - 1);
+                offset = chunk.length - keep;
+                continue;
+              }
+              
+              // Found boundary
+              offset += idx + this.boundaryMarker.length;
+              state = 'headers';
+              headerBuffer = Buffer.alloc(0);
+              continue;
+            }
+            
+            if (state === 'headers') {
+              // Accumulate header data until we find \r\n\r\n
+              const remaining = chunk.slice(offset);
+              const headerEnd = remaining.indexOf('\r\n\r\n');
+              
+              if (headerEnd === -1) {
+                // Headers not complete yet
+                headerBuffer = Buffer.concat([headerBuffer, remaining]);
+                offset = chunk.length;
+                continue;
+              }
+              
+              // Headers complete
+              headerBuffer = Buffer.concat([headerBuffer, remaining.slice(0, headerEnd)]);
+              const headersStr = headerBuffer.toString('utf8');
+              offset += headerEnd + 4;
+              
+              // Parse headers
+              const nameMatch = headersStr.match(/name="([^"]+)"/);
+              const filenameMatch = headersStr.match(/filename="([^"]+)"/);
+              const contentTypeMatch = headersStr.match(/Content-Type:\s*([^\r\n]+)/i);
+              
+              currentField = nameMatch ? nameMatch[1] : null;
+              const filename = filenameMatch ? filenameMatch[1] : null;
+              const contentType = contentTypeMatch ? contentTypeMatch[1].trim() : 'application/octet-stream';
+              
+              if (filename) {
+                // File upload - stream to disk
+                const ext = path.extname(filename) || '.bin';
+                const tempPath = path.join(config.cacheDir, `upload-${uuidv4()}${ext}`);
+                fileStream = fs.createWriteStream(tempPath);
+                currentFile = {
+                  fieldname: currentField,
+                  originalFilename: filename,
+                  mimeType: contentType,
+                  size: 0,
+                  tempPath,
+                };
+                fileSize = 0;
+              }
+              
+              state = 'body';
+              continue;
+            }
+            
+            if (state === 'body') {
+              const remaining = chunk.slice(offset);
+              
+              if (currentFile && fileStream) {
+                // Check if boundary appears in this chunk
+                const boundaryIdx = remaining.indexOf(this.boundaryMarker);
+                
+                if (boundaryIdx !== -1) {
+                  // End of file part
+                  const fileData = remaining.slice(0, boundaryIdx);
+                  // Remove trailing \r\n if present
+                  let actualData = fileData;
+                  if (fileData.length >= 2 && fileData[fileData.length - 2] === 13 && fileData[fileData.length - 1] === 10) {
+                    actualData = fileData.slice(0, -2);
+                  }
+                  if (actualData.length > 0) {
+                    fileStream.write(actualData);
+                    fileSize += actualData.length;
+                  }
+                  fileStream.end();
+                  currentFile.size = fileSize;
+                  parts.files.push(currentFile);
+                  
+                  offset += boundaryIdx + this.boundaryMarker.length;
+                  state = 'headers';
+                  headerBuffer = Buffer.alloc(0);
+                  currentFile = null;
+                  fileStream = null;
+                  continue;
+                }
+                
+                // No boundary - write entire chunk to file
+                fileStream.write(remaining);
+                fileSize += remaining.length;
+                offset = chunk.length;
+                continue;
+              } else if (currentField) {
+                // Regular field - accumulate in buffer
+                const boundaryIdx = remaining.indexOf(this.boundaryMarker);
+                
+                if (boundaryIdx !== -1) {
+                  let fieldData = remaining.slice(0, boundaryIdx);
+                  // Remove trailing \r\n
+                  if (fieldData.length >= 2 && fieldData[fieldData.length - 2] === 13 && fieldData[fieldData.length - 1] === 10) {
+                    fieldData = fieldData.slice(0, -2);
+                  }
+                  parts.fields[currentField] = fieldData.toString('utf8');
+                  
+                  offset += boundaryIdx + this.boundaryMarker.length;
+                  state = 'headers';
+                  headerBuffer = Buffer.alloc(0);
+                  currentField = null;
+                  continue;
+                }
+                
+                offset = chunk.length;
+                continue;
+              }
+            }
+          }
+        } catch (err) {
+          reject(err);
+        }
+      });
       
       req.on('end', () => {
         try {
-          const buffer = Buffer.concat(chunks);
-          const result = this.parseBuffer(buffer);
-          resolve(result);
+          if (fileStream) {
+            fileStream.end();
+            if (currentFile) {
+              currentFile.size = fileSize;
+              parts.files.push(currentFile);
+            }
+          }
+          resolve(parts);
         } catch (err) {
           reject(err);
         }
@@ -28,84 +183,6 @@ export class MultipartParser {
       
       req.on('error', reject);
     });
-  }
-
-  parseBuffer(buffer) {
-    const parts = { fields: {}, files: [] };
-    
-    // Find all boundary positions using Buffer.indexOf
-    const boundaries = [];
-    let pos = 0;
-    while (true) {
-      const idx = buffer.indexOf(this.boundaryMarker, pos);
-      if (idx === -1) break;
-      boundaries.push(idx);
-      pos = idx + this.boundaryMarker.length;
-    }
-
-    if (boundaries.length === 0) {
-      return parts;
-    }
-
-    // Process each part between boundaries
-    for (let i = 0; i < boundaries.length - 1; i++) {
-      const start = boundaries[i] + this.boundaryMarker.length;
-      const end = boundaries[i + 1];
-      let partData = buffer.slice(start, end);
-      
-      // Remove leading CRLF if present
-      if (partData.length >= 2 && partData[0] === 13 && partData[1] === 10) {
-        partData = partData.slice(2);
-      }
-      
-      // Remove trailing CRLF if present
-      if (partData.length >= 2 && partData[partData.length - 2] === 13 && partData[partData.length - 1] === 10) {
-        partData = partData.slice(0, -2);
-      }
-      
-      // Remove trailing '--' if this was before end marker
-      if (partData.length >= 2 && partData[partData.length - 2] === 45 && partData[partData.length - 1] === 45) {
-        partData = partData.slice(0, -2);
-      }
-
-      // Find header/body separator (CRLF CRLF = 0D 0A 0D 0A)
-      const headerEnd = this.findHeaderEnd(partData);
-      if (headerEnd === -1) continue;
-
-      const headersStr = partData.slice(0, headerEnd).toString('utf8');
-      const body = partData.slice(headerEnd + 4);
-
-      // Parse Content-Disposition
-      const nameMatch = headersStr.match(/name="([^"]+)"/);
-      const filenameMatch = headersStr.match(/filename="([^"]+)"/);
-      const contentTypeMatch = headersStr.match(/Content-Type:\s*([^\r\n]+)/i);
-
-      const name = nameMatch ? nameMatch[1] : null;
-      const filename = filenameMatch ? filenameMatch[1] : null;
-      const contentType = contentTypeMatch ? contentTypeMatch[1].trim() : 'application/octet-stream';
-
-      if (filename) {
-        parts.files.push({
-          fieldname: name,
-          originalFilename: filename,
-          mimeType: contentType,
-          buffer: body,
-          size: body.length,
-        });
-      } else if (name) {
-        parts.fields[name] = body.toString('utf8');
-      }
-    }
-
-    return parts;
-  }
-
-  /**
-   * Find the position of CRLF CRLF (header/body separator) in buffer
-   */
-  findHeaderEnd(buf) {
-    const separator = Buffer.from('\r\n\r\n');
-    return buf.indexOf(separator);
   }
 }
 

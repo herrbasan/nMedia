@@ -1,5 +1,7 @@
 import fs from 'fs';
 import path from 'path';
+import { v4 as uuidv4 } from '../../utils/uuid.js';
+import config from '../../config/config.js';
 import PipelineExecutor from '../../pipeline/PipelineExecutor.js';
 import ProgressReporter from '../../pipeline/ProgressReporter.js';
 import logger from '../../utils/logger.js';
@@ -106,12 +108,22 @@ async function handleVideoFileToFile(ctx, options) {
  */
 async function handleVideoUpload(ctx, options) {
   let inputBuffer;
+  let inputPath;
   let originalSize;
+  let needsCleanup = false;
 
-  // Handle file upload or base64 input
+  // Handle file upload
   if (ctx.file) {
-    inputBuffer = ctx.file.buffer;
-    originalSize = ctx.file.size;
+    if (ctx.file.tempPath) {
+      // File was streamed to disk - use path directly
+      inputPath = ctx.file.tempPath;
+      originalSize = ctx.file.size;
+      needsCleanup = true;
+    } else {
+      // File is in memory (small uploads)
+      inputBuffer = ctx.file.buffer;
+      originalSize = ctx.file.size;
+    }
   } else if (ctx.body?.base64) {
     const base64Data = ctx.body.base64.replace(/^data:[^;]+;base64,/, '');
     inputBuffer = Buffer.from(base64Data, 'base64');
@@ -127,8 +139,36 @@ async function handleVideoUpload(ctx, options) {
     mode: options.mode,
     hasFile: !!ctx.file,
     fileSize: ctx.file?.size,
+    isStreamed: !!ctx.file?.tempPath,
     allFields: Object.keys(ctx.body || {}),
   });
+
+  // For file-to-file (streamed upload), write directly to output
+  if (inputPath && responseType === 'file') {
+    const jobId = ctx.createSseJob();
+    const outputExt = options.mode === 'transcode' ? (options.output_format || 'mp4') : (options.format || 'mp3');
+    const outputPath = path.join(config.cacheDir, `output-${uuidv4()}.${outputExt}`);
+
+    const processorOptions = {
+      ...options,
+      input_path: inputPath,
+      output_path: outputPath,
+    };
+
+    const result = await PipelineExecutor.execute('video', null, processorOptions, ProgressReporter, jobId);
+
+    ctx.send(200, fs.readFileSync(result.outputPath), result.metadata.mimeType, `processed.${outputExt}`);
+
+    // Cleanup
+    try { fs.unlinkSync(inputPath); } catch {}
+    try { fs.unlinkSync(result.outputPath); } catch {}
+    return;
+  }
+
+  // For base64 response, read file into buffer if needed
+  if (inputPath && !inputBuffer) {
+    inputBuffer = fs.readFileSync(inputPath);
+  }
 
   // For synchronous (base64) responses, don't open SSE - just process and return
   // For file responses, open SSE for progress tracking
@@ -139,6 +179,11 @@ async function handleVideoUpload(ctx, options) {
 
   // Execute processing
   const result = await PipelineExecutor.execute('video', inputBuffer, options, ProgressReporter, jobId);
+
+  // Cleanup temp file
+  if (needsCleanup && inputPath) {
+    try { fs.unlinkSync(inputPath); } catch {}
+  }
 
   // Send final response based on response_type and mode
   // Force file streaming if buffer is too large for base64 (>400MB)
