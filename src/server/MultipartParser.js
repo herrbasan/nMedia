@@ -1,12 +1,13 @@
 /**
  * Custom multipart/form-data parser.
  * Parses incoming request streams without external dependencies.
+ * Uses Buffer operations only - no toString() on large buffers.
  */
 export class MultipartParser {
   constructor(boundary) {
     this.boundary = boundary;
-    this.boundaryMarker = `--${boundary}`;
-    this.endMarker = `--${boundary}--`;
+    this.boundaryMarker = Buffer.from(`--${boundary}`);
+    this.endMarker = Buffer.from(`--${boundary}--`);
   }
 
   async parse(req) {
@@ -31,13 +32,12 @@ export class MultipartParser {
 
   parseBuffer(buffer) {
     const parts = { fields: {}, files: [] };
-    const str = buffer.toString('binary');
     
-    // Find all boundary positions
+    // Find all boundary positions using Buffer.indexOf
     const boundaries = [];
     let pos = 0;
     while (true) {
-      const idx = str.indexOf(this.boundaryMarker, pos);
+      const idx = buffer.indexOf(this.boundaryMarker, pos);
       if (idx === -1) break;
       boundaries.push(idx);
       pos = idx + this.boundaryMarker.length;
@@ -68,8 +68,8 @@ export class MultipartParser {
         partData = partData.slice(0, -2);
       }
 
-      // Parse headers and body
-      const headerEnd = partData.indexOf('\r\n\r\n');
+      // Find header/body separator (CRLF CRLF = 0D 0A 0D 0A)
+      const headerEnd = this.findHeaderEnd(partData);
       if (headerEnd === -1) continue;
 
       const headersStr = partData.slice(0, headerEnd).toString('utf8');
@@ -98,6 +98,14 @@ export class MultipartParser {
     }
 
     return parts;
+  }
+
+  /**
+   * Find the position of CRLF CRLF (header/body separator) in buffer
+   */
+  findHeaderEnd(buf) {
+    const separator = Buffer.from('\r\n\r\n');
+    return buf.indexOf(separator);
   }
 }
 
