@@ -34,8 +34,6 @@ const TEST_DEFINITIONS = {
 };
 
 export function initTestsPage(element, nui) {
-    console.log('tests init');
-
     const resultsSection = element.querySelector('#test-results-section');
     const testSummary = element.querySelector('#test-summary');
     const testResults = element.querySelector('#test-results');
@@ -45,36 +43,13 @@ export function initTestsPage(element, nui) {
     const testAudioBtn = element.querySelector('#test-audio-btn');
     const testVideoBtn = element.querySelector('#test-video-btn');
 
-    console.log('Buttons found:', {
-        runAll: !!runAllBtn,
-        health: !!testHealthBtn,
-        image: !!testImageBtn,
-        audio: !!testAudioBtn,
-        video: !!testVideoBtn,
-    });
-
     let testResultsData = [];
 
-    runAllBtn?.addEventListener('click', () => {
-        console.log('Run all clicked');
-        runAllTests();
-    });
-    testHealthBtn?.addEventListener('click', () => {
-        console.log('Health clicked');
-        runTest('health');
-    });
-    testImageBtn?.addEventListener('click', () => {
-        console.log('Image clicked');
-        runTest('image');
-    });
-    testAudioBtn?.addEventListener('click', () => {
-        console.log('Audio clicked');
-        runTest('audio');
-    });
-    testVideoBtn?.addEventListener('click', () => {
-        console.log('Video clicked');
-        runTest('video');
-    });
+    runAllBtn?.addEventListener('click', () => runAllTests());
+    testHealthBtn?.addEventListener('click', () => runTest('health'));
+    testImageBtn?.addEventListener('click', () => runTest('image'));
+    testAudioBtn?.addEventListener('click', () => runTest('audio'));
+    testVideoBtn?.addEventListener('click', () => runTest('video'));
 
     async function runAllTests() {
         testResultsData = [];
