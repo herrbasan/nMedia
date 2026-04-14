@@ -10,3 +10,6 @@
 [submodule "modules/nImage"]
 	path = modules/nImage
 	url = https://github.com/herrbasan/nImage.git
+[submodule "modules/nVideo"]
+	path = modules/nVideo
+	url = https://github.com/herrbasan/nVideo
