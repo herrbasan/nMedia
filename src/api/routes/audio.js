@@ -77,8 +77,12 @@ export async function handleAudio(ctx) {
 
     const responseType = ctx.body.response_type || 'base64';
 
-    // Create SSE connection for progress
-    const jobId = ctx.createSseJob();
+    // For synchronous (base64) responses, don't open SSE - just process and return
+    // For file responses, open SSE for progress tracking
+    let jobId = null;
+    if (responseType !== 'base64') {
+      jobId = ctx.createSseJob();
+    }
 
     // Execute processing
     const result = await PipelineExecutor.execute('audio', inputBuffer, options, ProgressReporter, jobId);
