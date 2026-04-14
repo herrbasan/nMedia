@@ -25,32 +25,6 @@ if (!config.media?.gpu?.platform) {
   throw new Error('media.gpu.platform is required in config.json (e.g., "nvenc", "vaapi", "cpu")');
 }
 
-function getFfmpegPath() {
-  // 1. Check config path if explicitly set
-  if (config.media?.ffmpegPath) {
-    const configPath = path.resolve(process.cwd(), config.media.ffmpegPath);
-    if (fs.existsSync(configPath)) {
-      return configPath;
-    }
-    throw new Error(`FFmpeg not found at configured path: ${configPath}`);
-  }
-  
-  // 2. Check bundled bin directory
-  const bundledPath = path.join(__dirname, '../../bin/ffmpeg.exe');
-  if (fs.existsSync(bundledPath)) {
-    return bundledPath;
-  }
-  
-  // 3. Check non-Windows bundled path
-  const bundledUnixPath = path.join(__dirname, '../../bin/ffmpeg');
-  if (fs.existsSync(bundledUnixPath)) {
-    return bundledUnixPath;
-  }
-  
-  // 4. Return null to use system PATH
-  return null;
-}
-
 export default {
   port: config.server.port,
   host: config.server.host,
@@ -66,6 +40,6 @@ export default {
   cacheTtl: config.cache.ttl,
   cacheMaxSize: config.cache.maxSize,
   maxConcurrentTasks: config.workers.maxConcurrentTasks,
+  workersMode: config.workers.mode ?? 'queue',
   messageTransport: config.messaging.transport,
-  ffmpegPath: getFfmpegPath(),
 };

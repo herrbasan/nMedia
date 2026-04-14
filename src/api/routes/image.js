@@ -4,7 +4,6 @@ import config from '../../config/config.js';
 import PipelineExecutor from '../../pipeline/PipelineExecutor.js';
 import ProgressReporter from '../../pipeline/ProgressReporter.js';
 import logger from '../../utils/logger.js';
-import { verifyFfmpeg } from '../../utils/ffmpeg/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -141,9 +140,12 @@ export async function handleHealth(ctx) {
     health.processors.image = 'error';
   }
 
-  // Check ffmpeg
+  // Check nVideo
   try {
-    await verifyFfmpeg();
+    const nVideoPath = path.join(__dirname, '../../../modules/nVideo/lib/index.js');
+    const nVideoUrl = pathToFileURL(nVideoPath).href;
+    const nVideo = (await import(nVideoUrl)).default;
+    nVideo.probe(path.join(__dirname, '../../../tests/assets/audio/Vangengel.wav'));
     health.processors.audio = 'ready';
     health.processors.video = 'ready';
   } catch (e) {

@@ -11,9 +11,7 @@
     "test:e2e": "node tests/e2e-runner.js",
     "test:e2e:manual": "echo 'Start service with npm start, then run: node tests/e2e.test.js'"
   },
-  "dependencies": {
-    "@ffmpeg-installer/ffmpeg": "^1.1.0"
-  },
+  "dependencies": {},
   "engines": {
     "node": ">=18.0.0"
   }
