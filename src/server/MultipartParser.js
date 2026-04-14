@@ -4,184 +4,165 @@ import { v4 as uuidv4 } from '../utils/uuid.js';
 import config from '../config/config.js';
 
 /**
- * Custom multipart/form-data parser.
- * Streams file uploads directly to disk to avoid buffering large files in memory.
- * Uses Buffer operations for header parsing - no toString() on large buffers.
+ * Streaming multipart/form-data parser.
+ * Pipes the entire request to a temp file, then parses it.
+ * Zero memory buffering - handles files of any size.
  */
 export class MultipartParser {
   constructor(boundary) {
-    this.boundary = boundary;
-    this.boundaryMarker = Buffer.from(`--${boundary}`);
+    this.boundary = `--${boundary}`;
+    this.boundaryEnd = `--${boundary}--`;
   }
 
   async parse(req) {
-    return new Promise((resolve, reject) => {
-      const parts = { fields: {}, files: [] };
-      let state = 'boundary'; // boundary, headers, body
-      let headerBuffer = Buffer.alloc(0);
-      let currentHeaders = null;
-      let currentField = null;
-      let currentFile = null;
-      let fileStream = null;
-      let fileSize = 0;
+    const parts = { fields: {}, files: [] };
+    
+    // Pipe entire request to temp file
+    const tempPath = path.join(config.cacheDir, `multipart-${uuidv4()}.raw`);
+    
+    await new Promise((resolve, reject) => {
+      const writeStream = fs.createWriteStream(tempPath);
+      req.pipe(writeStream);
+      writeStream.on('finish', resolve);
+      writeStream.on('error', reject);
+    });
+
+    const fileSize = fs.statSync(tempPath).size;
+    const fd = fs.openSync(tempPath, 'r');
+    
+    try {
+      // Read file in chunks to find boundaries
+      const boundaryBuf = Buffer.from(this.boundary);
+      const boundaryEndBuf = Buffer.from(this.boundaryEnd);
+      const CRLF = Buffer.from('\r\n');
       
-      // Boundary detection state
-      let potentialBoundaryStart = 0;
-      let boundaryMatchPos = 0;
-
-      const flushBoundary = Buffer.from('\r\n');
-
-      req.on('data', (chunk) => {
-        try {
-          let offset = 0;
+      let pos = 0;
+      
+      // Find first boundary
+      const firstBoundaryPos = this._findInFile(fd, boundaryBuf, pos, 8192);
+      if (firstBoundaryPos === -1) {
+        return parts;
+      }
+      pos = firstBoundaryPos + boundaryBuf.length;
+      
+      while (pos < fileSize) {
+        // Skip CRLF after boundary
+        const crlfCheck = this._readBuffer(fd, pos, 2);
+        if (crlfCheck && crlfCheck[0] === 13 && crlfCheck[1] === 10) {
+          pos += 2;
+        }
+        
+        // Read headers (max 4KB should be enough)
+        const headerBuf = this._readBuffer(fd, pos, 4096);
+        if (!headerBuf) break;
+        
+        const headerEndIdx = headerBuf.indexOf('\r\n\r\n');
+        if (headerEndIdx === -1) break;
+        
+        const headersStr = headerBuf.slice(0, headerEndIdx).toString('utf8');
+        const headerBytes = headerEndIdx + 4;
+        const bodyStart = pos + headerBytes;
+        
+        // Parse headers
+        const nameMatch = headersStr.match(/name="([^"]+)"/);
+        const filenameMatch = headersStr.match(/filename="([^"]+)"/);
+        const contentTypeMatch = headersStr.match(/Content-Type:\s*([^\r\n]+)/i);
+        
+        const name = nameMatch ? nameMatch[1] : null;
+        const filename = filenameMatch ? filenameMatch[1] : null;
+        const contentType = contentTypeMatch ? contentTypeMatch[1].trim() : 'application/octet-stream';
+        
+        // Find next boundary
+        const nextBoundaryPos = this._findInFile(fd, boundaryBuf, bodyStart, 8192);
+        if (nextBoundaryPos === -1) break;
+        
+        // Body ends at next boundary, minus trailing CRLF
+        let bodyEnd = nextBoundaryPos;
+        if (bodyEnd >= bodyStart + 2) {
+          const trailingCheck = this._readBuffer(fd, bodyEnd - 2, 2);
+          if (trailingCheck && trailingCheck[0] === 13 && trailingCheck[1] === 10) {
+            bodyEnd -= 2;
+          }
+        }
+        
+        const bodyLength = bodyEnd - bodyStart;
+        
+        if (filename) {
+          // File part - extract to separate file
+          const ext = path.extname(filename) || '.bin';
+          const outputPath = path.join(config.cacheDir, `upload-${uuidv4()}${ext}`);
           
-          while (offset < chunk.length) {
-            if (state === 'boundary') {
-              // Look for boundary marker
-              const remaining = chunk.slice(offset);
-              const idx = remaining.indexOf(this.boundaryMarker);
-              
-              if (idx === -1) {
-                // No boundary found in this chunk, skip most of it
-                // Keep last (boundaryMarker.length - 1) bytes for next chunk
-                const keep = Math.min(remaining.length, this.boundaryMarker.length - 1);
-                offset = chunk.length - keep;
-                continue;
-              }
-              
-              // Found boundary
-              offset += idx + this.boundaryMarker.length;
-              state = 'headers';
-              headerBuffer = Buffer.alloc(0);
-              continue;
-            }
-            
-            if (state === 'headers') {
-              // Accumulate header data until we find \r\n\r\n
-              const remaining = chunk.slice(offset);
-              const headerEnd = remaining.indexOf('\r\n\r\n');
-              
-              if (headerEnd === -1) {
-                // Headers not complete yet
-                headerBuffer = Buffer.concat([headerBuffer, remaining]);
-                offset = chunk.length;
-                continue;
-              }
-              
-              // Headers complete
-              headerBuffer = Buffer.concat([headerBuffer, remaining.slice(0, headerEnd)]);
-              const headersStr = headerBuffer.toString('utf8');
-              offset += headerEnd + 4;
-              
-              // Parse headers
-              const nameMatch = headersStr.match(/name="([^"]+)"/);
-              const filenameMatch = headersStr.match(/filename="([^"]+)"/);
-              const contentTypeMatch = headersStr.match(/Content-Type:\s*([^\r\n]+)/i);
-              
-              currentField = nameMatch ? nameMatch[1] : null;
-              const filename = filenameMatch ? filenameMatch[1] : null;
-              const contentType = contentTypeMatch ? contentTypeMatch[1].trim() : 'application/octet-stream';
-              
-              if (filename) {
-                // File upload - stream to disk
-                const ext = path.extname(filename) || '.bin';
-                const tempPath = path.join(config.cacheDir, `upload-${uuidv4()}${ext}`);
-                fileStream = fs.createWriteStream(tempPath);
-                currentFile = {
-                  fieldname: currentField,
-                  originalFilename: filename,
-                  mimeType: contentType,
-                  size: 0,
-                  tempPath,
-                };
-                fileSize = 0;
-              }
-              
-              state = 'body';
-              continue;
-            }
-            
-            if (state === 'body') {
-              const remaining = chunk.slice(offset);
-              
-              if (currentFile && fileStream) {
-                // Check if boundary appears in this chunk
-                const boundaryIdx = remaining.indexOf(this.boundaryMarker);
-                
-                if (boundaryIdx !== -1) {
-                  // End of file part
-                  const fileData = remaining.slice(0, boundaryIdx);
-                  // Remove trailing \r\n if present
-                  let actualData = fileData;
-                  if (fileData.length >= 2 && fileData[fileData.length - 2] === 13 && fileData[fileData.length - 1] === 10) {
-                    actualData = fileData.slice(0, -2);
-                  }
-                  if (actualData.length > 0) {
-                    fileStream.write(actualData);
-                    fileSize += actualData.length;
-                  }
-                  fileStream.end();
-                  currentFile.size = fileSize;
-                  parts.files.push(currentFile);
-                  
-                  offset += boundaryIdx + this.boundaryMarker.length;
-                  state = 'headers';
-                  headerBuffer = Buffer.alloc(0);
-                  currentFile = null;
-                  fileStream = null;
-                  continue;
-                }
-                
-                // No boundary - write entire chunk to file
-                fileStream.write(remaining);
-                fileSize += remaining.length;
-                offset = chunk.length;
-                continue;
-              } else if (currentField) {
-                // Regular field - accumulate in buffer
-                const boundaryIdx = remaining.indexOf(this.boundaryMarker);
-                
-                if (boundaryIdx !== -1) {
-                  let fieldData = remaining.slice(0, boundaryIdx);
-                  // Remove trailing \r\n
-                  if (fieldData.length >= 2 && fieldData[fieldData.length - 2] === 13 && fieldData[fieldData.length - 1] === 10) {
-                    fieldData = fieldData.slice(0, -2);
-                  }
-                  parts.fields[currentField] = fieldData.toString('utf8');
-                  
-                  offset += boundaryIdx + this.boundaryMarker.length;
-                  state = 'headers';
-                  headerBuffer = Buffer.alloc(0);
-                  currentField = null;
-                  continue;
-                }
-                
-                offset = chunk.length;
-                continue;
-              }
-            }
+          this._copyFileRange(fd, bodyStart, bodyLength, outputPath);
+          
+          parts.files.push({
+            fieldname: name,
+            originalFilename: filename,
+            mimeType: contentType,
+            size: bodyLength,
+            tempPath: outputPath,
+          });
+        } else if (name) {
+          // Field part - read as string
+          const fieldBuf = this._readBuffer(fd, bodyStart, bodyLength);
+          if (fieldBuf) {
+            parts.fields[name] = fieldBuf.toString('utf8');
           }
-        } catch (err) {
-          reject(err);
         }
-      });
-      
-      req.on('end', () => {
-        try {
-          if (fileStream) {
-            fileStream.end();
-            if (currentFile) {
-              currentFile.size = fileSize;
-              parts.files.push(currentFile);
-            }
-          }
-          resolve(parts);
-        } catch (err) {
-          reject(err);
+        
+        pos = nextBoundaryPos + boundaryBuf.length;
+        
+        // Check if this was the end boundary
+        const endCheck = this._readBuffer(fd, pos, 2);
+        if (endCheck && endCheck[0] === 45 && endCheck[1] === 45) {
+          break; // -- at end means this was --boundary--
         }
-      });
+      }
+    } finally {
+      fs.closeSync(fd);
+      fs.unlinkSync(tempPath);
+    }
+    
+    return parts;
+  }
+
+  _readBuffer(fd, offset, length) {
+    if (length <= 0) return null;
+    const buf = Buffer.alloc(length);
+    const bytesRead = fs.readSync(fd, buf, 0, length, offset);
+    return bytesRead > 0 ? buf.slice(0, bytesRead) : null;
+  }
+
+  _findInFile(fd, pattern, startOffset, chunkSize) {
+    const searchBuf = Buffer.alloc(Math.min(chunkSize, 8192));
+    let pos = startOffset;
+    let carryBuf = Buffer.alloc(0);
+    
+    while (true) {
+      const bytesRead = fs.readSync(fd, searchBuf, 0, searchBuf.length, pos);
+      if (bytesRead === 0) return -1;
       
-      req.on('error', reject);
+      const data = bytesRead < searchBuf.length ? searchBuf.slice(0, bytesRead) : searchBuf;
+      const combined = carryBuf.length > 0 ? Buffer.concat([carryBuf, data]) : data;
+      
+      const idx = combined.indexOf(pattern);
+      if (idx !== -1) {
+        return pos - carryBuf.length + idx;
+      }
+      
+      // Keep last (pattern.length - 1) bytes for next iteration
+      const keep = Math.min(combined.length, pattern.length - 1);
+      carryBuf = combined.slice(combined.length - keep);
+      pos += bytesRead;
+    }
+  }
+
+  _copyFileRange(fd, offset, length, outputPath) {
+    const readStream = fs.createReadStream(null, { fd, start: offset, end: offset + length - 1, autoClose: false });
+    const writeStream = fs.createWriteStream(outputPath);
+    readStream.pipe(writeStream);
+    return new Promise((resolve, reject) => {
+      writeStream.on('finish', resolve);
+      writeStream.on('error', reject);
     });
   }
 }
