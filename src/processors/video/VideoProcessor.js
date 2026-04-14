@@ -1,15 +1,33 @@
 import fs from 'fs';
 import path from 'path';
+import { createRequire } from 'module';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { v4 as uuidv4 } from '../../utils/uuid.js';
 import Processor from '../../pipeline/Processor.js';
 import config from '../../config/config.js';
 import logger from '../../utils/logger.js';
-import { extractAudio, extractKeyframes, FORMAT_EXTENSIONS } from '../../utils/ffmpeg/index.js';
 
-/**
- * Video processor using FFmpeg CLI wrapper
- * Supports extracting audio or keyframes with GPU acceleration
- */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load nVideo from submodule (ESM compatibility via createRequire)
+const nVideoPath = path.join(__dirname, '../../../modules/nVideo/lib/index.js');
+const require = createRequire(import.meta.url);
+const nVideo = require(nVideoPath);
+
+// Load nImage for RGB→JPEG conversion of thumbnails
+const nImagePath = path.join(__dirname, '../../../modules/nImage/lib/index.js');
+const nImageUrl = pathToFileURL(nImagePath).href;
+let nImage;
+try {
+  nImage = (await import(nImageUrl)).default;
+} catch (e) {
+  throw new Error(`nImage module not found. Error: ${e.message}`);
+}
+
+const MIME_TYPES = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4' };
+const AUDIO_CODECS = { mp3: 'libmp3lame', wav: 'pcm_s16le', ogg: 'libvorbis', m4a: 'aac' };
+
 class VideoProcessor extends Processor {
   constructor() {
     super('video');
@@ -27,10 +45,7 @@ class VideoProcessor extends Processor {
   }
 
   async process(input, options = {}, onProgress) {
-    const {
-      mode = 'extract_audio',
-      fps = 1,
-    } = options;
+    const { mode = 'extract_audio' } = options;
 
     onProgress?.(5, `Starting video processing: ${mode}`);
 
@@ -46,47 +61,41 @@ class VideoProcessor extends Processor {
 
     const inputId = uuidv4();
     const outputId = uuidv4();
-    
+
     const inputExt = this._detectInputExtension(input);
     const inputPath = path.join(config.cacheDir, `input-${inputId}.${inputExt}`);
-    const outputPath = path.join(config.cacheDir, `output-${outputId}.${FORMAT_EXTENSIONS[format] || format}`);
+    const outputPath = path.join(config.cacheDir, `output-${outputId}.${format}`);
 
     try {
       onProgress?.(10, 'Preparing video');
-
-      // Write input buffer to temp file
       fs.writeFileSync(inputPath, input);
 
       onProgress?.(15, 'Extracting audio track');
 
-      // Extract audio with FFmpeg
-      const result = await extractAudio({
-        inputPath,
-        outputPath,
-        format,
-        onProgress: (percent, metadata) => {
-          // Map FFmpeg progress (0-100) to our range (15-90)
-          const mappedPercent = 15 + Math.round(percent * 0.75);
-          onProgress?.(mappedPercent, `Extracting: ${Math.round(percent)}%`);
-        },
+      await new Promise((resolve, reject) => {
+        nVideo.extractAudio(inputPath, outputPath, {
+          codec: AUDIO_CODECS[format],
+          bitrate: 128000,
+          cache: false,
+          onProgress: (p) => {
+            const mappedPercent = 15 + Math.round(p.percent * 0.75);
+            onProgress?.(mappedPercent, `Extracting: ${Math.round(p.percent)}%`);
+          },
+          onComplete: (result) => {
+            resolve(result);
+          },
+          onError: (error) => {
+            reject(new Error(error.message || 'nVideo extractAudio failed'));
+          },
+        });
       });
 
       onProgress?.(90, 'Reading output');
 
-      // Read output file
       const outputBuffer = fs.readFileSync(outputPath);
 
-      // Clean up temp files
-      try {
-        fs.unlinkSync(inputPath);
-      } catch (err) {
-        logger.debug('Failed to clean up input file', { error: err.message });
-      }
-      try {
-        fs.unlinkSync(outputPath);
-      } catch (err) {
-        logger.debug('Failed to clean up output file', { error: err.message });
-      }
+      try { fs.unlinkSync(inputPath); } catch {}
+      try { fs.unlinkSync(outputPath); } catch {}
 
       onProgress?.(100, 'Complete');
 
@@ -102,159 +111,122 @@ class VideoProcessor extends Processor {
           outputSize: outputBuffer.length,
           mode: 'extract_audio',
           format,
-          mimeType: 'audio/mpeg',
+          mimeType: MIME_TYPES[format] || 'audio/mpeg',
         },
       };
     } catch (error) {
-      // Clean up temp files on error
       try { fs.unlinkSync(inputPath); } catch {}
       try { fs.unlinkSync(outputPath); } catch {}
-      
+
       logger.error('Video audio extraction error', { error: error.message });
       throw error;
     }
   }
 
   async extractKeyframes(input, options, onProgress) {
-    const { fps = 1, format = 'jpeg', max_dimension = 1024 } = options;
+    const { fps = 1, max_dimension = 1024 } = options;
 
     const inputId = uuidv4();
     const outputId = uuidv4();
-    
+
     const inputExt = this._detectInputExtension(input);
     const inputPath = path.join(config.cacheDir, `input-${inputId}.${inputExt}`);
-    
-    // For keyframes, we use a directory and collect all frames
-    const outputDir = path.join(config.cacheDir, `frames-${outputId}`);
-    const outputPattern = path.join(outputDir, 'frame_%04d.jpg');
 
     try {
       onProgress?.(10, 'Preparing video');
-
-      // Create output directory
-      fs.mkdirSync(outputDir, { recursive: true });
-
-      // Write input buffer to temp file
       fs.writeFileSync(inputPath, input);
 
+      // Probe to get duration and video stream info
       onProgress?.(15, `Extracting keyframes at ${fps} fps`);
+      const probeResult = nVideo.probe(inputPath);
+      const videoStream = probeResult.streams.find(s => s.type === 'video');
+      if (!videoStream) {
+        throw new Error('No video stream found in file');
+      }
 
-      // Extract keyframes with FFmpeg
-      const result = await extractKeyframes({
-        inputPath,
-        outputPath: outputPattern,
-        fps,
-        maxDimension: max_dimension,
-        onProgress: (percent, metadata) => {
-          // Map FFmpeg progress (0-100) to our range (15-85)
-          const mappedPercent = 15 + Math.round(percent * 0.7);
-          onProgress?.(mappedPercent, `Extracted ${metadata.frame || 0} frames`);
-        },
-      });
+      const duration = probeResult.format.duration;
+      const frameWidth = Math.min(max_dimension, videoStream.width);
+      const frameInterval = 1 / fps;
+      const frameCount = Math.floor(duration * fps);
+
+      const frames = [];
+      for (let i = 0; i < frameCount; i++) {
+        const timestamp = i * frameInterval;
+        const progress = 15 + Math.round((i / frameCount) * 70);
+        onProgress?.(progress, `Extracted ${i + 1}/${frameCount} frames`);
+
+        const thumb = nVideo.thumbnail(inputPath, {
+          timestamp,
+          width: frameWidth,
+        });
+
+        // thumb is { width, height, data: Uint8Array } in RGB24 format
+        const jpegBuffer = await this._rgbToJpeg(thumb.data, thumb.width, thumb.height);
+        frames.push(jpegBuffer);
+      }
 
       onProgress?.(85, 'Collecting frames');
 
-      // Read all extracted frames
-      const frameFiles = fs.readdirSync(outputDir)
-        .filter(f => f.endsWith('.jpg'))
-        .sort();
+      // Return first frame as buffer (matching current API)
+      const firstFrame = frames.length > 0 ? frames[0] : Buffer.alloc(0);
 
-      const frameCount = frameFiles.length;
-      
-      if (frameCount === 0) {
-        throw new Error('No frames were extracted from the video');
-      }
-
-      // For now, return the first frame as the result
-      // Future: Could return a ZIP of all frames or a sprite sheet
-      const firstFramePath = path.join(outputDir, frameFiles[0]);
-      const outputBuffer = fs.readFileSync(firstFramePath);
-
-      // Clean up temp files and directory
-      try {
-        fs.unlinkSync(inputPath);
-      } catch (err) {
-        logger.debug('Failed to clean up input file', { error: err.message });
-      }
-      
-      // Clean up output directory and all frames
-      try {
-        for (const file of frameFiles) {
-          fs.unlinkSync(path.join(outputDir, file));
-        }
-        fs.rmdirSync(outputDir);
-      } catch (err) {
-        logger.debug('Failed to clean up frames directory', { error: err.message });
-      }
+      try { fs.unlinkSync(inputPath); } catch {}
 
       onProgress?.(100, 'Complete');
 
       logger.info('Keyframes extracted from video', {
         originalSize: input.length,
-        frameCount,
-        outputSize: outputBuffer.length,
+        frameCount: frames.length,
+        outputSize: firstFrame.length,
       });
 
       return {
-        buffer: outputBuffer,
+        buffer: firstFrame,
         metadata: {
           originalSize: input.length,
-          frameCount,
+          frameCount: frames.length,
           mode: 'extract_keyframes',
-          format,
+          format: 'jpeg',
           fps,
           maxDimension: max_dimension,
           mimeType: 'image/jpeg',
         },
+        frames, // All frames available for future use
       };
     } catch (error) {
-      // Clean up temp files on error
       try { fs.unlinkSync(inputPath); } catch {}
-      try {
-        if (fs.existsSync(outputDir)) {
-          const files = fs.readdirSync(outputDir);
-          for (const file of files) {
-            fs.unlinkSync(path.join(outputDir, file));
-          }
-          fs.rmdirSync(outputDir);
-        }
-      } catch {}
-      
+
       logger.error('Video keyframe extraction error', { error: error.message });
       throw error;
     }
   }
 
-  /**
-   * Detect input file extension from buffer magic bytes
-   * @param {Buffer} buffer
-   * @returns {string}
-   */
+  async _rgbToJpeg(rgbData, width, height) {
+    // nVideo thumbnail returns RGB24 data, convert to JPEG using nImage
+    // nImage expects ImageData-like object: { data, width, height, channels }
+    return await nImage({
+      data: rgbData,
+      width,
+      height,
+      channels: 3
+    }).jpeg({ quality: 85 }).toBuffer();
+  }
+
   _detectInputExtension(buffer) {
     if (buffer.length < 12) return 'bin';
-    
+
     const magic = buffer.slice(0, 12).toString('hex').toUpperCase();
-    
-    // MP4 (ftyp)
+
     if (buffer.slice(4, 8).toString('hex').toUpperCase() === '66747970') {
-      // Check for specific brands
       const brand = buffer.slice(8, 12).toString('ascii');
       if (brand.startsWith('qt')) return 'mov';
       return 'mp4';
     }
-    
-    // WebM (matroska)
+
     if (magic.startsWith('1A45DFA3')) return 'webm';
-    
-    // AVI (RIFF....AVI )
     if (magic.startsWith('52494646') && magic.includes('41564920')) return 'avi';
-    
-    // MKV (matroska)
-    if (magic.startsWith('1A45DFA3')) return 'mkv';
-    
-    // MOV (ftypqt)
     if (buffer.slice(4, 10).toString('ascii') === 'ftypqt') return 'mov';
-    
+
     return 'bin';
   }
 }
