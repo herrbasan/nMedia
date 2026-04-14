@@ -5,7 +5,6 @@ export function initImagePage(element, nui) {
     let currentFile = null;
     let processedData = null;
 
-    const dropzone = element.querySelector('#image-dropzone');
     const selectBtn = element.querySelector('#select-image-btn');
     const optionsSection = element.querySelector('#image-options');
     const qualitySlider = element.querySelector('#quality');
@@ -21,16 +20,6 @@ export function initImagePage(element, nui) {
     selectBtn?.addEventListener('nui-file-selected', (e) => {
         if (e.detail.files.length > 0) {
             handleFile(e.detail.files[0]).catch(err => {
-                console.error('handleFile error:', err);
-            });
-        }
-    });
-
-    dropzone?.addEventListener('nui-dropzone-drop', (e) => {
-        e.preventDefault();
-        const files = e.detail.dataTransfer.files;
-        if (files.length > 0) {
-            handleFile(files[0]).catch(err => {
                 console.error('handleFile error:', err);
             });
         }

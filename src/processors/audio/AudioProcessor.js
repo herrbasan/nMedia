@@ -92,6 +92,10 @@ class AudioProcessor extends Processor {
                 return;
               }
 
+              console.log('=== FFPROBE AUDIO STREAM ===');
+              console.log(JSON.stringify(audioStream, null, 2));
+              console.log('============================');
+
               resolve({
                 duration: metadata.format.duration ? parseFloat(metadata.format.duration) : null,
                 bitrate: metadata.format.bit_rate ? parseInt(metadata.format.bit_rate) : null,
@@ -100,7 +104,7 @@ class AudioProcessor extends Processor {
                 channels: audioStream.channels,
                 channelLayout: audioStream.channel_layout,
                 codec: audioStream.codec_name,
-                bitDepth: audioStream.bits_per_sample,
+                bitDepth: audioStream.bits_per_sample || audioStream.bits_per_raw_sample || null,
               });
             } catch (err) {
               reject(new Error(`Failed to parse ffprobe output: ${err.message}`));

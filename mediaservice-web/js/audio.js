@@ -6,7 +6,6 @@ export function initAudioPage(element, nui) {
     let processedData = null;
     let sourceMetadata = null;
 
-    const dropzone = element.querySelector('#audio-dropzone');
     const selectBtn = element.querySelector('#select-audio-btn');
     const optionsSection = element.querySelector('#audio-options');
     const processBtn = element.querySelector('#process-audio-btn');
@@ -16,16 +15,6 @@ export function initAudioPage(element, nui) {
     selectBtn?.addEventListener('nui-file-selected', (e) => {
         if (e.detail.files.length > 0) {
             handleFile(e.detail.files[0]).catch(err => {
-                console.error('handleFile error:', err);
-            });
-        }
-    });
-
-    dropzone?.addEventListener('nui-dropzone-drop', (e) => {
-        e.preventDefault();
-        const files = e.detail.dataTransfer.files;
-        if (files.length > 0) {
-            handleFile(files[0]).catch(err => {
                 console.error('handleFile error:', err);
             });
         }
@@ -90,6 +79,11 @@ export function initAudioPage(element, nui) {
         }
         
         const result = await response.json();
+        console.log('=== AUDIO PROBE RESPONSE ===');
+        console.log('Status:', response.status);
+        console.log('Headers:', Object.fromEntries(response.headers.entries()));
+        console.log('Full response body:', JSON.stringify(result, null, 2));
+        console.log('===========================');
         sourceMetadata = result.metadata;
         
         if (!sourceMetadata) return;

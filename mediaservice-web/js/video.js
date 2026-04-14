@@ -6,7 +6,6 @@ export function initVideoPage(element, nui) {
     let processedData = null;
     let originalVideoUrl = null;
 
-    const dropzone = element.querySelector('#video-dropzone');
     const selectBtn = element.querySelector('#select-video-btn');
     const optionsSection = element.querySelector('#video-options');
     const modeSelect = element.querySelector('#video-mode-select');
@@ -31,16 +30,6 @@ export function initVideoPage(element, nui) {
     selectBtn?.addEventListener('nui-file-selected', (e) => {
         if (e.detail.files.length > 0) {
             handleFile(e.detail.files[0]).catch(err => {
-                console.error('handleFile error:', err);
-            });
-        }
-    });
-
-    dropzone?.addEventListener('nui-dropzone-drop', (e) => {
-        e.preventDefault();
-        const files = e.detail.dataTransfer.files;
-        if (files.length > 0) {
-            handleFile(files[0]).catch(err => {
                 console.error('handleFile error:', err);
             });
         }

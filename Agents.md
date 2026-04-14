@@ -50,6 +50,9 @@ Test assets are located in `/tests/assets/`:
 ## Service Management
 - **Do Not Start/Restart Service:** Never start, restart, or stop the Media Service on your own. If the service needs to be started or restarted, ask the user to do it.
 
+## Development Environment
+- **FiveServer Live Reload:** The health check endpoint (`/health`) writes to `/logs` on every call. FiveServer's file watcher detects these log writes and triggers constant page reloads. This is resolved by `fiveserver.config.cjs` which ignores `/logs/` and `/cache/` directories. If live reload loops occur, verify the config exists and restart FiveServer.
+
 ## Bundled Submodules
 
 This project uses git submodules located in `/modules`. These are all **our own projects** and can be enhanced if needed:

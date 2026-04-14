@@ -4,23 +4,12 @@
 </header>
 
 <section>
-    <nui-card>
-        <div class="nui-headline">Upload Image</div>
-        <div style="position: relative; min-height: 12rem; margin: 1rem 0;">
-            <nui-dropzone id="image-dropzone">
-                <div data-drop="image">Drop File Here</div>
-            </nui-dropzone>
-        </div>
-        <p style="text-align: center; color: var(--nui-text-muted);">or click to select a file</p>
-        <nui-button-container align="center">
-            <nui-button id="select-image-btn">
-                <input type="file" class="nui-hidden" id="image-file-input">
-                <button type="button">
-                    <nui-icon name="upload">↑</nui-icon> Select Image
-                </button>
-            </nui-button>
-        </nui-button-container>
-    </nui-card>
+    <nui-button id="select-image-btn">
+        <input type="file" class="nui-hidden" id="image-file-input">
+        <button type="button">
+            <nui-icon name="upload">↑</nui-icon> Select Image File
+        </button>
+    </nui-button>
 </section>
 
 <section id="image-options" style="display: none;">
