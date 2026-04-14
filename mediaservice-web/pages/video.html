@@ -37,9 +37,10 @@
                         <select>
                             <option value="extract_audio" selected>Extract Audio Track</option>
                             <option value="extract_keyframes">Extract Keyframes</option>
+                            <option value="transcode">Transcode Video</option>
                         </select>
                     </nui-select>
-                    <span class="description">Choose what to extract from the video</span>
+                    <span class="description">Choose what to extract or convert</span>
                 </nui-input-group>
 
                 <div id="keyframe-options" style="display: none;">
@@ -57,6 +58,91 @@
                             <input type="number" id="video-max-dimension" value="1024" min="64" max="2048" step="64">
                         </nui-input>
                         <span class="description">Max size for extracted frames</span>
+                    </nui-input-group>
+                </div>
+
+                <div id="transcode-options" style="display: none;">
+                    <nui-input-group>
+                        <label>Output Container</label>
+                        <nui-select id="output-format-select">
+                            <select>
+                                <option value="mp4" selected>MP4</option>
+                                <option value="webm">WebM</option>
+                                <option value="mkv">MKV</option>
+                                <option value="mov">MOV</option>
+                            </select>
+                        </nui-select>
+                    </nui-input-group>
+
+                    <nui-input-group>
+                        <label>Video Codec</label>
+                        <nui-select id="video-codec-select">
+                            <select>
+                                <option value="libx264" selected>H.264 (CPU)</option>
+                                <option value="libx265">H.265/HEVC (CPU)</option>
+                                <option value="h264_nvenc">H.264 (NVENC GPU)</option>
+                                <option value="hevc_nvenc">HEVC (NVENC GPU)</option>
+                                <option value="h264_vaapi">H.264 (VAAPI)</option>
+                                <option value="hevc_vaapi">HEVC (VAAPI)</option>
+                                <option value="h264_qsv">H.264 (QuickSync)</option>
+                                <option value="hevc_qsv">HEVC (QuickSync)</option>
+                            </select>
+                        </nui-select>
+                        <span class="description">GPU codecs require compatible hardware</span>
+                    </nui-input-group>
+
+                    <nui-input-group>
+                        <label>Width (px, optional)</label>
+                        <nui-input>
+                            <input type="number" id="transcode-width" value="" min="64" max="4096" step="2" placeholder="Source width">
+                        </nui-input>
+                        <span class="description">Leave empty to keep source width. Height auto-calculated if only one set.</span>
+                    </nui-input-group>
+
+                    <nui-input-group>
+                        <label>Height (px, optional)</label>
+                        <nui-input>
+                            <input type="number" id="transcode-height" value="" min="64" max="4096" step="2" placeholder="Source height">
+                        </nui-input>
+                        <span class="description">Leave empty to keep source height</span>
+                    </nui-input-group>
+
+                    <nui-input-group>
+                        <label>Quality (CRF)</label>
+                        <nui-slider>
+                            <input type="range" id="crf" min="0" max="51" value="23" step="1">
+                        </nui-slider>
+                        <span class="description">CRF: <span id="crf-value">23</span> (0=lossless, 51=worst, 18-28=good)</span>
+                    </nui-input-group>
+
+                    <nui-input-group>
+                        <label>Encoding Preset</label>
+                        <nui-select id="preset-select">
+                            <select>
+                                <option value="ultrafast">Ultrafast</option>
+                                <option value="superfast">Superfast</option>
+                                <option value="veryfast">Veryfast</option>
+                                <option value="faster">Faster</option>
+                                <option value="fast">Fast</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="slow">Slow</option>
+                                <option value="slower">Slower</option>
+                                <option value="veryslow">Veryslow</option>
+                            </select>
+                        </nui-select>
+                        <span class="description">Slower = better quality/size, takes longer</span>
+                    </nui-input-group>
+
+                    <nui-input-group>
+                        <label>Audio Codec</label>
+                        <nui-select id="audio-codec-select">
+                            <select>
+                                <option value="aac" selected>AAC</option>
+                                <option value="libmp3lame">MP3</option>
+                                <option value="libopus">Opus</option>
+                                <option value="copy">Copy (no re-encode)</option>
+                            </select>
+                        </nui-select>
                     </nui-input-group>
                 </div>
 

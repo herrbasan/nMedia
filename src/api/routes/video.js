@@ -26,10 +26,19 @@ export async function handleVideo(ctx) {
 
     const options = {
       mode: ctx.body.mode || 'extract_audio',
-      fps: parseInt(ctx.body.fps) || 1,
+      fps: ctx.body.fps ? parseInt(ctx.body.fps) : undefined,
       format: ctx.body.format || 'jpeg',
-      max_dimension: parseInt(ctx.body.max_dimension) || 1024,
+      max_dimension: ctx.body.max_dimension ? parseInt(ctx.body.max_dimension) : undefined,
       response_type: ctx.body.response_type || 'base64',
+      // Transcode options
+      output_format: ctx.body.output_format,
+      video_codec: ctx.body.video_codec,
+      audio_codec: ctx.body.audio_codec,
+      width: ctx.body.width ? parseInt(ctx.body.width) : undefined,
+      height: ctx.body.height ? parseInt(ctx.body.height) : undefined,
+      crf: ctx.body.crf ? parseInt(ctx.body.crf) : undefined,
+      preset: ctx.body.preset,
+      audio_bitrate: ctx.body.audio_bitrate ? parseInt(ctx.body.audio_bitrate) : undefined,
     };
 
     const responseType = ctx.body.response_type || 'base64';
@@ -55,6 +64,19 @@ export async function handleVideo(ctx) {
           format: result.metadata.format,
           base64: `data:${result.metadata.mimeType};base64,${base64}`,
         });
+      } else if (options.mode === 'transcode') {
+        const base64 = result.buffer.toString('base64');
+        ctx.json(200, {
+          original_size_bytes: originalSize,
+          output_size_bytes: result.metadata.outputSize,
+          mode: result.metadata.mode,
+          output_format: result.metadata.outputFormat,
+          video_codec: result.metadata.videoCodec,
+          audio_codec: result.metadata.audioCodec,
+          dimensions: result.metadata.dimensions,
+          duration: result.metadata.duration,
+          base64: `data:${result.metadata.mimeType};base64,${base64}`,
+        });
       } else {
         ctx.json(200, {
           original_size_bytes: originalSize,
@@ -66,6 +88,9 @@ export async function handleVideo(ctx) {
     } else {
       if (options.mode === 'extract_audio') {
         ctx.send(200, result.buffer, result.metadata.mimeType, 'audio.mp3');
+      } else if (options.mode === 'transcode') {
+        const ext = result.metadata.outputFormat || 'mp4';
+        ctx.send(200, result.buffer, result.metadata.mimeType, `transcoded.${ext}`);
       } else {
         ctx.send(200, result.buffer, 'image/jpeg', 'frames.jpg');
       }
