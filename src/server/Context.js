@@ -110,6 +110,7 @@ export class Context {
    * @param {Object} data - Response data
    */
   json(statusCode, data) {
+    if (this.#res.headersSent) return;
     const body = JSON.stringify(data);
     this.#res.writeHead(statusCode, {
       'Content-Type': 'application/json; charset=utf-8',
@@ -128,6 +129,7 @@ export class Context {
    * @param {string} [filename] - Optional Content-Disposition filename
    */
   send(statusCode, buffer, mimeType, filename) {
+    if (this.#res.headersSent) return;
     const headers = {
       'Content-Type': mimeType,
       'Content-Length': buffer.length,
@@ -156,6 +158,11 @@ export class Context {
    * @param {string} message - Error message
    */
   error(statusCode, message) {
+    if (this.#res.headersSent) {
+      logger.error('Request error (headers already sent)', { statusCode, message, path: this.path });
+      this.#res.destroy();
+      return;
+    }
     logger.error('Request error', { statusCode, message, path: this.path });
     this.json(statusCode, { error: message });
   }

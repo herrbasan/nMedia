@@ -145,7 +145,7 @@ async function handleVideoUpload(ctx, options) {
 
   // For file-to-file (streamed upload), write directly to output
   if (inputPath && responseType === 'file') {
-    const jobId = ctx.createSseJob();
+    // No SSE - can't mix SSE headers with file streaming on same connection
     const outputExt = options.mode === 'transcode' ? (options.output_format || 'mp4') : (options.format || 'mp3');
     const outputPath = path.join(config.cacheDir, `output-${uuidv4()}.${outputExt}`);
 
@@ -155,7 +155,7 @@ async function handleVideoUpload(ctx, options) {
       output_path: outputPath,
     };
 
-    const result = await PipelineExecutor.execute('video', null, processorOptions, ProgressReporter, jobId);
+    const result = await PipelineExecutor.execute('video', null, processorOptions, ProgressReporter, null);
 
     ctx.send(200, fs.readFileSync(result.outputPath), result.metadata.mimeType, `processed.${outputExt}`);
 
@@ -170,12 +170,10 @@ async function handleVideoUpload(ctx, options) {
     inputBuffer = fs.readFileSync(inputPath);
   }
 
-  // For synchronous (base64) responses, don't open SSE - just process and return
-  // For file responses, open SSE for progress tracking
-  let jobId = null;
-  if (responseType !== 'base64') {
-    jobId = ctx.createSseJob();
-  }
+  // For file responses, don't open SSE - can't mix SSE headers with file streaming
+  // For base64 responses, no SSE needed either (synchronous)
+  // SSE is only useful for async/file-to-file workflows with separate progress endpoint
+  const jobId = null;
 
   // Execute processing
   const result = await PipelineExecutor.execute('video', inputBuffer, options, ProgressReporter, jobId);

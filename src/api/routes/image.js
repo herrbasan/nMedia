@@ -41,11 +41,8 @@ export async function handleImage(ctx) {
 
     const responseType = ctx.body.response_type || 'base64';
 
-    // Only use SSE for progress reporting if not requesting base64 response
-    let jobId = null;
-    if (responseType !== 'base64') {
-      jobId = ctx.createSseJob();
-    }
+    // Don't open SSE - can't mix SSE headers with file streaming
+    const jobId = null;
 
     // Execute processing
     const result = await PipelineExecutor.execute('image', inputBuffer, options, ProgressReporter, jobId);
