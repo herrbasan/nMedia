@@ -71,15 +71,15 @@ Target: nVideo `transcode()` or `extractAudio()` → callback progress → outpu
 
 **Bug:** When decoder's `ch_layout.u.mask` is 0 (common for WAV files), the abuffer filter receives `channel_layout=0x0` which is invalid. Fix: derive channel layout from channel count when mask is 0.
 
-### Phase 3: VideoProcessor Rewrite
+### Phase 3: VideoProcessor Rewrite ✅ COMPLETE
 
 Current: FFmpeg CLI → `spawn('ffmpeg', [...])` for extract_audio or extract_keyframes
 Target: nVideo `extractAudio()` / `thumbnail()` / `transcode()`
 
 **Methods to implement:**
-- `extractAudio(buffer, options)` → Use nVideo `extractAudio()`
-- `extractKeyframes(buffer, options)` → Use nVideo `thumbnail()` in a loop at calculated timestamps, or `transcode()` with video filter
-- Progress callback → Map nVideo `onProgress` to our `onProgress` interface
+- `extractAudio(buffer, options)` → Use nVideo `extractAudio()` ✅ DONE
+- `extractKeyframes(buffer, options)` → Use nVideo `thumbnail()` in a loop at calculated timestamps ✅ DONE
+- Progress callback → Map nVideo `onProgress` to our `onProgress` interface ✅ DONE
 
 **Key mapping:**
 | Current Option | nVideo Equivalent |
@@ -87,6 +87,10 @@ Target: nVideo `extractAudio()` / `thumbnail()` / `transcode()`
 | `mode: extract_audio` | `extractAudio()` |
 | `mode: extract_keyframes` + `fps` | Loop `thumbnail()` at `timestamp = n/fps` |
 | `max_dimension` | `thumbnail()` width parameter |
+
+**Status:** VideoProcessor.js rewritten. Both modes working:
+- extract_audio: 52MB MOV → 138KB MP3
+- extract_keyframes: 8 frames at 640px width, RGB→JPEG via nImage
 
 ### Phase 4: Cleanup
 
