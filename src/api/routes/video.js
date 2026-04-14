@@ -122,6 +122,14 @@ async function handleVideoUpload(ctx, options) {
 
   const responseType = ctx.body.response_type || 'base64';
 
+  logger.info('Video upload request', {
+    responseType,
+    mode: options.mode,
+    hasFile: !!ctx.file,
+    fileSize: ctx.file?.size,
+    allFields: Object.keys(ctx.body || {}),
+  });
+
   // For synchronous (base64) responses, don't open SSE - just process and return
   // For file responses, open SSE for progress tracking
   let jobId = null;
