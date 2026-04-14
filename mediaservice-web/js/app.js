@@ -3,13 +3,15 @@ import { initAudioPage } from './audio.js';
 import { initImagePage } from './image.js';
 import { initVideoPage } from './video.js';
 import { initSettingsPage } from './settings.js';
+import { initTestsPage } from './tests.js';
 
 
 window.app = {
     'initAudioPage': initAudioPage,
     'initImagePage': initImagePage,
     'initVideoPage': initVideoPage,
-    'initSettingsPage': initSettingsPage
+    'initSettingsPage': initSettingsPage,
+    'initTestsPage': initTestsPage
 }
 
 const navigationData = [
@@ -38,6 +40,16 @@ const navigationData = [
             {
                 "label": "Preferences",
                 "href": "#page=settings"
+            }
+        ]
+    },
+    {
+        "label": "Testing",
+        "icon": "bug_report",
+        "items": [
+            {
+                "label": "API Tests",
+                "href": "#page=tests"
             }
         ]
     }

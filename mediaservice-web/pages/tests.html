@@ -1,0 +1,49 @@
+<div class="page-tests">
+<header>
+    <h2><nui-icon name="bug_report">🧪</nui-icon> API Tests</h2>
+    <p class="lead">Automated tests for Media Service endpoints</p>
+</header>
+
+<section>
+    <nui-card>
+        <div class="nui-headline">Test Controls</div>
+        <nui-button-container align="start" style="gap: 0.5rem; flex-wrap: wrap;">
+            <nui-button variant="primary" id="run-all-tests-btn">
+                <button type="button">
+                    <nui-icon name="play_arrow">▶</nui-icon> Run All Tests
+                </button>
+            </nui-button>
+            <nui-button id="test-health-btn">
+                <button type="button">
+                    <nui-icon name="health_and_safety">♥</nui-icon> Health Check
+                </button>
+            </nui-button>
+            <nui-button id="test-image-btn">
+                <button type="button">
+                    <nui-icon name="image">🖼</nui-icon> Image Processor
+                </button>
+            </nui-button>
+            <nui-button id="test-audio-btn">
+                <button type="button">
+                    <nui-icon name="speaker">🔊</nui-icon> Audio Processor
+                </button>
+            </nui-button>
+            <nui-button id="test-video-btn">
+                <button type="button">
+                    <nui-icon name="videocam">🎬</nui-icon> Video Processor
+                </button>
+            </nui-button>
+        </nui-button-container>
+    </nui-card>
+</section>
+
+<section id="test-results-section" style="display: none;">
+    <nui-card>
+        <div class="nui-headline">Test Results</div>
+        <div id="test-summary" style="display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;"></div>
+        <div id="test-results"></div>
+    </nui-card>
+</section>
+
+<script type="nui/page">function init(element, params, nui) { app.initTestsPage(element, nui)}</script>
+</div>
