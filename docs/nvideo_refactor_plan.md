@@ -104,7 +104,7 @@ Target: nVideo `extractAudio()` / `thumbnail()` / `transcode()`
 
 **Net result:** 1004 lines of FFmpeg CLI code removed
 
-### Phase 5: Worker Mode Implementation
+### Phase 5: Worker Mode Implementation ✅ COMPLETE
 
 Add configurable execution mode for audio/video processing:
 
@@ -118,22 +118,22 @@ Add configurable execution mode for audio/video processing:
 ```
 
 **Queue Mode** (default, current behavior):
-- Tasks processed via TaskQueue → Worker → PipelineExecutor
-- nVideo runs on main thread, serialized by queue
-- Lower memory, simpler architecture
+- Tasks processed via TaskQueue → TaskWorker → PipelineExecutor on main thread
+- Serialized execution, lower memory footprint
 - Event loop blocked during processing (acceptable for sync endpoints)
 
 **Thread Mode** (new):
 - Each task spawns a Node.js `worker_thread`
-- nVideo runs synchronously in worker, event loop stays free
+- nVideo/nImage runs in worker, main event loop stays free
 - True parallelism bounded by `maxConcurrentTasks`
-- Requires: worker bootstrap script, `parentPort` message passing, error propagation
+- Worker bootstrap: `src/tasks/TaskWorker.js`
+- Message protocol: `{ type: 'process', mediaType, inputBuffer, options, cacheDir }` → `{ type: 'progress' }` | `{ type: 'complete', result }` | `{ type: 'error', message }`
 
 **Implementation:**
-1. Create `src/tasks/TaskWorker.js` - worker_thread bootstrap
-2. Modify `src/tasks/Worker.js` - spawn worker_thread when mode is "thread"
-3. Message protocol: `{ type: 'process', mediaType, inputPath, outputPath, options }` → `{ type: 'progress', percent, metadata }` | `{ type: 'complete', result }` | `{ type: 'error', message }`
-4. Progress forwarding: worker sends progress → main thread relays to SSE
+1. ✅ Create `src/tasks/TaskWorker.js` - worker_thread bootstrap with audio/video/image processing
+2. ✅ Modify `src/tasks/Worker.js` → renamed to `TaskWorker` class, supports both modes
+3. ✅ Update `src/tasks/TaskManager.js` - passes mode config to workers
+4. ✅ Verified both modes start without errors
 
 ### Phase 6: Documentation
 

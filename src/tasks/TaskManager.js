@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from '../utils/uuid.js';
 import { Task, TaskStatus } from './Task.js';
 import { TaskStore } from './TaskStore.js';
 import { TaskQueue } from './TaskQueue.js';
-import { Worker } from './Worker.js';
+import { TaskWorker } from './Worker.js';
 import ProgressReporter from '../pipeline/ProgressReporter.js';
 import logger from '../utils/logger.js';
 import config from '../config/config.js';
@@ -35,10 +35,11 @@ class TaskManager {
    * @private
    */
   _createWorkers() {
+    const mode = config.workersMode || 'queue';
     for (let i = 0; i < config.maxConcurrentTasks; i++) {
-      this.workers.push(new Worker(`worker-${i}`, this.queue, this.store));
+      this.workers.push(new TaskWorker(`worker-${i}`, this.queue, this.store, mode));
     }
-    logger.info(`Created ${this.workers.length} workers`);
+    logger.info(`Created ${this.workers.length} workers (mode: ${mode})`);
   }
 
   /**
