@@ -6,13 +6,12 @@ import logger from '../utils/logger.js';
 
 /**
  * Streaming multipart/form-data parser.
- * Pipes the entire request to a temp file, then parses it.
- * Zero memory buffering - handles files of any size.
+ * Pipes request to temp file, then parses with boundary detection.
+ * Uses \r\n-prefixed boundary search to avoid false matches in binary data.
  */
 export class MultipartParser {
   constructor(boundary) {
-    this.boundary = `--${boundary}`;
-    this.boundaryEnd = `--${boundary}--`;
+    this.boundary = boundary;
   }
 
   async parse(req) {
@@ -30,40 +29,49 @@ export class MultipartParser {
 
     const fileSize = fs.statSync(tempPath).size;
     logger.info(`Multipart request piped to disk: ${fileSize} bytes`);
-    const fd = fs.openSync(tempPath, 'r');
     
     try {
-      // Read file in chunks to find boundaries
-      const boundaryBuf = Buffer.from(this.boundary);
-      const boundaryEndBuf = Buffer.from(this.boundaryEnd);
-      const CRLF = Buffer.from('\r\n');
+      return this._parseFile(tempPath, fileSize, parts);
+    } finally {
+      try { fs.unlinkSync(tempPath); } catch {}
+    }
+  }
+
+  _parseFile(filePath, fileSize, parts) {
+    const fd = fs.openSync(filePath, 'r');
+    
+    try {
+      // Read first 2KB to find boundary and parse initial parts
+      const headerBuf = this._readBuffer(fd, 0, Math.min(4096, fileSize));
+      if (!headerBuf) return parts;
       
-      let pos = 0;
-      
-      // Find first boundary
-      const firstBoundaryPos = this._findInFile(fd, boundaryBuf, pos, 8192);
-      if (firstBoundaryPos === -1) {
+      // Find first boundary: --boundary
+      const boundaryStr = `--${this.boundary}`;
+      const firstBoundaryIdx = headerBuf.indexOf(boundaryStr);
+      if (firstBoundaryIdx === -1) {
+        logger.error('No boundary found in multipart request');
         return parts;
       }
-      pos = firstBoundaryPos + boundaryBuf.length;
       
-      while (pos < fileSize) {
-        // Skip CRLF after boundary
-        const crlfCheck = this._readBuffer(fd, pos, 2);
-        if (crlfCheck && crlfCheck[0] === 13 && crlfCheck[1] === 10) {
+      let pos = firstBoundaryIdx + boundaryStr.length;
+      
+      // Parse each part
+      while (pos < fileSize - 100) {
+        // Skip \r\n after boundary
+        const afterBoundary = this._readBuffer(fd, pos, 2);
+        if (afterBoundary && afterBoundary[0] === 13 && afterBoundary[1] === 10) {
           pos += 2;
         }
         
-        // Read headers (max 4KB should be enough)
-        const headerBuf = this._readBuffer(fd, pos, 4096);
-        if (!headerBuf) break;
+        // Read headers
+        const headerChunk = this._readBuffer(fd, pos, 4096);
+        if (!headerChunk) break;
         
-        const headerEndIdx = headerBuf.indexOf('\r\n\r\n');
+        const headerEndIdx = headerChunk.indexOf('\r\n\r\n');
         if (headerEndIdx === -1) break;
         
-        const headersStr = headerBuf.slice(0, headerEndIdx).toString('utf8');
-        const headerBytes = headerEndIdx + 4;
-        const bodyStart = pos + headerBytes;
+        const headersStr = headerChunk.slice(0, headerEndIdx).toString('utf8');
+        const bodyStart = pos + headerEndIdx + 4;
         
         // Parse headers
         const nameMatch = headersStr.match(/name="([^"]+)"/);
@@ -74,22 +82,69 @@ export class MultipartParser {
         const filename = filenameMatch ? filenameMatch[1] : null;
         const contentType = contentTypeMatch ? contentTypeMatch[1].trim() : 'application/octet-stream';
         
-        // Find next boundary
-        const nextBoundaryPos = this._findInFile(fd, boundaryBuf, bodyStart, 8192);
-        if (nextBoundaryPos === -1) break;
+        // Check if this is the end boundary
+        if (headersStr.includes(`--${this.boundary}--`)) {
+          break;
+        }
         
-        // Body ends at next boundary, minus trailing CRLF
-        let bodyEnd = nextBoundaryPos;
-        if (bodyEnd >= bodyStart + 2) {
-          const trailingCheck = this._readBuffer(fd, bodyEnd - 2, 2);
-          if (trailingCheck && trailingCheck[0] === 13 && trailingCheck[1] === 10) {
-            bodyEnd -= 2;
+        // Find the next boundary by reading from the END of the file backwards
+        // Read last 2KB to find the final boundary position
+        // For file parts, the body ends at: fileSize - len(\r\n--boundary--\r\n)
+        // For non-last parts, we need to find \r\n--boundary
+        
+        let bodyEnd;
+        const endBoundaryStr = `\r\n--${this.boundary}`;
+        const endBoundaryFull = `\r\n--${this.boundary}--`;
+        
+        // Check if this is the last part by looking at the end of the file
+        const tailBuf = this._readBuffer(fd, Math.max(0, fileSize - 200), 200);
+        const isLastPart = tailBuf && tailBuf.includes(`--${this.boundary}--`);
+        
+        if (isLastPart && !filename) {
+          // Last part is a text field
+          // Find where the end boundary starts
+          const endMarkerPos = this._findInFile(fd, Buffer.from(endBoundaryFull), bodyStart, 16384);
+          if (endMarkerPos === -1) {
+            bodyEnd = fileSize;
+          } else {
+            bodyEnd = endMarkerPos;
+            // Remove trailing \r\n
+            const trailingCheck = this._readBuffer(fd, bodyEnd - 2, 2);
+            if (trailingCheck && trailingCheck[0] === 13 && trailingCheck[1] === 10) {
+              bodyEnd -= 2;
+            }
+          }
+        } else if (filename) {
+          // File part - body ends at the last \r\n--boundary in the file
+          // Search backwards from end of file
+          const endMarkerPos = this._findBoundaryFromEnd(fd, endBoundaryStr, fileSize, 16384);
+          if (endMarkerPos === -1) {
+            bodyEnd = fileSize;
+          } else {
+            bodyEnd = endMarkerPos;
+            // Remove trailing \r\n before boundary
+            const trailingCheck = this._readBuffer(fd, bodyEnd - 2, 2);
+            if (trailingCheck && trailingCheck[0] === 13 && trailingCheck[1] === 10) {
+              bodyEnd -= 2;
+            }
+          }
+        } else {
+          // Non-file, non-last part - find next boundary
+          const nextBoundaryPos = this._findInFile(fd, Buffer.from(endBoundaryStr), bodyStart, 16384);
+          if (nextBoundaryPos === -1) {
+            bodyEnd = fileSize;
+          } else {
+            bodyEnd = nextBoundaryPos;
+            const trailingCheck = this._readBuffer(fd, bodyEnd - 2, 2);
+            if (trailingCheck && trailingCheck[0] === 13 && trailingCheck[1] === 10) {
+              bodyEnd -= 2;
+            }
           }
         }
         
         const bodyLength = bodyEnd - bodyStart;
         
-        if (filename) {
+        if (filename && bodyLength > 0) {
           // File part - extract to separate file
           const ext = path.extname(filename) || '.bin';
           const outputPath = path.join(config.cacheDir, `upload-${uuidv4()}${ext}`);
@@ -98,7 +153,7 @@ export class MultipartParser {
           
           const exists = fs.existsSync(outputPath);
           const size = exists ? fs.statSync(outputPath).size : 0;
-          logger.info(`Extracted file part: ${filename} → ${outputPath} (exists: ${exists}, size: ${size}, expected: ${bodyLength})`);
+          logger.info(`Extracted file: ${filename} (${bodyLength} bytes) → ${outputPath} (exists: ${exists}, actual: ${size})`);
           
           parts.files.push({
             fieldname: name,
@@ -106,28 +161,28 @@ export class MultipartParser {
             mimeType: contentType,
             size: bodyLength,
             tempPath: outputPath,
-            extracted: exists,
-            extractedSize: size,
           });
-        } else if (name) {
-          // Field part - read as string
-          const fieldBuf = this._readBuffer(fd, bodyStart, bodyLength);
+        } else if (name && bodyLength > 0) {
+          // Text field
+          const fieldBuf = this._readBuffer(fd, bodyStart, Math.min(bodyLength, 65536));
           if (fieldBuf) {
             parts.fields[name] = fieldBuf.toString('utf8');
           }
         }
         
-        pos = nextBoundaryPos + boundaryBuf.length;
+        // Move past this part's boundary
+        if (isLastPart) break;
         
-        // Check if this was the end boundary
-        const endCheck = this._readBuffer(fd, pos, 2);
-        if (endCheck && endCheck[0] === 45 && endCheck[1] === 45) {
-          break; // -- at end means this was --boundary--
-        }
+        const nextBoundaryPos = this._findInFile(fd, Buffer.from(endBoundaryStr), bodyEnd, 16384);
+        if (nextBoundaryPos === -1) break;
+        pos = nextBoundaryPos + endBoundaryStr.length;
+        
+        // Check for end boundary
+        const afterPos = this._readBuffer(fd, pos, 2);
+        if (afterPos && afterPos[0] === 45 && afterPos[1] === 45) break; // --
       }
     } finally {
       fs.closeSync(fd);
-      fs.unlinkSync(tempPath);
     }
     
     return parts;
@@ -136,51 +191,83 @@ export class MultipartParser {
   _readBuffer(fd, offset, length) {
     if (length <= 0) return null;
     const buf = Buffer.alloc(length);
-    const bytesRead = fs.readSync(fd, buf, 0, length, offset);
-    return bytesRead > 0 ? buf.slice(0, bytesRead) : null;
-  }
-
-  _findInFile(fd, pattern, startOffset, chunkSize) {
-    const searchBuf = Buffer.alloc(Math.min(chunkSize, 8192));
-    let pos = startOffset;
-    let carryBuf = Buffer.alloc(0);
-    
-    while (true) {
-      const bytesRead = fs.readSync(fd, searchBuf, 0, searchBuf.length, pos);
-      if (bytesRead === 0) return -1;
-      
-      const data = bytesRead < searchBuf.length ? searchBuf.slice(0, bytesRead) : searchBuf;
-      const combined = carryBuf.length > 0 ? Buffer.concat([carryBuf, data]) : data;
-      
-      const idx = combined.indexOf(pattern);
-      if (idx !== -1) {
-        return pos - carryBuf.length + idx;
-      }
-      
-      // Keep last (pattern.length - 1) bytes for next iteration
-      const keep = Math.min(combined.length, pattern.length - 1);
-      carryBuf = combined.slice(combined.length - keep);
-      pos += bytesRead;
+    try {
+      const bytesRead = fs.readSync(fd, buf, 0, length, offset);
+      return bytesRead > 0 ? buf.slice(0, bytesRead) : null;
+    } catch {
+      return null;
     }
   }
 
+  _findInFile(fd, pattern, startOffset, chunkSize) {
+    const searchBuf = Buffer.alloc(chunkSize);
+    let pos = startOffset;
+    let carryBuf = Buffer.alloc(0);
+    let iterations = 0;
+    const maxIterations = 100000; // Safety limit
+    
+    while (iterations < maxIterations) {
+      iterations++;
+      try {
+        const bytesRead = fs.readSync(fd, searchBuf, 0, searchBuf.length, pos);
+        if (bytesRead === 0) return -1;
+        
+        const data = bytesRead < searchBuf.length ? searchBuf.slice(0, bytesRead) : searchBuf;
+        const combined = carryBuf.length > 0 ? Buffer.concat([carryBuf, data]) : data;
+        
+        const idx = combined.indexOf(pattern);
+        if (idx !== -1) {
+          return pos - carryBuf.length + idx;
+        }
+        
+        const keep = Math.min(combined.length, pattern.length - 1);
+        carryBuf = combined.slice(combined.length - keep);
+        pos += bytesRead;
+      } catch {
+        return -1;
+      }
+    }
+    return -1;
+  }
+
+  _findBoundaryFromEnd(fd, boundaryStr, fileSize, chunkSize) {
+    // Read from end of file backwards to find boundary
+    const searchBuf = Buffer.alloc(chunkSize);
+    const readStart = Math.max(0, fileSize - chunkSize);
+    
+    try {
+      const bytesRead = fs.readSync(fd, searchBuf, 0, Math.min(chunkSize, fileSize), readStart);
+      if (bytesRead === 0) return -1;
+      
+      const data = searchBuf.slice(0, bytesRead);
+      const idx = data.lastIndexOf(boundaryStr);
+      if (idx !== -1) {
+        return readStart + idx;
+      }
+    } catch {}
+    
+    return -1;
+  }
+
   _copyFileRange(fd, offset, length, outputPath) {
-    const CHUNK_SIZE = 64 * 1024 * 1024; // 64MB chunks
+    const CHUNK_SIZE = 16 * 1024 * 1024; // 16MB chunks
     const writeFd = fs.openSync(outputPath, 'w');
     let remaining = length;
     let readPos = offset;
     const readBuf = Buffer.alloc(Math.min(CHUNK_SIZE, length));
     
-    while (remaining > 0) {
-      const toRead = Math.min(CHUNK_SIZE, remaining);
-      const bytesRead = fs.readSync(fd, readBuf, 0, toRead, readPos);
-      if (bytesRead === 0) break;
-      fs.writeSync(writeFd, readBuf, 0, bytesRead);
-      remaining -= bytesRead;
-      readPos += bytesRead;
+    try {
+      while (remaining > 0) {
+        const toRead = Math.min(CHUNK_SIZE, remaining);
+        const bytesRead = fs.readSync(fd, readBuf, 0, toRead, readPos);
+        if (bytesRead === 0) break;
+        fs.writeSync(writeFd, readBuf, 0, bytesRead);
+        remaining -= bytesRead;
+        readPos += bytesRead;
+      }
+    } finally {
+      fs.closeSync(writeFd);
     }
-    
-    fs.closeSync(writeFd);
   }
 }
 
