@@ -92,14 +92,17 @@ Target: nVideo `extractAudio()` / `thumbnail()` / `transcode()`
 - extract_audio: 52MB MOV → 138KB MP3
 - extract_keyframes: 8 frames at 640px width, RGB→JPEG via nImage
 
-### Phase 4: Cleanup
+### Phase 4: Cleanup ✅ COMPLETE
 
-1. Delete `src/utils/ffmpeg/` (index.js, parser.js, codecs.js)
-2. Remove `bin/ffmpeg.exe` and `bin/ffprobe.exe` from `.gitignore` / tracking
-3. Remove `@ffmpeg-installer/ffmpeg` from `package.json` dependencies
-4. Update `config.json` schema (remove `media.ffmpegPath`)
-5. Update `config/config.js` validation
-6. Update AGENTS.md documentation
+1. ✅ Delete `src/utils/ffmpeg/` (index.js, parser.js, codecs.js)
+2. ✅ Remove `bin/ffmpeg.exe` and `bin/ffprobe.exe` (deleted entire bin/ directory)
+3. ✅ Remove `@ffmpeg-installer/ffmpeg` from `package.json` dependencies
+4. ✅ Update `config.json` schema (removed `media.ffmpegPath`)
+5. ✅ Update `config/config.js` validation (removed getFfmpegPath, added workersMode)
+6. ✅ Delete `src/utils/HeifDecoder.js` (nImage handles HEIC natively)
+7. ✅ Update health check to use nVideo probe instead of verifyFfmpeg
+
+**Net result:** 1004 lines of FFmpeg CLI code removed
 
 ### Phase 5: Worker Mode Implementation
 
