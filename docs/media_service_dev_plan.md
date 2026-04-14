@@ -353,6 +353,37 @@ nVideo provides native progress callbacks (no stderr parsing):
 
 ---
 
+## 11. Known Issues & Technical Debt
+
+### Transport Architecture - Multipart Upload for Large Files
+
+**Problem:** The custom `MultipartParser` cannot reliably handle large file uploads (755MB+ video files).
+
+**Attempts made:**
+1. `Buffer.concat()` entire request → OOM (V8 string limit ~512MB)
+2. Pure `Buffer.indexOf()` operations → Still OOM on large buffers
+3. Stream-to-disk pipe, then parse temp file → Boundary detection fails (false matches in binary video data)
+4. `\r\n--boundary` prefix search → Still crashes on 755MB files
+5. Backwards search from file end → Works but brittle, edge cases with multi-part requests
+
+**Root cause:** Custom multipart parsing on multi-hundred-MB binary data is inherently fragile. The boundary string can appear in binary video/audio data, and scanning hundreds of megabytes for boundaries is slow and error-prone.
+
+**Proposed solutions for next session:**
+1. **File-to-file only API** - Client writes file to known path, sends `{input_path, output_path}` JSON request. No upload needed. This is the primary use case for Electron/Node.js clients.
+2. **Streaming upload to temp file** - Use a proper streaming multipart parser (like `busboy` or `formidable`) that doesn't buffer. Or implement a simpler binary protocol.
+3. **Separate upload endpoint** - `POST /v1/upload` streams to temp file, returns `file_id`. Then `POST /v1/process/{type}` uses `file_id`. Decouples upload from processing.
+4. **Raw binary upload** - `Content-Type: application/octet-stream` with file metadata in headers (`X-Original-Filename`, `X-Content-Type`). No multipart parsing needed.
+
+**Recommendation:** Option 1 (file-to-file) for programmatic clients, Option 4 (raw binary) for web uploads. Drop multipart entirely.
+
+### SSE + Response Conflict
+
+**Problem:** `createSseJob()` sends headers immediately, preventing subsequent `ctx.json()` or `ctx.send()` on the same connection.
+
+**Fix applied:** Removed SSE from all upload routes. Upload routes are now purely synchronous. SSE is only useful for async task workflows with separate progress endpoint.
+
+---
+
 ## 10. Recent Changes
 
 ### 2026-04-14 - nVideo Integration Pivot
