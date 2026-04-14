@@ -105,7 +105,7 @@ export function initVideoPage(element, nui) {
             const formData = new FormData();
             formData.append('file', currentFile);
             formData.append('mode', mode);
-            formData.append('response_type', 'base64');
+            formData.append('response_type', mode === 'transcode' ? 'file' : 'base64');
 
             if (mode === 'extract_keyframes') {
                 formData.append('fps', options.fps);
@@ -128,17 +128,23 @@ export function initVideoPage(element, nui) {
             processingDialog?.close();
 
             if (response.ok) {
-                const data = await response.json();
-                if (mode === 'extract_audio' && !data.base64) {
-                    nui.components.banner.show({
-                        content: 'Error: API response missing base64 field',
-                        priority: 'alert',
-                        placement: 'bottom',
-                        autoClose: 5000
-                    });
-                    return;
+                let data;
+                if (mode === 'transcode') {
+                    // File response - create blob URL
+                    const blob = await response.blob();
+                    const blobUrl = URL.createObjectURL(blob);
+                    data = {
+                        base64: blobUrl,
+                        original_size_bytes: currentFile.size,
+                        output_size_bytes: blob.size,
+                        mode: 'transcode',
+                        output_format: options.output_format,
+                    };
+                } else {
+                    data = await response.json();
                 }
-                if (mode === 'transcode' && !data.base64) {
+                
+                if (mode === 'extract_audio' && !data.base64) {
                     nui.components.banner.show({
                         content: 'Error: API response missing base64 field',
                         priority: 'alert',
@@ -310,14 +316,17 @@ export function initVideoPage(element, nui) {
         if (!processedData || !currentFile) return;
         
         const link = document.createElement('a');
-        link.href = processedData.base64;
-        
         const baseName = currentFile.name.replace(/\.[^/.]+$/, '');
+        
         if (processedData.mode === 'transcode') {
+            link.href = processedData.base64;
             const ext = processedData.output_format || 'mp4';
             link.download = `transcoded_${baseName}.${ext}`;
-        } else {
+        } else if (processedData.base64 && processedData.base64.startsWith('data:')) {
+            link.href = processedData.base64;
             link.download = `extracted_audio_${baseName}.mp3`;
+        } else {
+            return;
         }
         link.click();
     });
