@@ -47,8 +47,14 @@ class VideoProcessor extends Processor {
   }
 
   async process(input, options = {}, onProgress) {
-    const { mode = 'extract_audio' } = options;
+    const { mode = 'extract_audio', input_path, output_path } = options;
 
+    // File-to-file workflow
+    if (input_path && output_path) {
+      return this.processFileToFile(input_path, output_path, options, onProgress);
+    }
+
+    // Buffer-based workflow (upload)
     onProgress?.(5, `Starting video processing: ${mode}`);
 
     if (mode === 'extract_audio') {
@@ -58,6 +64,172 @@ class VideoProcessor extends Processor {
     } else {
       return this.transcodeVideo(input, options, onProgress);
     }
+  }
+
+  /**
+   * File-to-file processing - no buffer loading
+   * @param {string} inputPath - Absolute path to input file
+   * @param {string} outputPath - Absolute path to output file
+   * @param {Object} options - Processing options
+   * @param {Function} onProgress - Progress callback
+   */
+  async processFileToFile(inputPath, outputPath, options, onProgress) {
+    const { mode = 'extract_audio' } = options;
+
+    if (!fs.existsSync(inputPath)) {
+      throw new Error(`Input file not found: ${inputPath}`);
+    }
+
+    const outputDir = path.dirname(outputPath);
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    const inputStat = fs.statSync(inputPath);
+    onProgress?.(5, `File-to-file: ${mode}`);
+
+    if (mode === 'extract_audio') {
+      return this._extractAudioFromFile(inputPath, outputPath, options, onProgress, inputStat.size);
+    } else if (mode === 'transcode') {
+      return this._transcodeFileToFile(inputPath, outputPath, options, onProgress, inputStat.size);
+    } else {
+      throw new Error(`File-to-file mode '${mode}' not supported. Use 'extract_audio' or 'transcode'.`);
+    }
+  }
+
+  async _extractAudioFromFile(inputPath, outputPath, options, onProgress, inputSize) {
+    const { format = 'mp3' } = options;
+
+    onProgress?.(10, 'Extracting audio track');
+
+    await new Promise((resolve, reject) => {
+      nVideo.extractAudio(inputPath, outputPath, {
+        codec: AUDIO_CODECS[format],
+        bitrate: 128000,
+        cache: false,
+        onProgress: (p) => {
+          const mappedPercent = 10 + Math.round(p.percent * 0.8);
+          onProgress?.(mappedPercent, `Extracting: ${Math.round(p.percent)}%`);
+        },
+        onComplete: (result) => resolve(result),
+        onError: (error) => reject(new Error(error.message || 'nVideo extractAudio failed')),
+      });
+    });
+
+    const outputStat = fs.statSync(outputPath);
+
+    onProgress?.(100, 'Complete');
+
+    logger.info('Audio extracted from video (file-to-file)', {
+      inputPath,
+      outputPath,
+      inputSize,
+      outputSize: outputStat.size,
+    });
+
+    return {
+      outputPath,
+      metadata: {
+        originalSize: inputSize,
+        outputSize: outputStat.size,
+        mode: 'extract_audio',
+        format,
+        mimeType: MIME_TYPES[format] || 'audio/mpeg',
+      },
+    };
+  }
+
+  async _transcodeFileToFile(inputPath, outputPath, options, onProgress, inputSize) {
+    const {
+      output_format = 'mp4',
+      video_codec = 'libx264',
+      audio_codec = 'aac',
+      width,
+      height,
+      crf = 23,
+      preset = 'medium',
+      audio_bitrate = 128000,
+      fps,
+    } = options;
+
+    onProgress?.(10, 'Probing source video');
+    const probeResult = nVideo.probe(inputPath);
+    const videoStream = probeResult.streams.find(s => s.type === 'video');
+    const audioStream = probeResult.streams.find(s => s.type === 'audio');
+
+    const sourceWidth = videoStream?.width;
+    const sourceHeight = videoStream?.height;
+    const sourceDuration = probeResult.format.duration;
+
+    let targetWidth = width;
+    let targetHeight = height;
+    if (targetWidth && !targetHeight) {
+      targetHeight = Math.round(sourceHeight * (targetWidth / sourceWidth));
+    } else if (targetHeight && !targetWidth) {
+      targetWidth = Math.round(sourceWidth * (targetHeight / sourceHeight));
+    }
+    if (targetWidth) targetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth + 1;
+    if (targetHeight) targetHeight = targetHeight % 2 === 0 ? targetHeight : targetHeight + 1;
+
+    onProgress?.(15, `Transcoding: ${video_codec} → ${output_format}`);
+
+    const transcodeOpts = {
+      cache: false,
+      video: {
+        codec: video_codec,
+        crf,
+        preset,
+      },
+    };
+    if (targetWidth) transcodeOpts.video.width = targetWidth;
+    if (targetHeight) transcodeOpts.video.height = targetHeight;
+    if (fps) transcodeOpts.video.fps = fps;
+
+    if (audioStream) {
+      transcodeOpts.audio = {
+        codec: audio_codec,
+        bitrate: audio_bitrate,
+      };
+    }
+
+    await new Promise((resolve, reject) => {
+      transcodeOpts.onProgress = (p) => {
+        const mappedPercent = 15 + Math.round(p.percent * 0.75);
+        onProgress?.(mappedPercent, `Transcoding: ${Math.round(p.percent)}% (${p.speed?.toFixed(1) || '?'}x)`);
+      };
+      transcodeOpts.onComplete = (result) => resolve(result);
+      transcodeOpts.onError = (error) => reject(new Error(error.message || 'nVideo transcode failed'));
+      nVideo.transcode(inputPath, outputPath, transcodeOpts);
+    });
+
+    const outputStat = fs.statSync(outputPath);
+
+    onProgress?.(100, 'Complete');
+
+    logger.info('Video transcoded (file-to-file)', {
+      inputPath,
+      outputPath,
+      inputSize,
+      outputSize: outputStat.size,
+      videoCodec,
+      audioCodec,
+      outputFormat,
+    });
+
+    return {
+      outputPath,
+      metadata: {
+        originalSize: inputSize,
+        outputSize: outputStat.size,
+        mode: 'transcode',
+        outputFormat,
+        videoCodec,
+        audioCodec,
+        dimensions: targetWidth && targetHeight ? `${targetWidth}x${targetHeight}` : `${sourceWidth}x${sourceHeight}`,
+        duration: sourceDuration,
+        mimeType: MIME_TYPES[output_format] || 'video/mp4',
+      },
+    };
   }
 
   async extractAudio(input, options, onProgress) {
