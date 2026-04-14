@@ -8,8 +8,8 @@ Media Service is a comprehensive media processing microservice built on **Node.j
 
 - **Orchestration**: Node.js (HTTP server, task management, messaging)
 - **Image Processing**: Native NAPI bindings (nImage with libraw/libheif/ImageMagick)
-- **Audio/Video Processing**: FFmpeg CLI (custom wrapper with GPU acceleration)
-- **Hybrid Architecture**: NAPI for images (fast, universal format support), CLI for A/V (full feature access)
+- **Audio/Video Processing**: Native NAPI bindings (nVideo with direct FFmpeg library integration)
+- **Unified Native Architecture**: NAPI for all media processing - zero process spawning, zero-copy decode, real-time progress
 
 ### Use Cases
 
@@ -49,8 +49,8 @@ Media Service is a comprehensive media processing microservice built on **Node.j
 │  │                    Native Processors                        │  │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │  │
 │  │  │ Image       │  │ Audio       │  │ Video               │  │  │
-│  │  │ (nImage     │  │ (FFmpeg     │  │ (FFmpeg             │  │  │
-│  │  │  NAPI)      │  │  CLI)       │  │  CLI)               │  │  │
+│  │  │ (nImage     │  │ (nVideo     │  │ (nVideo             │  │  │
+│  │  │  NAPI)      │  │  NAPI)      │  │  NAPI)              │  │  │
 │  │  └─────────────┘  └─────────────┘  └─────────────────────┘  │  │
 │  └─────────────────────────────────────────────────────────────┘  │
 │  ┌─────────────────────────────────────────────────────────────┐  │
@@ -71,41 +71,55 @@ Media Service is a comprehensive media processing microservice built on **Node.j
   - **ImageMagick**: 150+ additional formats (PDF, SVG, EXR, HDR, etc.)
 - **Capabilities**: Resize, crop, format conversion, EXIF stripping, region extraction
 
-#### Audio/Video Processing (FFmpeg CLI)
-- **Why**: Full CLI capability access, familiar interface, hardware acceleration support
-- **Current**: FFmpeg CLI via custom wrapper with GPU codec auto-selection
+#### Audio/Video Processing (nVideo - Native NAPI)
+- **Why**: Direct FFmpeg library integration - zero process spawning, zero-copy decode, native progress callbacks
 - **Architecture**:
-  - File-based I/O for reliability (all formats supported)
-  - Progress parsing from FFmpeg stderr
+  - Direct FFmpeg C API (`avformat`, `avcodec`, `avfilter`, `swscale`, `swresample`)
+  - File-to-file transcoding runs entirely in C++ (no JS involvement during processing)
   - Automatic GPU codec selection based on `config.media.gpu.platform`
-  - Support for NVENC (NVIDIA), VAAPI (Intel/AMD), QSV (Intel), CPU fallback
+  - Support for NVENC (NVIDIA), QSV (Intel), VAAPI (Intel/AMD), D3D11VA (Windows)
+  - Audio filter graphs (`abuffer → aformat → asetnsamples → abuffersink`) for reliable transcoding
+  - Video filter graphs via libavfilter
 - **Capabilities**:
-  - Decode: Any format FFmpeg supports
-  - Encode: All major codecs with hardware acceleration when available
+  - `probe()`: Metadata, streams, codec info (no ffprobe spawn)
+  - `transcode()`: Full re-encode with video/audio filter graphs, HW acceleration, progress callbacks
+  - `extractAudio()`: Decode audio from video, re-encode to target format
+  - `thumbnail()`: Seek to timestamp, decode single frame
+  - `remux()`: Stream copy without re-encode
+  - `concat()`: Multi-file join with timestamp management
+  - `getWaveform()`: Audio peak amplitude generation
+  - Stateful decode: `openInput()`, `readAudio()`, `readVideoFrame()`, `seek()`, `close()`
 
 ---
 
-## 3. FFmpeg CLI Wrapper
+## 3. nVideo Native Module
 
 ### 3.1 Architecture
 
+nVideo is a native N-API module located at `/modules/nVideo`. It links directly against FFmpeg's C libraries (no CLI spawning).
+
 ```
-src/utils/ffmpeg/
-├── index.js     # Main API: run(), with GPU codec selection
-├── parser.js    # Progress stderr parsing
-└── codecs.js    # GPU platform codec mappings
+modules/nVideo/
+├── src/
+│   ├── processor.cpp   # FFmpeg C API implementation (~3000 lines)
+│   ├── processor.h     # Data structures and class declarations
+│   └── binding.cpp     # N-API bindings layer
+├── lib/
+│   └── index.js        # JavaScript API wrapper with caching
+└── binding.gyp         # node-gyp build configuration
 ```
 
 ### 3.2 Key Features
 
 | Feature | Implementation |
 |---------|----------------|
-| **I/O Mode** | File-based (temp files in cache dir) |
-| **Input Handling** | Write buffer → temp file → FFmpeg processes → read output file |
-| **GPU Acceleration** | Auto-selected based on `config.media.gpu.platform` |
-| **Progress** | Parsed from FFmpeg stderr (frame/fps/time/bitrate/speed) |
-| **Cancellation** | AbortController support (SIGTERM to FFmpeg process) |
+| **I/O Mode** | File-to-file (temp files in cache dir) |
+| **Input Handling** | Write buffer → temp file → nVideo processes → read output file |
+| **GPU Acceleration** | Native HW device context (CUDA, QSV, VAAPI, D3D11VA) |
+| **Progress** | Native callback (percent, speed, bitrate, ETA, frame counts) |
+| **Cancellation** | Not yet implemented (planned) |
 | **Cleanup** | Input temp file deleted immediately; output stored in AssetCache |
+| **Caching** | SHA256-based cache with transmit-once TTL (built into nVideo) |
 
 ### 3.3 GPU Platform Support
 
@@ -118,14 +132,14 @@ src/utils/ffmpeg/
 
 ### 3.4 Progress Format
 
-FFmpeg stderr is parsed for lines like:
-```
-frame=  120 fps= 60 q=28.0 size=     256kB time=00:00:04.00 bitrate= 524.3kbits/s speed=  2x
-```
+nVideo provides native progress callbacks with:
+- `percent`: 0-100 completion
+- `speed`: Encoding speed multiplier
+- `bitrate`: Current bitrate
+- `timestamp`: Current stream position
+- `eta`: Estimated time remaining
 
-Parsed fields: `frame`, `fps`, `q`, `size`, `time`, `bitrate`, `speed`
-
-Progress callback: `(percent, { frame, fps, time, bitrate, speed })`
+Progress callback: `(percent, { speed, bitrate, timestamp, eta })`
 
 ---
 
@@ -187,25 +201,42 @@ Progress callback: `(percent, { frame, fps, time, bitrate, speed })`
 
 ```
 Client → POST /v1/process/video (file uploaded)
-           ↓
-       Route Handler writes file to temp input file
-           ↓
-       Task created with input file path
-           ↓
-       Task queued → Worker picks up
-           ↓
-       FFmpeg wrapper processes (file → file)
-           ↓
-       Output file stored in AssetCache
-           ↓
-       Input temp file deleted immediately
-           ↓
-       SSE: completed event with assetId
-           ↓
-Client → GET /v1/assets/:assetId (download result)
-           ↓
-       Asset marked as retrieved (TTL reduced to 0)
+            ↓
+        Route Handler writes file to temp input file
+            ↓
+        Task created with input file path
+            ↓
+        Task queued → Worker picks up
+            ↓
+        nVideo processes (file → file, all in C++ memory)
+            ↓
+        Output file stored in AssetCache
+            ↓
+        Input temp file deleted immediately
+            ↓
+        SSE: completed event with assetId
+            ↓
+ Client → GET /v1/assets/:assetId (download result)
+            ↓
+        Asset marked as retrieved (TTL reduced to 0)
 ```
+
+### 4.5 Worker Execution Modes
+
+Processing can run in two modes, configured via `workers.mode`:
+
+**Queue Mode** (`"queue"` - default):
+- Tasks processed via TaskQueue → Worker → PipelineExecutor on main thread
+- Serialized execution, lower memory footprint
+- Event loop blocked during processing (acceptable for sync endpoints)
+
+**Thread Mode** (`"thread"`):
+- Each task spawns a Node.js `worker_thread`
+- nVideo runs synchronously in worker, main event loop stays free
+- True parallelism bounded by `maxConcurrentTasks`
+- Requires worker bootstrap (`src/tasks/TaskWorker.js`) with message protocol:
+  - Input: `{ type: 'process', mediaType, inputPath, outputPath, options }`
+  - Output: `{ type: 'progress', percent, metadata }` | `{ type: 'complete', result }` | `{ type: 'error', message }`
 
 ---
 
@@ -410,7 +441,6 @@ All configuration via `config.json`. No `.env` defaults are used.
 | `server.port` | Yes | HTTP server port |
 | `server.host` | No | Host to bind (default: 0.0.0.0) |
 | `media.maxFileSizeMb` | No | Max upload size in MB (default: 300) |
-| `media.ffmpegPath` | No | Custom FFmpeg path |
 | `media.gpu.platform` | **Yes** | GPU platform: `nvenc`, `vaapi`, `qsv`, `cpu` |
 | `media.gpu.device` | No | GPU device index (default: 0) |
 | `logging.level` | No | Log level: error, warn, info, debug (default: info) |
@@ -421,6 +451,7 @@ All configuration via `config.json`. No `.env` defaults are used.
 | `cache.ttl` | No | Asset TTL in seconds (default: 3600) |
 | `cache.maxSize` | No | Max cache size in bytes (default: 10GB) |
 | `workers.maxConcurrentTasks` | No | Max parallel async tasks (default: 4) |
+| `workers.mode` | No | Execution mode: `queue` or `thread` (default: queue) |
 | `messaging.transport` | No | Transport: sse, ws, polling (default: sse) |
 
 ---
@@ -447,19 +478,20 @@ All configuration via `config.json`. No `.env` defaults are used.
 - **Node.js 18+**: HTTP server, orchestration, task management
 - **Native HTTP**: Node.js built-in `http` module with custom Router and multipart parser
 - **Native FS**: Node.js built-in `fs` module for file operations
-- **Child Process**: `spawn` for FFmpeg CLI execution
+- **Worker Threads**: Node.js `worker_threads` for parallel processing (thread mode)
 
-**Note**: No Express, Multer, or fluent-ffmpeg - the service uses custom lightweight implementations.
+**Note**: No Express, Multer, fluent-ffmpeg, or FFmpeg CLI - the service uses custom lightweight implementations and native N-API modules.
 
 ### Bundled Modules (Submodules)
 Located in `/modules`:
 - **nLogger**: Structured logging with detailed formatting
 - **nImage**: Native image processing (RAW, HEIC, 150+ formats via libraw/libheif/ImageMagick)
-- **ffmpeg-napi-interface**: FFmpeg NAPI bindings for audio/video (future use)
+- **nVideo**: Native audio/video processing (direct FFmpeg library integration via N-API)
 - **nui_wc2**: Web UI for monitoring and testing
 
 ### External Dependencies
-- **FFmpeg CLI**: Video/audio processing (system binary or bundled)
+- **FFmpeg libraries**: Linked by nVideo (avformat, avcodec, avutil, swscale, swresample, avfilter)
+- **No FFmpeg CLI required**: nVideo replaces all CLI functionality
 
 ---
 
@@ -477,21 +509,27 @@ Located in `/modules`:
 - [x] HEIC/HEIF support via libheif (part of nImage)
 - [x] RAW format support (CR2, ORF, NEF, ARW, DNG, etc.) via nImage/libraw
 
-### Phase 3: Audio/Video Processing ✅ COMPLETE
-- [x] FFmpeg CLI integration (custom wrapper, not fluent-ffmpeg)
-- [x] Audio transcoding/resampling (MP3, WAV, OGG, M4A)
-- [x] Video audio extraction
-- [x] Video keyframe extraction
-- [x] GPU acceleration (NVENC, VAAPI, QSV) with auto-selection
-- [x] File-based processing for reliability
-- [x] Progress parsing from FFmpeg stderr
+### Phase 3: Audio/Video Processing (FFmpeg CLI) ✅ COMPLETE → REPLACED
+- [x] FFmpeg CLI integration (custom wrapper, not fluent-ffmpeg) - *superseded by nVideo*
+- [x] Audio transcoding/resampling (MP3, WAV, OGG, M4A) - *migrated to nVideo*
+- [x] Video audio extraction - *migrated to nVideo*
+- [x] Video keyframe extraction - *migrated to nVideo*
+- [x] GPU acceleration (NVENC, VAAPI, QSV) with auto-selection - *migrated to nVideo*
+- [x] File-based processing for reliability - *retained with nVideo*
+- [x] Progress parsing from FFmpeg stderr - *replaced by nVideo native callbacks*
 
-### Phase 4: Advanced Features 📋 PLANNED
-- [ ] Connect audio/video to task system (make fully async)
+### Phase 4: nVideo Integration 🔄 CURRENT
+- [ ] Add nVideo as git submodule (`/modules/nVideo`)
+- [ ] Rewrite AudioProcessor to use nVideo (`transcode()`, `extractAudio()`, `probe()`)
+- [ ] Rewrite VideoProcessor to use nVideo (`extractAudio()`, `thumbnail()`, `transcode()`)
+- [ ] Remove FFmpeg CLI wrapper (`src/utils/ffmpeg/`)
+- [ ] Remove FFmpeg binary dependency (`bin/ffmpeg.exe`)
+- [ ] Add configurable worker execution mode (`queue` vs `thread`)
+- [ ] Implement TaskWorker for thread mode (`src/tasks/TaskWorker.js`)
+
+### Phase 5: Advanced Features 📋 PLANNED
 - [ ] WebSocket messaging adapter
 - [ ] REST polling adapter
-- [ ] Video streaming endpoint
-- [ ] Audio streaming endpoint
 - [ ] Task retry logic with exponential backoff
 - [ ] Cache size management (enforce max cache size with LRU eviction)
 - [ ] Adaptive sync/async logic (auto-detect based on file size)

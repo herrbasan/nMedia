@@ -5,7 +5,6 @@
   },
   "media": {
     "maxFileSizeMb": 9007199254740991,
-    "ffmpegPath": "./bin/ffmpeg.exe",
     "gpu": {
       "platform": "nvenc",
       "device": 0
@@ -23,7 +22,8 @@
     "maxSize": 10737418240
   },
   "workers": {
-    "maxConcurrentTasks": 4
+    "maxConcurrentTasks": 4,
+    "mode": "queue"
   },
   "messaging": {
     "transport": "sse"

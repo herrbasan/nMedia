@@ -11,6 +11,7 @@ Media Service is a stateless microservice designed to preprocess multimedia file
 | Configuration | `config.json` | All configuration settings (server, media, logging, cache, workers) |
 | Specification | `docs/media_service_spec.md` | Detailed technical specification, API design, architecture |
 | Development Plan | `docs/media_service_dev_plan.md` | Implementation roadmap, technology choices, development phases |
+| Refactor Plan | `docs/nvideo_refactor_plan.md` | nVideo integration plan, phases, file changes |
 | Task System | `docs/task_system_proposal.md` | Task system architecture and async patterns |
 
 ## Configuration
@@ -61,7 +62,7 @@ This project uses git submodules located in `/modules`. These are all **our own 
 |-----------|---------|
 | `modules/nLogger` | Structured logging |
 | `modules/nImage` | Native image processing (RAW, HEIC, 150+ formats) |
-| `modules/ffmpeg-napi-interface` | FFmpeg NAPI bindings for audio/video (future) |
+| `modules/nVideo` | Native audio/video processing (direct FFmpeg library integration) |
 | `modules/nui_wc2` | Web UI for monitoring/testing |
 
 **Important:** Before modifying any submodule code, ask the user for permission. Changes to submodules affect other projects that depend on them.
@@ -80,23 +81,16 @@ This project uses git submodules located in `/modules`. These are all **our own 
 | Processor | Technology | Capabilities |
 |-----------|------------|--------------|
 | ImageProcessor | nImage (native NAPI) | Resize, format conversion, cropping (region/center/grid), EXIF stripping. Supports RAW, HEIC, and 150+ formats |
-| AudioProcessor | FFmpeg CLI | Resampling (8-48kHz), channel conversion, format conversion (mp3/wav/ogg/m4a) |
-| VideoProcessor | FFmpeg CLI | Audio extraction, keyframe extraction at configurable FPS |
+| AudioProcessor | nVideo (native NAPI) | Resampling (8-48kHz), channel conversion, format conversion (mp3/wav/ogg/m4a). Direct FFmpeg library integration. |
+| VideoProcessor | nVideo (native NAPI) | Audio extraction, keyframe extraction at configurable FPS. Direct FFmpeg library integration. |
 
-#### FFmpeg CLI Wrapper (`src/utils/ffmpeg/`)
-- Custom wrapper around FFmpeg CLI (replaced fluent-ffmpeg)
-- File-based I/O for reliability (temp files in cache dir)
+#### nVideo Native Module (`modules/nVideo/`)
+- Direct FFmpeg C API integration (no CLI spawning)
+- File-to-file transcoding runs entirely in C++
+- Audio filter graphs (`abuffer → aformat → asetnsamples → abuffersink`)
+- Native progress callbacks (percent, speed, bitrate, ETA)
 - Automatic GPU codec selection based on `config.media.gpu.platform`
-- Real-time progress parsing from FFmpeg stderr
-- Process cancellation via AbortController
-
-**Structure:**
-```
-src/utils/ffmpeg/
-├── index.js     # Main API: run(), abort support
-├── parser.js    # Progress parsing from stderr
-└── codecs.js    # GPU platform codec mappings
-```
+- SHA256-based caching with transmit-once TTL
 
 **GPU Platforms:**
 | Platform | Video Decode | Video Encode |
@@ -140,14 +134,24 @@ The task system handles asynchronous processing:
 - **TaskManager** (`src/tasks/TaskManager.js`) - Singleton coordinator
 - **TaskQueue** (`src/tasks/TaskQueue.js`) - FIFO queue with concurrency control
 - **Worker** (`src/tasks/Worker.js`) - Processes tasks via PipelineExecutor
+- **TaskWorker** (`src/tasks/TaskWorker.js`) - Worker thread bootstrap (thread mode)
 - **AssetCache** (`src/cache/AssetCache.js`) - Stores results with TTL
+
+### Worker Execution Modes
+
+Configured via `workers.mode` in `config.json`:
+
+| Mode | Behavior | Use Case |
+|------|----------|----------|
+| `queue` (default) | Tasks run on main thread, serialized by queue | Memory-constrained, simpler |
+| `thread` | Each task spawns a `worker_thread` | True parallelism, responsive event loop |
 
 ### Audio/Video Processing Flow
 
 ```
 1. Client uploads file
 2. Input written to temp file in cache dir
-3. FFmpeg processes: input → output
+3. nVideo processes: input → output (all in C++ memory)
 4. Output stored in AssetCache
 5. Input temp file deleted
 6. SSE progress updates sent
