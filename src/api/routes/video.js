@@ -114,6 +114,14 @@ async function handleVideoUpload(ctx, options) {
 
   // Handle file upload
   if (ctx.file) {
+    logger.info('Video file received', {
+      tempPath: ctx.file.tempPath,
+      exists: ctx.file.tempPath ? fs.existsSync(ctx.file.tempPath) : 'N/A',
+      size: ctx.file.size,
+      extracted: ctx.file.extracted,
+      extractedSize: ctx.file.extractedSize,
+    });
+    
     if (ctx.file.tempPath) {
       // File was streamed to disk - use path directly
       inputPath = ctx.file.tempPath;

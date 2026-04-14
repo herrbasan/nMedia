@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from '../utils/uuid.js';
 import config from '../config/config.js';
+import logger from '../utils/logger.js';
 
 /**
  * Streaming multipart/form-data parser.
@@ -28,6 +29,7 @@ export class MultipartParser {
     });
 
     const fileSize = fs.statSync(tempPath).size;
+    logger.info(`Multipart request piped to disk: ${fileSize} bytes`);
     const fd = fs.openSync(tempPath, 'r');
     
     try {
@@ -94,12 +96,18 @@ export class MultipartParser {
           
           this._copyFileRange(fd, bodyStart, bodyLength, outputPath);
           
+          const exists = fs.existsSync(outputPath);
+          const size = exists ? fs.statSync(outputPath).size : 0;
+          logger.info(`Extracted file part: ${filename} → ${outputPath} (exists: ${exists}, size: ${size}, expected: ${bodyLength})`);
+          
           parts.files.push({
             fieldname: name,
             originalFilename: filename,
             mimeType: contentType,
             size: bodyLength,
             tempPath: outputPath,
+            extracted: exists,
+            extractedSize: size,
           });
         } else if (name) {
           // Field part - read as string
@@ -157,13 +165,22 @@ export class MultipartParser {
   }
 
   _copyFileRange(fd, offset, length, outputPath) {
-    const readStream = fs.createReadStream(null, { fd, start: offset, end: offset + length - 1, autoClose: false });
-    const writeStream = fs.createWriteStream(outputPath);
-    readStream.pipe(writeStream);
-    return new Promise((resolve, reject) => {
-      writeStream.on('finish', resolve);
-      writeStream.on('error', reject);
-    });
+    const CHUNK_SIZE = 64 * 1024 * 1024; // 64MB chunks
+    const writeFd = fs.openSync(outputPath, 'w');
+    let remaining = length;
+    let readPos = offset;
+    const readBuf = Buffer.alloc(Math.min(CHUNK_SIZE, length));
+    
+    while (remaining > 0) {
+      const toRead = Math.min(CHUNK_SIZE, remaining);
+      const bytesRead = fs.readSync(fd, readBuf, 0, toRead, readPos);
+      if (bytesRead === 0) break;
+      fs.writeSync(writeFd, readBuf, 0, bytesRead);
+      remaining -= bytesRead;
+      readPos += bytesRead;
+    }
+    
+    fs.closeSync(writeFd);
   }
 }
 
