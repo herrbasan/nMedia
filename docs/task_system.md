@@ -224,7 +224,7 @@ Only works if task is still pending. Running tasks cannot be cancelled (FFmpeg p
 2. **Input cleanup**: Input temp files deleted immediately after processing
    - Output remains in AssetCache with TTL
 
-3. **Progress tracking**: Parsed from FFmpeg stderr
+3. **Progress tracking**: Native nVideo callbacks
    - Frame count, FPS, bitrate, time, speed
 
 4. **Retrieval optimization**: Assets marked as retrieved get TTL=0
@@ -290,5 +290,5 @@ Enforce max cache size with LRU eviction:
 | Task not found | 404 Not Found |
 | Task already running | 409 Conflict |
 | Processing error | SSE: error event, task marked failed |
-| FFmpeg crashes | Error caught, task failed, temp files cleaned |
+| Native module error | Error caught, task failed, temp files cleaned |
 | Client disconnects | Processing continues, result cached |

@@ -2,14 +2,16 @@ import { v4 as uuidv4 } from '../utils/uuid.js';
 
 /**
  * Manages SSE connections for progress reporting.
- * Now uses generic Sender interface (SseConnection) instead of Express res.
+ * Uses generic Sender interface (SseConnection).
+ * Supports linking SSE connections to internal job IDs for progress forwarding.
  */
 class ProgressReporter {
   #connections = new Map();
+  #jobLinks = new Map(); // sseJobId -> internal jobId
 
   /**
    * Create a new job with SSE connection.
-   * @param {Sender} sender - Object implementing Sender interface (e.g., SseConnection)
+   * @param {Sender} sender - Object implementing Sender interface
    * @returns {string} - Job ID
    */
   createJob(sender) {
@@ -28,9 +30,31 @@ class ProgressReporter {
 
     sender.onClose(() => {
       this.#connections.delete(jobId);
+      this.#jobLinks.delete(jobId);
     });
 
     return jobId;
+  }
+
+  /**
+   * Link an SSE connection to an internal job ID.
+   * Progress events for the internal job will be forwarded to this SSE connection.
+   * @param {string} sseJobId - SSE connection ID
+   * @param {string} internalJobId - Internal job ID
+   */
+  linkJob(sseJobId, internalJobId) {
+    if (this.#connections.has(sseJobId)) {
+      this.#jobLinks.set(sseJobId, internalJobId);
+    }
+  }
+
+  /**
+   * Get internal job ID linked to an SSE connection.
+   * @param {string} sseJobId
+   * @returns {string|null}
+   */
+  getLinkedJob(sseJobId) {
+    return this.#jobLinks.get(sseJobId) || null;
   }
 
   /**
@@ -92,7 +116,16 @@ class ProgressReporter {
     if (sender) {
       sender.end();
       this.#connections.delete(jobId);
+      this.#jobLinks.delete(jobId);
     }
+  }
+
+  /**
+   * Get active connection count.
+   * @returns {number}
+   */
+  get activeConnections() {
+    return this.#connections.size;
   }
 }
 

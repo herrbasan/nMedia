@@ -50,18 +50,27 @@ function detectInputExtension(buffer) {
   return 'bin';
 }
 
-async function processAudio(inputBuffer, options, cacheDir) {
+function resolveInputPath(inputSource, cacheDir) {
+  if (inputSource.type === 'path') {
+    return inputSource.value;
+  }
+  // Buffer input: write to temp file
+  const inputId = crypto.randomUUID();
+  const inputExt = detectInputExtension(inputSource.value);
+  const inputPath = path.join(cacheDir, `input-${inputId}.${inputExt}`);
+  fs.writeFileSync(inputPath, inputSource.value);
+  return inputPath;
+}
+
+async function processAudio(inputSource, options, cacheDir) {
   const { sample_rate = 16000, channels = 1, format = 'mp3' } = options;
 
-  const inputId = crypto.randomUUID();
+  const inputPath = resolveInputPath(inputSource, cacheDir);
+  const shouldCleanupInput = inputSource.type === 'buffer';
   const outputId = crypto.randomUUID();
-  const inputExt = detectInputExtension(inputBuffer);
-  const inputPath = path.join(cacheDir, `input-${inputId}.${inputExt}`);
   const outputPath = path.join(cacheDir, `output-${outputId}.${FORMAT_EXTENSIONS[format] || format}`);
 
   try {
-    fs.writeFileSync(inputPath, inputBuffer);
-
     await new Promise((resolve, reject) => {
       nVideo.transcode(inputPath, outputPath, {
         audio: {
@@ -82,24 +91,21 @@ async function processAudio(inputBuffer, options, cacheDir) {
     const outputBuffer = fs.readFileSync(outputPath);
     return { buffer: outputBuffer, metadata: { outputSize: outputBuffer.length, sampleRate: sample_rate, channels, format, mimeType: MIME_TYPES[format] } };
   } finally {
-    try { fs.unlinkSync(inputPath); } catch {}
+    if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
     try { fs.unlinkSync(outputPath); } catch {}
   }
 }
 
-async function processVideo(inputBuffer, options, cacheDir) {
+async function processVideo(inputSource, options, cacheDir) {
   const { mode = 'extract_audio', fps = 1, max_dimension = 1024, format = 'mp3' } = options;
+  const inputPath = resolveInputPath(inputSource, cacheDir);
+  const shouldCleanupInput = inputSource.type === 'buffer';
 
   if (mode === 'extract_audio') {
-    const inputId = crypto.randomUUID();
     const outputId = crypto.randomUUID();
-    const inputExt = detectInputExtension(inputBuffer);
-    const inputPath = path.join(cacheDir, `input-${inputId}.${inputExt}`);
     const outputPath = path.join(cacheDir, `output-${outputId}.${format}`);
 
     try {
-      fs.writeFileSync(inputPath, inputBuffer);
-
       await new Promise((resolve, reject) => {
         nVideo.extractAudio(inputPath, outputPath, {
           codec: AUDIO_CODECS[format],
@@ -116,18 +122,12 @@ async function processVideo(inputBuffer, options, cacheDir) {
       const outputBuffer = fs.readFileSync(outputPath);
       return { buffer: outputBuffer, metadata: { outputSize: outputBuffer.length, mode, format, mimeType: MIME_TYPES[format] } };
     } finally {
-      try { fs.unlinkSync(inputPath); } catch {}
+      if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
       try { fs.unlinkSync(outputPath); } catch {}
     }
   } else {
     // extract_keyframes
-    const inputId = crypto.randomUUID();
-    const inputExt = detectInputExtension(inputBuffer);
-    const inputPath = path.join(cacheDir, `input-${inputId}.${inputExt}`);
-
     try {
-      fs.writeFileSync(inputPath, inputBuffer);
-
       const probeResult = nVideo.probe(inputPath);
       const videoStream = probeResult.streams.find(s => s.type === 'video');
       if (!videoStream) throw new Error('No video stream found');
@@ -155,12 +155,19 @@ async function processVideo(inputBuffer, options, cacheDir) {
         frames,
       };
     } finally {
-      try { fs.unlinkSync(inputPath); } catch {}
+      if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
     }
   }
 }
 
-async function processImage(inputBuffer, options) {
+async function processImage(inputSource, options) {
+  let inputBuffer;
+  if (inputSource.type === 'path') {
+    inputBuffer = fs.readFileSync(inputSource.value);
+  } else {
+    inputBuffer = inputSource.value;
+  }
+
   const { max_dimension = 1024, quality = 85, format = 'jpeg' } = options;
   const img = await initNImage();
 
@@ -186,16 +193,16 @@ async function processImage(inputBuffer, options) {
 
 // Message handler
 parentPort.on('message', async (message) => {
-  const { type, mediaType, inputBuffer, options, cacheDir } = message;
+  const { type, mediaType, inputSource, options, cacheDir } = message;
 
   try {
     let result;
     if (mediaType === 'audio') {
-      result = await processAudio(inputBuffer, options, cacheDir);
+      result = await processAudio(inputSource, options, cacheDir);
     } else if (mediaType === 'video') {
-      result = await processVideo(inputBuffer, options, cacheDir);
+      result = await processVideo(inputSource, options, cacheDir);
     } else if (mediaType === 'image') {
-      result = await processImage(inputBuffer, options);
+      result = await processImage(inputSource, options);
     } else {
       throw new Error(`Unknown media type: ${mediaType}`);
     }

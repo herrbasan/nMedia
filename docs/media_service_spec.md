@@ -518,18 +518,18 @@ Located in `/modules`:
 - [x] File-based processing for reliability - *retained with nVideo*
 - [x] Progress parsing from FFmpeg stderr - *replaced by nVideo native callbacks*
 
-### Phase 4: nVideo Integration 🔄 CURRENT
-- [ ] Add nVideo as git submodule (`/modules/nVideo`)
-- [ ] Rewrite AudioProcessor to use nVideo (`transcode()`, `extractAudio()`, `probe()`)
-- [ ] Rewrite VideoProcessor to use nVideo (`extractAudio()`, `thumbnail()`, `transcode()`)
-- [ ] Remove FFmpeg CLI wrapper (`src/utils/ffmpeg/`)
-- [ ] Remove FFmpeg binary dependency (`bin/ffmpeg.exe`)
-- [ ] Add configurable worker execution mode (`queue` vs `thread`)
-- [ ] Implement TaskWorker for thread mode (`src/tasks/TaskWorker.js`)
+### Phase 4: nVideo Integration ✅ COMPLETE
+- [x] Add nVideo as git submodule (`/modules/nVideo`)
+- [x] Rewrite AudioProcessor to use nVideo (`transcode()`, `extractAudio()`, `probe()`)
+- [x] Rewrite VideoProcessor to use nVideo (`extractAudio()`, `thumbnail()`, `transcode()`)
+- [x] Remove FFmpeg CLI wrapper (`src/utils/ffmpeg/`)
+- [x] Remove FFmpeg binary dependency (`bin/ffmpeg.exe`)
+- [x] Add configurable worker execution mode (`queue` vs `thread`)
+- [x] Implement TaskWorker for thread mode (`src/tasks/TaskWorker.js`)
 
-### Phase 5: Advanced Features 📋 PLANNED
+### Phase 5: Advanced Features 🔄 PARTIAL
+- [x] REST polling adapter (`GET /v1/jobs/:jobId`)
+- [x] Cache size management (LRU eviction in AssetCache)
 - [ ] WebSocket messaging adapter
-- [ ] REST polling adapter
 - [ ] Task retry logic with exponential backoff
-- [ ] Cache size management (enforce max cache size with LRU eviction)
 - [ ] Adaptive sync/async logic (auto-detect based on file size)

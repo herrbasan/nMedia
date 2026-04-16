@@ -285,23 +285,53 @@ Real-time audio processing with streaming response.
 7. ~~Progress parsing~~ → **DONE** (parse FFmpeg stderr) - *replaced by nVideo native callbacks*
 8. ~~Process cancellation~~ → **DONE** (AbortController) - *to be reimplemented in nVideo*
 
-### Phase 4: nVideo Integration 🔄 CURRENT
-1. **Add nVideo submodule** → `modules/nVideo` (git submodule from herrbasan/nVideo)
-2. **Build nVideo** → `npm run setup && npm run build` (download FFmpeg libs, compile)
-3. **Rewrite AudioProcessor** → Use nVideo `transcode()` / `extractAudio()` / `probe()`
-4. **Rewrite VideoProcessor** → Use nVideo `extractAudio()` / `thumbnail()` / `transcode()`
-5. **Remove FFmpeg CLI wrapper** → Delete `src/utils/ffmpeg/`
-6. **Remove FFmpeg binary** → Delete `bin/ffmpeg.exe`
-7. **Add worker mode config** → `workers.mode` (queue/thread)
-8. **Implement TaskWorker** → `src/tasks/TaskWorker.js` for thread mode
-9. **Update config** → Remove `media.ffmpegPath`, add `workers.mode`
+### Phase 4: nVideo Integration ✅ COMPLETE
+1. ~~Add nVideo submodule~~ → **DONE**
+2. ~~Build nVideo~~ → **DONE**
+3. ~~Rewrite AudioProcessor~~ → **DONE**
+4. ~~Rewrite VideoProcessor~~ → **DONE**
+5. ~~Remove FFmpeg CLI wrapper~~ → **DONE**
+6. ~~Remove FFmpeg binary~~ → **DONE**
+7. ~~Add worker mode config~~ → **DONE**
+8. ~~Implement TaskWorker~~ → **DONE**
+9. ~~Update config~~ → **DONE**
 
-### Phase 5: Advanced Features 📋 PLANNED
-1. WebSocket messaging adapter
-2. REST polling adapter
-3. Task retry logic with exponential backoff
-4. Cache size management (enforce max cache size with LRU eviction)
-5. Health check endpoint with detailed processor status
+### Phase 5: Advanced Features 🔄 PARTIAL
+1. ~~REST polling adapter~~ → **DONE** (`GET /v1/jobs/:jobId`)
+2. ~~Cache size management~~ → **DONE** (LRU eviction in AssetCache)
+3. ~~Health check endpoint with detailed processor status~~ → **DONE**
+4. WebSocket messaging adapter → **PLANNED**
+5. Task retry logic with exponential backoff → **PLANNED**
+
+### Phase 6: Transport Redesign 📋 PLANNED
+See [Transport Architecture Redesign](transport_architecture_redesign.md)
+
+**6.1 AssetCache Implementation**
+- Create `src/cache/AssetCache.js` (missing)
+- Disk storage, TTL management, LRU eviction, Range header support
+
+**6.2 Job Store & Persistence**
+- Create `src/jobs/JobStore.js`
+- Disk-backed persistence, ID chain tracking, startup recovery
+
+**6.3 Streaming Upload Endpoint**
+- `POST /v1/upload` - raw binary stream, Content-Length required, magic byte validation
+- Upload concurrency limiter, partial file cleanup on abort
+
+**6.4 Refactor Processors**
+- Unified `POST /v1/process` endpoint (handles both `input_path` and `fileId`)
+- Path validation against allowlist, pre-flight `fs.access()`
+- GPU slot semaphore, thread mode default for audio/video
+
+**6.5 Job Management**
+- `GET /v1/jobs/:jobId/progress` (SSE)
+- `GET /v1/jobs/:jobId` (polling fallback)
+- `DELETE /v1/jobs/:jobId` (cancellation)
+
+**6.6 Cleanup**
+- Delete `src/server/MultipartParser.js`
+- Remove multipart handling from Context
+- Update config schema (allowedInputPaths, maxConcurrentUploads, gpu.maxConcurrentSessions)
 
 ---
 
@@ -355,32 +385,23 @@ nVideo provides native progress callbacks (no stderr parsing):
 
 ## 11. Known Issues & Technical Debt
 
-### Transport Architecture - Multipart Upload for Large Files
+### Transport Architecture - REDESIGNED
 
-**Problem:** The custom `MultipartParser` cannot reliably handle large file uploads (755MB+ video files).
+The multipart upload system has been replaced. See **[Transport Architecture Redesign](transport_architecture_redesign.md)** for the new design.
 
-**Attempts made:**
-1. `Buffer.concat()` entire request → OOM (V8 string limit ~512MB)
-2. Pure `Buffer.indexOf()` operations → Still OOM on large buffers
-3. Stream-to-disk pipe, then parse temp file → Boundary detection fails (false matches in binary video data)
-4. `\r\n--boundary` prefix search → Still crashes on 755MB files
-5. Backwards search from file end → Works but brittle, edge cases with multi-part requests
-
-**Root cause:** Custom multipart parsing on multi-hundred-MB binary data is inherently fragile. The boundary string can appear in binary video/audio data, and scanning hundreds of megabytes for boundaries is slow and error-prone.
-
-**Proposed solutions for next session:**
-1. **File-to-file only API** - Client writes file to known path, sends `{input_path, output_path}` JSON request. No upload needed. This is the primary use case for Electron/Node.js clients.
-2. **Streaming upload to temp file** - Use a proper streaming multipart parser (like `busboy` or `formidable`) that doesn't buffer. Or implement a simpler binary protocol.
-3. **Separate upload endpoint** - `POST /v1/upload` streams to temp file, returns `file_id`. Then `POST /v1/process/{type}` uses `file_id`. Decouples upload from processing.
-4. **Raw binary upload** - `Content-Type: application/octet-stream` with file metadata in headers (`X-Original-Filename`, `X-Content-Type`). No multipart parsing needed.
-
-**Recommendation:** Option 1 (file-to-file) for programmatic clients, Option 4 (raw binary) for web uploads. Drop multipart entirely.
+**Summary of changes:**
+- Dropped `multipart/form-data` entirely
+- Two patterns: **Path-based processing** (input_path) and **Upload-to-cache** (raw binary stream to `/v1/upload`)
+- All processing is async with SSE progress reporting
+- AssetCache implementation required (was missing)
 
 ### SSE + Response Conflict
 
 **Problem:** `createSseJob()` sends headers immediately, preventing subsequent `ctx.json()` or `ctx.send()` on the same connection.
 
 **Fix applied:** Removed SSE from all upload routes. Upload routes are now purely synchronous. SSE is only useful for async task workflows with separate progress endpoint.
+
+**Resolution:** New architecture separates upload from processing. SSE progress endpoint is `GET /v1/process/progress/:jobId`, decoupled from the processing request.
 
 ---
 

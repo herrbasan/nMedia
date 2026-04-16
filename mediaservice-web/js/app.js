@@ -4,6 +4,7 @@ import { initImagePage } from './image.js';
 import { initVideoPage } from './video.js';
 import { initSettingsPage } from './settings.js';
 import { initTestsPage } from './tests.js';
+import { initTransportTestsPage } from './transport-tests.js';
 
 
 window.app = {
@@ -11,7 +12,8 @@ window.app = {
     'initImagePage': initImagePage,
     'initVideoPage': initVideoPage,
     'initSettingsPage': initSettingsPage,
-    'initTestsPage': initTestsPage
+    'initTestsPage': initTestsPage,
+    'initTransportTestsPage': initTransportTestsPage,
 }
 
 const navigationData = [
@@ -50,6 +52,10 @@ const navigationData = [
             {
                 "label": "API Tests",
                 "href": "#page=tests"
+            },
+            {
+                "label": "Transport Tests",
+                "href": "#page=transport-tests"
             }
         ]
     }

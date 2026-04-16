@@ -8,7 +8,10 @@
     "gpu": {
       "platform": "nvenc",
       "device": 0
-    }
+    },
+    "allowedInputPaths": [
+      "D:\\Work\\_GIT\\MediaService\\tests\\assets"
+    ]
   },
   "logging": {
     "level": "info",
@@ -23,7 +26,7 @@
   },
   "workers": {
     "maxConcurrentTasks": 4,
-    "mode": "queue"
+    "mode": "thread"
   },
   "messaging": {
     "transport": "sse"

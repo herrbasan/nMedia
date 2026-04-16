@@ -47,14 +47,29 @@ class VideoProcessor extends Processor {
   }
 
   async process(input, options = {}, onProgress) {
-    const { mode = 'extract_audio', input_path, output_path } = options;
+    const { mode = 'extract_audio', input_path, output_path, _inputSource } = options;
 
-    // File-to-file workflow
+    // File-to-file workflow (explicit paths)
     if (input_path && output_path) {
       return this.processFileToFile(input_path, output_path, options, onProgress);
     }
 
-    // Buffer-based workflow (upload)
+    // Path-based input (from Worker resolving input_path or fileId)
+    if (_inputSource === 'path' && typeof input === 'string' && fs.existsSync(input)) {
+      onProgress?.(5, `Starting video processing: ${mode}`);
+
+      const inputStat = fs.statSync(input);
+
+      if (mode === 'extract_audio') {
+        return this._extractAudioToBuffer(input, options, onProgress, inputStat.size);
+      } else if (mode === 'extract_keyframes') {
+        return this._extractKeyframesFromPath(input, options, onProgress, inputStat.size);
+      } else {
+        return this._transcodePathToBuffer(input, options, onProgress, inputStat.size);
+      }
+    }
+
+    // Buffer-based workflow (legacy upload)
     onProgress?.(5, `Starting video processing: ${mode}`);
 
     if (mode === 'extract_audio') {
@@ -94,6 +109,49 @@ class VideoProcessor extends Processor {
       return this._transcodeFileToFile(inputPath, outputPath, options, onProgress, inputStat.size);
     } else {
       throw new Error(`File-to-file mode '${mode}' not supported. Use 'extract_audio' or 'transcode'.`);
+    }
+  }
+
+  async _extractAudioToBuffer(inputPath, options, onProgress, inputSize) {
+    const { format = 'mp3' } = options;
+    const outputId = uuidv4();
+    const outputPath = path.join(config.cacheDir, `output-${outputId}.${format}`);
+
+    try {
+      onProgress?.(10, 'Extracting audio track');
+
+      await new Promise((resolve, reject) => {
+        nVideo.extractAudio(inputPath, outputPath, {
+          codec: AUDIO_CODECS[format],
+          bitrate: 128000,
+          cache: false,
+          onProgress: (p) => {
+            const mappedPercent = 10 + Math.round(p.percent * 0.8);
+            onProgress?.(mappedPercent, `Extracting: ${Math.round(p.percent)}%`);
+          },
+          onComplete: (result) => resolve(result),
+          onError: (error) => reject(new Error(error.message || 'nVideo extractAudio failed')),
+        });
+      });
+
+      const outputBuffer = fs.readFileSync(outputPath);
+      try { fs.unlinkSync(outputPath); } catch {}
+
+      onProgress?.(100, 'Complete');
+
+      return {
+        buffer: outputBuffer,
+        metadata: {
+          originalSize: inputSize,
+          outputSize: outputBuffer.length,
+          mode: 'extract_audio',
+          format,
+          mimeType: MIME_TYPES[format] || 'audio/mpeg',
+        },
+      };
+    } catch (error) {
+      try { fs.unlinkSync(outputPath); } catch {}
+      throw error;
     }
   }
 
@@ -137,6 +195,150 @@ class VideoProcessor extends Processor {
         mimeType: MIME_TYPES[format] || 'audio/mpeg',
       },
     };
+  }
+
+  async _extractKeyframesFromPath(inputPath, options, onProgress, inputSize) {
+    const { fps = 1, max_dimension = 1024 } = options;
+
+    onProgress?.(15, `Extracting keyframes at ${fps} fps`);
+    const probeResult = nVideo.probe(inputPath);
+    const videoStream = probeResult.streams.find(s => s.type === 'video');
+    if (!videoStream) {
+      throw new Error('No video stream found in file');
+    }
+
+    const duration = probeResult.format.duration;
+    const frameWidth = Math.min(max_dimension, videoStream.width);
+    const frameInterval = 1 / fps;
+    const frameCount = Math.floor(duration * fps);
+
+    const frames = [];
+    for (let i = 0; i < frameCount; i++) {
+      const timestamp = i * frameInterval;
+      const progress = 15 + Math.round((i / frameCount) * 70);
+      onProgress?.(progress, `Extracted ${i + 1}/${frameCount} frames`);
+
+      const thumb = nVideo.thumbnail(inputPath, {
+        timestamp,
+        width: frameWidth,
+      });
+
+      const jpegBuffer = await this._rgbToJpeg(thumb.data, thumb.width, thumb.height);
+      frames.push(jpegBuffer);
+    }
+
+    onProgress?.(85, 'Collecting frames');
+
+    const firstFrame = frames.length > 0 ? frames[0] : Buffer.alloc(0);
+
+    onProgress?.(100, 'Complete');
+
+    return {
+      buffer: firstFrame,
+      metadata: {
+        originalSize: inputSize,
+        frameCount: frames.length,
+        mode: 'extract_keyframes',
+        format: 'jpeg',
+        fps,
+        maxDimension: max_dimension,
+        mimeType: 'image/jpeg',
+      },
+      frames,
+    };
+  }
+
+  async _transcodePathToBuffer(inputPath, options, onProgress, inputSize) {
+    const {
+      output_format = 'mp4',
+      video_codec = 'libx264',
+      audio_codec = 'aac',
+      width,
+      height,
+      crf = 23,
+      preset = 'medium',
+      audio_bitrate = 128000,
+      fps,
+    } = options;
+
+    onProgress?.(15, 'Probing source video');
+    const probeResult = nVideo.probe(inputPath);
+    const videoStream = probeResult.streams.find(s => s.type === 'video');
+    const audioStream = probeResult.streams.find(s => s.type === 'audio');
+
+    const sourceWidth = videoStream?.width;
+    const sourceHeight = videoStream?.height;
+    const sourceDuration = probeResult.format.duration;
+
+    let targetWidth = width;
+    let targetHeight = height;
+    if (targetWidth && !targetHeight) {
+      targetHeight = Math.round(sourceHeight * (targetWidth / sourceWidth));
+    } else if (targetHeight && !targetWidth) {
+      targetWidth = Math.round(sourceWidth * (targetHeight / sourceHeight));
+    }
+    if (targetWidth) targetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth + 1;
+    if (targetHeight) targetHeight = targetHeight % 2 === 0 ? targetHeight : targetHeight + 1;
+
+    const outputId = uuidv4();
+    const outputExt = CONTAINER_MAP[output_format] || output_format;
+    const outputPath = path.join(config.cacheDir, `output-${outputId}.${outputExt}`);
+
+    try {
+      onProgress?.(20, `Transcoding: ${video_codec} → ${output_format}`);
+
+      const transcodeOpts = {
+        cache: false,
+        video: {
+          codec: video_codec,
+          crf,
+          preset,
+        },
+      };
+      if (targetWidth) transcodeOpts.video.width = targetWidth;
+      if (targetHeight) transcodeOpts.video.height = targetHeight;
+      if (fps) transcodeOpts.video.fps = fps;
+
+      if (audioStream) {
+        transcodeOpts.audio = {
+          codec: audio_codec,
+          bitrate: audio_bitrate,
+        };
+      }
+
+      await new Promise((resolve, reject) => {
+        transcodeOpts.onProgress = (p) => {
+          const mappedPercent = 20 + Math.round(p.percent * 0.7);
+          onProgress?.(mappedPercent, `Transcoding: ${Math.round(p.percent)}%`);
+        };
+        transcodeOpts.onComplete = (result) => resolve(result);
+        transcodeOpts.onError = (error) => reject(new Error(error.message || 'nVideo transcode failed'));
+        nVideo.transcode(inputPath, outputPath, transcodeOpts);
+      });
+
+      const outputBuffer = fs.readFileSync(outputPath);
+      try { fs.unlinkSync(outputPath); } catch {}
+
+      onProgress?.(100, 'Complete');
+
+      return {
+        buffer: outputBuffer,
+        metadata: {
+          originalSize: inputSize,
+          outputSize: outputBuffer.length,
+          mode: 'transcode',
+          output_format,
+          video_codec,
+          audio_codec,
+          dimensions: targetWidth && targetHeight ? `${targetWidth}x${targetHeight}` : `${sourceWidth}x${sourceHeight}`,
+          duration: sourceDuration,
+          mimeType: MIME_TYPES[output_format] || 'video/mp4',
+        },
+      };
+    } catch (error) {
+      try { fs.unlinkSync(outputPath); } catch {}
+      throw error;
+    }
   }
 
   async _transcodeFileToFile(inputPath, outputPath, options, onProgress, inputSize) {
@@ -211,9 +413,9 @@ class VideoProcessor extends Processor {
       outputPath,
       inputSize,
       outputSize: outputStat.size,
-      videoCodec,
-      audioCodec,
-      outputFormat,
+      video_codec,
+      audio_codec,
+      output_format,
     });
 
     return {
@@ -222,9 +424,9 @@ class VideoProcessor extends Processor {
         originalSize: inputSize,
         outputSize: outputStat.size,
         mode: 'transcode',
-        outputFormat,
-        videoCodec,
-        audioCodec,
+        output_format,
+        video_codec,
+        audio_codec,
         dimensions: targetWidth && targetHeight ? `${targetWidth}x${targetHeight}` : `${sourceWidth}x${sourceHeight}`,
         duration: sourceDuration,
         mimeType: MIME_TYPES[output_format] || 'video/mp4',
@@ -479,9 +681,9 @@ class VideoProcessor extends Processor {
       logger.info('Video transcoded', {
         originalSize: input.length,
         outputSize: outputBuffer.length,
-        videoCodec,
-        audioCodec,
-        outputFormat,
+        video_codec,
+        audio_codec,
+        output_format,
         dimensions: targetWidth && targetHeight ? `${targetWidth}x${targetHeight}` : 'source',
       });
 
@@ -491,9 +693,9 @@ class VideoProcessor extends Processor {
           originalSize: input.length,
           outputSize: outputBuffer.length,
           mode: 'transcode',
-          outputFormat,
-          videoCodec,
-          audioCodec,
+          output_format,
+          video_codec,
+          audio_codec,
           dimensions: targetWidth && targetHeight ? `${targetWidth}x${targetHeight}` : `${sourceWidth}x${sourceHeight}`,
           duration: sourceDuration,
           mimeType: MIME_TYPES[output_format] || 'video/mp4',

@@ -174,4 +174,12 @@ export class Context {
   get rawResponse() {
     return this.#res;
   }
+
+  /**
+   * Get the underlying raw request object.
+   * Use sparingly - for streaming uploads.
+   */
+  get rawRequest() {
+    return this.#req;
+  }
 }

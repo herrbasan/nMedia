@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import Processor from '../../pipeline/Processor.js';
@@ -51,12 +52,11 @@ class ImageProcessor extends Processor {
   /**
    * Process crop operations
    */
-  async processCrop(input, metadata, cropOptions, format, quality, onProgress) {
+  async processCrop(input, metadata, cropOptions, format, quality, onProgress, originalSize) {
     const { type, left, top, right, bottom, width: widthPercent, height: heightPercent, grid } = cropOptions;
     const results = [];
 
     if (type === 'region') {
-      // Normalized region crop
       const leftPx = Math.round(left * metadata.width);
       const topPx = Math.round(top * metadata.height);
       const rightPx = Math.round(right * metadata.width);
@@ -71,7 +71,6 @@ class ImageProcessor extends Processor {
 
       results.push({ index: null, buffer: cropped, bounds: { left: leftPx, top: topPx, width: cropWidth, height: cropHeight } });
     } else if (type === 'center') {
-      // Center crop by percentage
       const pct = widthPercent || 50;
       const heightPct = heightPercent || pct;
       const cropWidth = Math.round(metadata.width * (pct / 100));
@@ -86,7 +85,6 @@ class ImageProcessor extends Processor {
 
       results.push({ index: null, buffer: cropped, bounds: { left: leftPx, top: topPx, width: cropWidth, height: cropHeight } });
     } else if (type === 'grid') {
-      // Grid-based crop
       const { cols, rows, cells = [] } = grid;
       const cellWidth = Math.floor(metadata.width / cols);
       const cellHeight = Math.floor(metadata.height / rows);
@@ -110,7 +108,6 @@ class ImageProcessor extends Processor {
       }
     }
 
-    // Encode all results
     onProgress?.(80, 'Encoding output');
     const encoded = await Promise.all(results.map(async (r) => {
       const encodedBuffer = await this.encodeBuffer(r.buffer, format, quality);
@@ -127,7 +124,7 @@ class ImageProcessor extends Processor {
     return {
       buffer: encoded[0]?.base64 || null,
       metadata: {
-        originalSize: input.length,
+        originalSize: originalSize || (Buffer.isBuffer(input) ? input.length : 0),
         crops: encoded,
         format,
         originalWidth: metadata.width,
@@ -169,27 +166,36 @@ class ImageProcessor extends Processor {
       format = 'jpeg',
       strip_exif = true,
       crop = null,
+      _inputSource,
     } = options;
 
-    onProgress?.(5, 'Loading image');
+    let inputSource = input;
+    let originalSize;
 
-    // nImage handles format detection and decoding automatically
-    // RAW, HEIC, and 150+ formats are supported natively
-    onProgress?.(10, 'Decoding image (nImage)');
-
-    // Get metadata first
-    const metadata = await nImage(input).metadata();
-    onProgress?.(15, `Detected: ${metadata.format || 'unknown'}, ${metadata.width}x${metadata.height}`);
-
-    // Handle crop operations
-    if (crop) {
-      return this.processCrop(input, metadata, crop, format, quality, onProgress);
+    // Path-based input
+    if (_inputSource === 'path' && typeof input === 'string' && fs.existsSync(input)) {
+      const stat = fs.statSync(input);
+      originalSize = stat.size;
+      inputSource = input;
+    } else if (Buffer.isBuffer(input)) {
+      originalSize = input.length;
+      inputSource = input;
+    } else {
+      throw new Error('Invalid image input: must be file path or buffer');
     }
 
-    // Build pipeline
-    let pipeline = nImage(input);
+    onProgress?.(5, 'Loading image');
+    onProgress?.(10, 'Decoding image (nImage)');
 
-    // Calculate resize dimensions
+    const metadata = await nImage(inputSource).metadata();
+    onProgress?.(15, `Detected: ${metadata.format || 'unknown'}, ${metadata.width}x${metadata.height}`);
+
+    if (crop) {
+      return this.processCrop(inputSource, metadata, crop, format, quality, onProgress, originalSize);
+    }
+
+    let pipeline = nImage(inputSource);
+
     let width = metadata.width;
     let height = metadata.height;
     const needsResize = width > max_dimension || height > max_dimension;
@@ -207,15 +213,12 @@ class ImageProcessor extends Processor {
       pipeline.resize(width, height, { fit: 'inside' });
     }
 
-    // Strip EXIF if requested (nImage doesn't preserve EXIF by default in output)
     if (!strip_exif) {
-      // nImage doesn't have direct EXIF preservation, but we can add it later
       onProgress?.(50, 'Processing metadata');
     } else {
       onProgress?.(50, 'Stripping metadata');
     }
 
-    // Apply format and quality
     onProgress?.(70, `Converting to ${format}`);
     switch (format) {
       case 'jpeg':
@@ -238,11 +241,10 @@ class ImageProcessor extends Processor {
     onProgress?.(85, 'Encoding output');
     const outputBuffer = await pipeline.toBuffer();
 
-    // Get output metadata
     const outputMetadata = await nImage(outputBuffer).metadata();
 
     logger.info('Image processed', {
-      originalSize: input.length,
+      originalSize,
       outputSize: outputBuffer.length,
       dimensions: `${outputMetadata.width}x${outputMetadata.height}`,
       format,
@@ -253,7 +255,7 @@ class ImageProcessor extends Processor {
     return {
       buffer: outputBuffer,
       metadata: {
-        originalSize: input.length,
+        originalSize,
         outputSize: outputBuffer.length,
         width: outputMetadata.width,
         height: outputMetadata.height,

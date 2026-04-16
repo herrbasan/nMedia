@@ -32,6 +32,7 @@ export default {
   maxFileSizeBytes: config.media.maxFileSizeMb * 1024 * 1024,
   gpuPlatform: config.media.gpu.platform,
   gpuDevice: config.media.gpu.device ?? 0,
+  gpuMaxConcurrentSessions: config.media.gpu.maxConcurrentSessions ?? 4,
   logLevel: config.logging.level,
   logsDir: path.resolve(process.cwd(), config.logging.logsDir),
   sessionPrefix: config.logging.sessionPrefix,
@@ -42,4 +43,7 @@ export default {
   maxConcurrentTasks: config.workers.maxConcurrentTasks,
   workersMode: config.workers.mode ?? 'queue',
   messageTransport: config.messaging.transport,
+  allowedInputPaths: (config.media.allowedInputPaths || []).map(p => path.resolve(p)),
+  allowUncPaths: config.media.allowUncPaths ?? false,
+  maxConcurrentUploads: config.server.maxConcurrentUploads ?? 4,
 };

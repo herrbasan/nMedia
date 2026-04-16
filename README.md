@@ -4,124 +4,208 @@ A stateless Node.js microservice for optimizing images, audio, and video for LLM
 
 ## Overview
 
-Media Service is designed as a sidecar service for the LLM Gateway. It receives large multimodal payloads (images, audio, video), aggressively compresses/downscales them, and returns LLM-friendly formats. By isolating this CPU-heavy workload, the core Gateway remains lightweight.
+Media Service receives large multimodal payloads, aggressively compresses/downscales them, and returns LLM-friendly formats. It uses native N-API modules for zero-process-spawning media processing.
 
 ## Tech Stack
 
 - **Runtime:** Node.js 18+
 - **HTTP Server:** Native Node.js `http` module with custom Router
 - **Image Processing:** nImage (native NAPI with libraw/libheif/ImageMagick)
-- **Audio/Video Processing:** FFmpeg CLI
-- **File Upload:** Custom multipart parser
+- **Audio/Video Processing:** nVideo (native NAPI with direct FFmpeg C API integration)
+- **Uploads:** Raw binary streaming to `POST /v1/upload`
 
 ## Project Structure
 
 ```
 src/
-├── index.js              # Application entry point
+├── index.js                    # Application entry point
 ├── config/
-│   └── config.js         # Configuration loader (config.json)
+│   └── config.js               # Configuration loader (config.json)
 ├── server/
-│   ├── HttpServer.js     # Native HTTP server with routing
-│   ├── Router.js         # Request routing
-│   ├── Context.js        # Request context handling
-│   ├── MultipartParser.js # File upload parsing
-│   ├── Sender.js         # Response utilities
-│   └── SseConnection.js  # SSE connection management
+│   ├── HttpServer.js           # Native HTTP server with routing
+│   ├── Router.js               # Request routing
+│   ├── Context.js              # Request context handling
+│   ├── MultipartParser.js      # File upload parsing (legacy)
+│   ├── Sender.js               # Response utilities
+│   ├── SseConnection.js        # SSE connection management
+│   └── StaticFileServer.js     # Static file serving
 ├── pipeline/
-│   ├── PipelineExecutor.js   # Processor registry and execution
-│   ├── Processor.js          # Base processor class
-│   └── ProgressReporter.js   # SSE progress reporting
+│   ├── PipelineExecutor.js     # Processor registry and execution
+│   ├── Processor.js            # Base processor class
+│   └── ProgressReporter.js     # SSE progress reporting
 ├── processors/
-│   ├── image/ImageProcessor.js   # Image resize/convert/crop
-│   ├── audio/AudioProcessor.js    # Audio resampling
-│   └── video/VideoProcessor.js    # Video audio extraction & keyframes
+│   ├── image/ImageProcessor.js # Image resize/convert/crop
+│   ├── audio/AudioProcessor.js # Audio resampling/transcoding
+│   └── video/VideoProcessor.js # Video audio extraction, keyframes, transcode
 ├── api/routes/
-│   ├── image.js   # POST /v1/process/image, /v1/process/image/crop
-│   ├── audio.js   # POST /v1/process/audio
-│   └── video.js   # POST /v1/process/video
-├── tasks/         # Async task system (Task, TaskQueue, TaskManager, Worker)
-├── cache/         # Asset caching (AssetCache.js)
+│   ├── process.js              # POST /v1/process (unified)
+│   ├── upload.js               # POST /v1/upload
+│   ├── jobs.js                 # GET/DELETE /v1/jobs/*
+│   ├── image.js                # Legacy POST /v1/process/image
+│   ├── audio.js                # Legacy POST /v1/process/audio
+│   ├── video.js                # Legacy POST /v1/process/video
+│   ├── assets.js               # Asset cache endpoints
+│   └── tasks.js                # Legacy task system endpoints
+├── jobs/
+│   └── JobStore.js             # Disk-backed job/upload persistence
+├── tasks/
+│   ├── TaskManager.js          # Task coordination
+│   ├── TaskQueue.js            # FIFO queue with concurrency control
+│   ├── TaskStore.js            # In-memory task storage
+│   ├── Worker.js               # Task worker (queue + thread modes)
+│   └── TaskWorker.js           # Worker thread bootstrap
+├── cache/
+│   └── AssetCache.js           # Disk-backed asset cache with TTL/LRU
 └── utils/
-    ├── logger.js      # Structured logging (nLogger)
-    └── uuid.js        # UUID generation
+    ├── logger.js               # Structured logging (nLogger)
+    ├── MagicByteDetector.js    # File type detection
+    └── uuid.js                 # UUID generation
 ```
 
 ## API Endpoints
 
-### `GET /health`
+### New Architecture (Recommended)
 
-Health check endpoint reporting processor status.
+#### `POST /v1/upload`
+Stream raw binary upload. Returns a `fileId` for processing.
 
-### `POST /v1/process/image`
+**Headers:**
+- `Content-Length` (required)
+- `X-Original-Filename` (optional)
+- `X-Upload-Id` (optional, for idempotency)
 
-Process/resize an image.
+**Response:**
+```json
+{
+  "fileId": "upload-abc-123",
+  "size": 52428800,
+  "detectedType": "video",
+  "detectedMimeType": "video/mp4",
+  "expiresAt": "2026-04-16T20:00:00Z",
+  "status": "ready"
+}
+```
 
-**Parameters:**
-- `file` (multipart) or `base64` - Input image
-- `max_dimension` (default: 1024) - Longest edge in pixels
-- `quality` (default: 85) - Output quality 1-100
-- `format` (default: jpeg) - Output format: jpeg, png, webp, avif, gif
-- `strip_exif` (default: true) - Remove EXIF metadata
-- `response_type` (default: base64) - Response format: base64 or file
+#### `POST /v1/process`
+Unified processing endpoint. Supports two patterns:
 
-### `POST /v1/process/image/crop`
+**Pattern A - Path-based:**
+```json
+{
+  "input_path": "C:\\Media\\video.mp4",
+  "processor": "video",
+  "mode": "extract_audio",
+  "options": { "format": "mp3" }
+}
+```
 
-Crop an image by region, center, or grid.
+**Pattern B - Upload-based:**
+```json
+{
+  "fileId": "upload-abc-123",
+  "processor": "video",
+  "mode": "extract_audio",
+  "options": { "format": "mp3" }
+}
+```
 
-**Parameters:**
-- `base64` - Input image (required)
-- `crop.type` - Crop type: region, center, or grid
-- `crop.left/top/right/bottom` - Normalized coordinates (0-1) for region
-- `crop.widthPercent/heightPercent` - Percentage for center crop
-- `crop.grid.cols/rows/cells` - Grid crop configuration
+**Response:**
+```json
+{
+  "jobId": "job-xyz-789",
+  "status": "queued",
+  "progress_url": "/v1/jobs/job-xyz-789/progress",
+  "poll_url": "/v1/jobs/job-xyz-789"
+}
+```
 
-### `POST /v1/process/audio`
+#### `GET /v1/jobs/:jobId/progress`
+SSE endpoint for real-time progress.
 
-Process/resample audio for STT models.
+#### `GET /v1/jobs/:jobId`
+Polling endpoint for job status.
 
-**Parameters:**
-- `file` (multipart) or `base64` - Input audio
-- `sample_rate` (default: 16000) - Output sample rate
-- `channels` (default: 1) - Output channels (1=mono, 2=stereo)
-- `format` (default: mp3) - Output format: mp3, wav, ogg, m4a
-- `response_type` (default: base64) - Response format
+#### `DELETE /v1/jobs/:jobId`
+Cancel a queued job.
 
-### `POST /v1/process/video`
+### Legacy Endpoints
 
-Process video - extract audio or keyframes.
+The following legacy endpoints still work for backward compatibility:
 
-**Parameters:**
-- `file` (multipart) or `base64` - Input video
-- `mode` (default: extract_audio) - extract_audio or extract_keyframes
-- `fps` (default: 1) - Frames per second for keyframe extraction
-- `max_dimension` (default: 1024) - Max dimension for extracted frames
-- `response_type` (default: base64) - Response format
+- `POST /v1/process/image` - Synchronous image processing
+- `POST /v1/process/image/crop` - Image cropping
+- `POST /v1/process/audio` - Synchronous audio processing
+- `POST /v1/process/video` - Synchronous video processing
+- `POST /v1/audio/probe` - Audio metadata probe
 
-### `GET /v1/process/progress/:jobId`
+### Asset Cache
 
-SSE endpoint for real-time job progress (when response_type is not base64).
+- `GET /v1/assets` - List assets
+- `GET /v1/assets/:id` - Download asset
+- `GET /v1/assets/:id/metadata` - Asset metadata
+- `DELETE /v1/assets/:id` - Delete asset
+- `DELETE /v1/assets` - Clear all assets
+
+### System
+
+- `GET /health` - Health check with processor status
 
 ## Configuration
 
 All configuration is managed via `config.json` in the project root. Required fields will throw an error at startup if missing.
+
+```json
+{
+  "server": {
+    "port": 3500,
+    "host": "0.0.0.0"
+  },
+  "media": {
+    "maxFileSizeMb": 500,
+    "gpu": {
+      "platform": "nvenc",
+      "device": 0
+    },
+    "allowedInputPaths": [
+      "C:\\Users\\dave\\Media\\input"
+    ]
+  },
+  "logging": {
+    "level": "info",
+    "logsDir": "./logs",
+    "sessionPrefix": "ms",
+    "retentionDays": 7
+  },
+  "cache": {
+    "dir": "./cache/assets",
+    "ttl": 3600,
+    "maxSize": 10737418240
+  },
+  "workers": {
+    "maxConcurrentTasks": 4,
+    "mode": "thread"
+  },
+  "messaging": {
+    "transport": "sse"
+  }
+}
+```
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `server.port` | Yes | HTTP server port |
 | `server.host` | No | Host to bind (default: 0.0.0.0) |
 | `media.maxFileSizeMb` | No | Max upload size in MB |
-| `media.ffmpegPath` | No | Path to FFmpeg executable |
-| `media.gpu.platform` | Yes | GPU platform: `nvenc`, `vaapi`, `cpu` |
+| `media.gpu.platform` | Yes | GPU platform: `nvenc`, `vaapi`, `qsv`, `cpu` |
 | `media.gpu.device` | No | GPU device index (default: 0) |
+| `media.allowedInputPaths` | No | Allowed directories for path-based processing |
 | `logging.level` | No | Log level: error, warn, info, debug |
 | `logging.logsDir` | Yes | Directory for log files |
-| `logging.sessionPrefix` | No | Log file prefix (default: ms) |
-| `logging.retentionDays` | No | Days to keep logs (default: 7) |
-| `cache.dir` | No | Cache directory (default: ./cache/assets) |
-| `cache.ttl` | No | Asset TTL in seconds (default: 3600) |
-| `cache.maxSize` | No | Max cache size in bytes (default: 10GB) |
-| `workers.maxConcurrentTasks` | No | Max parallel async tasks (default: 4) |
+| `cache.dir` | No | Cache directory |
+| `cache.ttl` | No | Asset TTL in seconds |
+| `cache.maxSize` | No | Max cache size in bytes |
+| `workers.maxConcurrentTasks` | No | Max parallel tasks |
+| `workers.mode` | No | `queue` or `thread` (default: queue) |
 
 ## Quick Start
 
@@ -130,7 +214,45 @@ npm install
 npm start
 ```
 
-## Usage Example
+## Testing
+
+```bash
+# Processor unit tests
+npm test
+
+# End-to-end HTTP tests (requires running service)
+npm run test:e2e
+```
+
+## Usage Examples
+
+### Upload then process (browser/remote clients)
+
+```bash
+# 1. Upload file
+curl -X POST http://localhost:3500/v1/upload \
+  -H "Content-Length: $(stat -c%s video.mp4)" \
+  -H "X-Original-Filename: video.mp4" \
+  --data-binary @video.mp4
+
+# 2. Process uploaded file
+curl -X POST http://localhost:3500/v1/process \
+  -H "Content-Type: application/json" \
+  -d '{"fileId":"upload-xxx","processor":"video","mode":"extract_audio","options":{"format":"mp3"}}'
+
+# 3. Stream progress
+curl -N http://localhost:3500/v1/jobs/JOB_ID/progress
+```
+
+### Path-based processing (local/Electron clients)
+
+```bash
+curl -X POST http://localhost:3500/v1/process \
+  -H "Content-Type: application/json" \
+  -d '{"input_path":"C:\\Media\\photo.CR2","processor":"image","options":{"max_dimension":1024,"format":"jpeg"}}'
+```
+
+### Legacy image processing
 
 ```bash
 curl -X POST http://localhost:3500/v1/process/image \
@@ -139,23 +261,14 @@ curl -X POST http://localhost:3500/v1/process/image \
   -F "format=webp"
 ```
 
-## Recent Changes
+## Worker Modes
 
-### Audio Probe Endpoint (NEW)
-- `POST /v1/audio/probe` - Extract metadata from audio files without processing
-- Returns: sampleRate, channels, duration, codec, bitrate
-- Uses ffprobe CLI
+**Queue mode** (`"queue"`): Tasks run serialized on the main thread. Lower memory footprint.
 
-### Audio Processing Enhancements
-- Added `'source'` option for `sample_rate` and `channels` parameters
-- When `'source'` is specified, preserves original audio properties
-- Returns `source_metadata` in response for comparison
+**Thread mode** (`"thread"`, recommended): Each task spawns a `worker_thread`. Native modules run off the main event loop, providing true parallelism and process isolation.
 
-### Web UI (mediaservice-web)
-- Full-featured web interface for testing all processors
-- Real-time file metadata display for audio
-- "Same as source" options for easy transcoding
-- Client-side processing time measurement
-- Responsive layout with NUI components
+## Web UI
+
+A web interface for testing is available at `http://localhost:3500/admin/` when the service is running.
 
 See `mediaservice-web/README.md` for UI details.

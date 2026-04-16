@@ -94,56 +94,22 @@ export class MultipartParser {
         
         let bodyEnd;
         const endBoundaryStr = `\r\n--${this.boundary}`;
-        const endBoundaryFull = `\r\n--${this.boundary}--`;
-        
-        // Check if this is the last part by looking at the end of the file
-        const tailBuf = this._readBuffer(fd, Math.max(0, fileSize - 200), 200);
-        const isLastPart = tailBuf && tailBuf.includes(`--${this.boundary}--`);
-        
-        if (isLastPart && !filename) {
-          // Last part is a text field
-          // Find where the end boundary starts
-          const endMarkerPos = this._findInFile(fd, Buffer.from(endBoundaryFull), bodyStart, 16384);
-          if (endMarkerPos === -1) {
-            bodyEnd = fileSize;
-          } else {
-            bodyEnd = endMarkerPos;
-            // Remove trailing \r\n
-            const trailingCheck = this._readBuffer(fd, bodyEnd - 2, 2);
-            if (trailingCheck && trailingCheck[0] === 13 && trailingCheck[1] === 10) {
-              bodyEnd -= 2;
-            }
-          }
-        } else if (filename) {
-          // File part - body ends at the last \r\n--boundary in the file
-          // Search backwards from end of file
-          const endMarkerPos = this._findBoundaryFromEnd(fd, endBoundaryStr, fileSize, 16384);
-          if (endMarkerPos === -1) {
-            bodyEnd = fileSize;
-          } else {
-            bodyEnd = endMarkerPos;
-            // Remove trailing \r\n before boundary
-            const trailingCheck = this._readBuffer(fd, bodyEnd - 2, 2);
-            if (trailingCheck && trailingCheck[0] === 13 && trailingCheck[1] === 10) {
-              bodyEnd -= 2;
-            }
-          }
+
+        // Find next boundary scanning forward
+        let nextBoundaryPos = this._findInFile(fd, Buffer.from(endBoundaryStr), bodyStart, 1024 * 1024);
+        if (nextBoundaryPos === -1) {
+          bodyEnd = fileSize;
         } else {
-          // Non-file, non-last part - find next boundary
-          const nextBoundaryPos = this._findInFile(fd, Buffer.from(endBoundaryStr), bodyStart, 16384);
-          if (nextBoundaryPos === -1) {
-            bodyEnd = fileSize;
-          } else {
-            bodyEnd = nextBoundaryPos;
-            const trailingCheck = this._readBuffer(fd, bodyEnd - 2, 2);
-            if (trailingCheck && trailingCheck[0] === 13 && trailingCheck[1] === 10) {
-              bodyEnd -= 2;
-            }
+          bodyEnd = nextBoundaryPos;
+          // Remove trailing \r\n before boundary
+          const trailingCheck = this._readBuffer(fd, bodyEnd - 2, 2);
+          if (trailingCheck && trailingCheck[0] === 13 && trailingCheck[1] === 10) {
+            bodyEnd -= 2;
           }
         }
-        
+
         const bodyLength = bodyEnd - bodyStart;
-        
+
         if (filename && bodyLength > 0) {
           // File part - extract to separate file
           const ext = path.extname(filename) || '.bin';
@@ -171,9 +137,9 @@ export class MultipartParser {
         }
         
         // Move past this part's boundary
-        if (isLastPart) break;
         
-        const nextBoundaryPos = this._findInFile(fd, Buffer.from(endBoundaryStr), bodyEnd, 16384);
+        
+        nextBoundaryPos = this._findInFile(fd, Buffer.from(endBoundaryStr), bodyEnd, 1024*1024);
         if (nextBoundaryPos === -1) break;
         pos = nextBoundaryPos + endBoundaryStr.length;
         

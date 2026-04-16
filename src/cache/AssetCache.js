@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { createReadStream } from 'fs';
 import { v4 as uuidv4 } from '../utils/uuid.js';
 import logger from '../utils/logger.js';
 import config from '../config/config.js';
@@ -11,30 +12,47 @@ import config from '../config/config.js';
  * @property {'image'|'audio'|'video'} type
  * @property {string} mimeType
  * @property {number} size - Bytes
- * @property {string} storagePath - Relative to cache root
- * @property {number} createdAt - Unix timestamp
- * @property {number} expiresAt - Unix timestamp
+ * @property {string} storagePath - Absolute path on disk
+ * @property {number} createdAt - Unix timestamp (ms)
+ * @property {number} expiresAt - Unix timestamp (ms)
  * @property {number|null} retrievedAt - Unix timestamp when first retrieved
+ * @property {number} lastAccessed - Unix timestamp (ms) for LRU
  * @property {Object} metadata
  */
 
 /**
- * In-memory asset metadata store with TTL-based disk storage.
+ * Disk-backed asset storage with TTL management and LRU eviction.
+ * Files stored on disk, metadata tracked in memory.
+ * Supports Range requests for partial downloads.
  */
 export class AssetCache {
   constructor() {
     /** @type {Map<string, AssetEntry>} */
     this.assets = new Map();
     this.cacheDir = config.cacheDir;
-    this.ttl = (config.cacheTtl || 3600) * 1000; // Convert to ms
-    this.maxSize = config.cacheMaxSize || 10737418240; // 10GB default
+    this.ttl = (config.cacheTtl || 3600) * 1000;
+    this.maxSize = config.cacheMaxSize || 10737418240;
+    this.currentSize = 0;
     this.cleanupInterval = null;
 
-    // Ensure cache directory exists
     this._ensureCacheDir();
-
-    // Start background cleanup
+    this._loadExisting();
     this._startCleanup();
+  }
+
+  _loadExisting() {
+    try {
+      const files = fs.readdirSync(this.cacheDir);
+      for (const file of files) {
+        const filePath = path.join(this.cacheDir, file);
+        const stat = fs.statSync(filePath);
+        if (stat.isFile()) {
+          this.currentSize += stat.size;
+        }
+      }
+    } catch (err) {
+      logger.warn('Failed to scan existing cache files', { error: err.message });
+    }
   }
 
   /**
@@ -128,7 +146,7 @@ export class AssetCache {
   }
 
   /**
-   * Store an asset in cache
+   * Store a buffer as an asset.
    * @param {'image'|'audio'|'video'} type
    * @param {Buffer} buffer - Asset data
    * @param {string} mimeType - MIME type
@@ -141,11 +159,8 @@ export class AssetCache {
     const storagePath = this._getStoragePath(id, extension);
     const now = Date.now();
 
-    // Write file to disk
     fs.writeFileSync(storagePath, buffer);
 
-    // Create asset entry
-    /** @type {AssetEntry} */
     const asset = {
       id,
       type,
@@ -154,17 +169,79 @@ export class AssetCache {
       storagePath,
       createdAt: now,
       expiresAt: now + this.ttl,
+      retrievedAt: null,
+      lastAccessed: now,
       metadata,
     };
 
     this.assets.set(id, asset);
-    logger.debug('Asset cached', { id, type, size: buffer.length });
+    this.currentSize += buffer.length;
 
+    if (this.currentSize > this.maxSize) {
+      this._enforceMaxSize();
+    }
+
+    logger.debug('Asset cached', { id, type, size: buffer.length });
     return asset;
   }
 
   /**
-   * Get an asset by ID
+   * Store a file from disk path as an asset (no buffer copy).
+   * @param {'image'|'audio'|'video'} type
+   * @param {string} sourcePath - Path to source file
+   * @param {string} mimeType - MIME type
+   * @param {Object} [metadata] - Additional metadata
+   * @returns {AssetEntry}
+   */
+  storeFile(type, sourcePath, mimeType, metadata = {}) {
+    const id = uuidv4();
+    const extension = this._getExtension(mimeType);
+    const storagePath = this._getStoragePath(id, extension);
+    const now = Date.now();
+
+    fs.copyFileSync(sourcePath, storagePath);
+    const stat = fs.statSync(storagePath);
+
+    const asset = {
+      id,
+      type,
+      mimeType,
+      size: stat.size,
+      storagePath,
+      createdAt: now,
+      expiresAt: now + this.ttl,
+      retrievedAt: null,
+      lastAccessed: now,
+      metadata,
+    };
+
+    this.assets.set(id, asset);
+    this.currentSize += stat.size;
+
+    if (this.currentSize > this.maxSize) {
+      this._enforceMaxSize();
+    }
+
+    logger.debug('Asset cached from file', { id, type, size: stat.size, sourcePath });
+    return asset;
+  }
+
+  /**
+   * Enforce max cache size via LRU eviction.
+   * @private
+   */
+  _enforceMaxSize() {
+    const sorted = Array.from(this.assets.values()).sort((a, b) => a.lastAccessed - b.lastAccessed);
+
+    for (const asset of sorted) {
+      if (this.currentSize <= this.maxSize * 0.8) break;
+      this._deleteFile(asset);
+      this.assets.delete(asset.id);
+    }
+  }
+
+  /**
+   * Get an asset by ID.
    * @param {string} id
    * @returns {AssetEntry|null}
    */
@@ -172,17 +249,18 @@ export class AssetCache {
     const asset = this.assets.get(id);
     if (!asset) return null;
 
-    // Check if expired
     if (Date.now() > asset.expiresAt) {
       this.delete(id);
       return null;
     }
 
+    asset.lastAccessed = Date.now();
     return asset;
   }
 
   /**
-   * Get asset file buffer
+   * Get asset file buffer (for backward compatibility).
+   * Use getStream() for large files.
    * @param {string} id
    * @returns {Buffer|null}
    */
@@ -195,10 +273,34 @@ export class AssetCache {
       return null;
     }
 
-    // Mark as retrieved (reduces TTL for early cleanup)
     this.markRetrieved(id);
-
     return fs.readFileSync(asset.storagePath);
+  }
+
+  /**
+   * Get readable stream for an asset. Supports Range requests.
+   * @param {string} id
+   * @param {Object} [range] - { start, end } for partial reads
+   * @returns {import('fs').ReadStream|null}
+   */
+  getStream(id, range = null) {
+    const asset = this.get(id);
+    if (!asset) return null;
+
+    if (!fs.existsSync(asset.storagePath)) {
+      this.delete(id);
+      return null;
+    }
+
+    const opts = {};
+    if (range && typeof range.start === 'number') {
+      opts.start = range.start;
+      if (typeof range.end === 'number') {
+        opts.end = range.end;
+      }
+    }
+
+    return createReadStream(asset.storagePath, opts);
   }
 
   /**
@@ -222,7 +324,7 @@ export class AssetCache {
   }
 
   /**
-   * Delete an asset
+   * Delete an asset.
    * @param {string} id
    * @returns {boolean}
    */
@@ -230,14 +332,27 @@ export class AssetCache {
     const asset = this.assets.get(id);
     if (!asset) return false;
 
-    // Delete file if exists
-    if (fs.existsSync(asset.storagePath)) {
-      fs.unlinkSync(asset.storagePath);
-    }
-
+    this._deleteFile(asset);
     this.assets.delete(id);
     logger.debug('Asset deleted', { id });
     return true;
+  }
+
+  /**
+   * Delete the file for an asset and update size tracking.
+   * @param {AssetEntry} asset
+   * @private
+   */
+  _deleteFile(asset) {
+    try {
+      if (asset.storagePath && fs.existsSync(asset.storagePath)) {
+        const stat = fs.statSync(asset.storagePath);
+        this.currentSize -= stat.size;
+        fs.unlinkSync(asset.storagePath);
+      }
+    } catch (err) {
+      logger.warn('Failed to delete asset file', { assetId: asset.id, error: err.message });
+    }
   }
 
   /**
@@ -275,18 +390,13 @@ export class AssetCache {
   }
 
   /**
-   * Get cache statistics
+   * Get cache statistics.
    * @returns {Object}
    */
   getStats() {
-    let totalSize = 0;
-    for (const asset of this.assets.values()) {
-      totalSize += asset.size;
-    }
-
     return {
       totalAssets: this.assets.size,
-      totalSizeBytes: totalSize,
+      totalSizeBytes: this.currentSize,
       maxSizeBytes: this.maxSize,
       ttlSeconds: this.ttl / 1000,
       cacheDir: this.cacheDir,

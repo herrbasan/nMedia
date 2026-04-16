@@ -41,13 +41,22 @@ class AudioProcessor extends Processor {
   }
 
   async probe(input) {
-    const inputId = uuidv4();
-    const inputExt = this._detectInputExtension(input);
-    const inputPath = path.join(config.cacheDir, `probe-${inputId}.${inputExt}`);
+    let inputPath = null;
+    let shouldCleanup = false;
+
+    if (typeof input === 'string' && fs.existsSync(input)) {
+      inputPath = input;
+    } else if (Buffer.isBuffer(input)) {
+      const inputId = uuidv4();
+      const inputExt = this._detectInputExtension(input);
+      inputPath = path.join(config.cacheDir, `probe-${inputId}.${inputExt}`);
+      fs.writeFileSync(inputPath, input);
+      shouldCleanup = true;
+    } else {
+      throw new Error('Invalid input for probe: must be file path or buffer');
+    }
 
     try {
-      fs.writeFileSync(inputPath, input);
-
       const probeResult = nVideo.probe(inputPath);
 
       const audioStream = probeResult.streams.find(s => s.type === 'audio');
@@ -69,14 +78,31 @@ class AudioProcessor extends Processor {
       logger.info('Audio probed', result);
       return result;
     } finally {
-      try { fs.unlinkSync(inputPath); } catch {}
+      if (shouldCleanup) { try { fs.unlinkSync(inputPath); } catch {} }
     }
   }
 
   async process(input, options = {}, onProgress) {
+    const inputSource = options._inputSource || 'buffer';
+    let inputPath = null;
+    let shouldCleanupInput = false;
+
+    // Resolve input path
+    if (inputSource === 'path' && typeof input === 'string' && fs.existsSync(input)) {
+      inputPath = input;
+    } else if (Buffer.isBuffer(input)) {
+      const inputId = uuidv4();
+      const inputExt = this._detectInputExtension(input);
+      inputPath = path.join(config.cacheDir, `input-${inputId}.${inputExt}`);
+      fs.writeFileSync(inputPath, input);
+      shouldCleanupInput = true;
+    } else {
+      throw new Error('Invalid audio input: must be file path or buffer');
+    }
+
     let sourceMetadata;
     try {
-      sourceMetadata = await this.probe(input);
+      sourceMetadata = await this.probe(inputPath);
     } catch (err) {
       logger.warn('Failed to probe source audio, using defaults', { error: err.message });
       sourceMetadata = { sampleRate: 44100, channels: 2 };
@@ -91,18 +117,13 @@ class AudioProcessor extends Processor {
     const targetSampleRate = sample_rate === 'source' ? sourceMetadata.sampleRate : sample_rate;
     const targetChannels = channels === 'source' ? sourceMetadata.channels : channels;
 
-    const inputId = uuidv4();
     const outputId = uuidv4();
-
-    const inputExt = this._detectInputExtension(input);
-    const inputPath = path.join(config.cacheDir, `input-${inputId}.${inputExt}`);
     const outputExt = FORMAT_EXTENSIONS[format] || format;
     const outputPath = path.join(config.cacheDir, `output-${outputId}.${outputExt}`);
 
-    try {
-      onProgress?.(5, 'Preparing audio');
-      fs.writeFileSync(inputPath, input);
+    const originalSize = fs.statSync(inputPath).size;
 
+    try {
       onProgress?.(10, 'Processing audio');
 
       await new Promise((resolve, reject) => {
@@ -131,13 +152,13 @@ class AudioProcessor extends Processor {
 
       const outputBuffer = fs.readFileSync(outputPath);
 
-      try { fs.unlinkSync(inputPath); } catch {}
       try { fs.unlinkSync(outputPath); } catch {}
+      if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
 
       onProgress?.(100, 'Complete');
 
       logger.info('Audio processed', {
-        originalSize: input.length,
+        originalSize,
         outputSize: outputBuffer.length,
         sourceSampleRate: sourceMetadata.sampleRate,
         sourceChannels: sourceMetadata.channels,
@@ -149,7 +170,7 @@ class AudioProcessor extends Processor {
       return {
         buffer: outputBuffer,
         metadata: {
-          originalSize: input.length,
+          originalSize,
           outputSize: outputBuffer.length,
           sampleRate: targetSampleRate,
           channels: targetChannels,
@@ -159,8 +180,8 @@ class AudioProcessor extends Processor {
         },
       };
     } catch (error) {
-      try { fs.unlinkSync(inputPath); } catch {}
       try { fs.unlinkSync(outputPath); } catch {}
+      if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
 
       logger.error('Audio processing error', { error: error.message });
       throw error;

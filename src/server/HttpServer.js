@@ -29,7 +29,8 @@ export class HttpServer {
       logger.info(`${req.method} ${req.url}`);
 
       // Parse body for methods that typically have bodies
-      if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+      // Skip for /v1/upload - handler streams raw binary directly
+      if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.url !== '/v1/upload') {
         await ctx.parseBody();
       }
 

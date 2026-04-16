@@ -29,6 +29,14 @@ import {
   handleClearAssets,
   handleListAssets,
 } from './api/routes/assets.js';
+import { handleUpload } from './api/routes/upload.js';
+import { handleProcess } from './api/routes/process.js';
+import {
+  handleJobProgress,
+  handleGetJob,
+  handleCancelJob,
+  handleListJobs,
+} from './api/routes/jobs.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -43,13 +51,27 @@ const router = new Router();
 
 // Register routes
 router.addRoute('GET', '/health', handleHealth);
+
+// Legacy routes (still supported during migration)
 router.addRoute('POST', '/v1/process/image', handleImage);
 router.addRoute('POST', '/v1/process/image/crop', handleImageCrop);
 router.addRoute('POST', '/v1/process/audio', handleAudio);
 router.addRoute('POST', '/v1/audio/probe', handleAudioProbe);
 router.addRoute('POST', '/v1/process/video', handleVideo);
 
-// Task system routes
+// New unified process endpoint
+router.addRoute('POST', '/v1/process', handleProcess);
+
+// Upload endpoint
+router.addRoute('POST', '/v1/upload', handleUpload);
+
+// Job management endpoints
+router.addRoute('GET', '/v1/jobs', handleListJobs);
+router.addRoute('GET', '/v1/jobs/:jobId', handleGetJob);
+router.addRoute('GET', '/v1/jobs/:jobId/progress', handleJobProgress);
+router.addRoute('DELETE', '/v1/jobs/:jobId', handleCancelJob);
+
+// Task system routes (legacy)
 router.addRoute('POST', '/v1/tasks', handleCreateTask);
 router.addRoute('GET', '/v1/tasks', handleListTasks);
 router.addRoute('GET', '/v1/tasks/stats', handleTaskStats);
