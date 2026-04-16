@@ -1,9 +1,6 @@
 [submodule "modules/nLogger"]
 	path = modules/nLogger
 	url = https://github.com/herrbasan/nLogger.git
-[submodule "modules/ffmpeg-napi-interface"]
-	path = modules/ffmpeg-napi-interface
-	url = https://github.com/herrbasan/ffmpeg-napi-interface.git
 [submodule "modules/nui_wc2"]
 	path = modules/nui_wc2
 	url = https://github.com/herrbasan/nui_wc2.git
