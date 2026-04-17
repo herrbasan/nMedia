@@ -43,6 +43,8 @@ export const JobStatus = {
  * @property {string} message - Current progress message
  * @property {string|null} assetId - Result asset ID when completed
  * @property {string|null} error - Error message when failed
+ * @property {string|null} outputPath - Optional filesystem path to write result to
+ * @property {boolean} deleted - Whether this job has been purged from active list
  * @property {number} createdAt - Unix timestamp (ms)
  * @property {number|null} startedAt - Unix timestamp (ms)
  * @property {number|null} completedAt - Unix timestamp (ms)
@@ -324,6 +326,8 @@ export class JobStore {
       message: 'Queued',
       assetId: null,
       error: null,
+      outputPath: opts.outputPath || null,
+      deleted: false,
       createdAt: now,
       startedAt: null,
       completedAt: null,

@@ -1,0 +1,135 @@
+/* Admin UI Styles */
+
+.status-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 0.5rem;
+}
+.status-dot.connected { background: var(--nui-success, #4caf50); }
+.status-dot.connecting { background: var(--nui-warning, #ff9800); }
+.status-dot.disconnected { background: var(--nui-danger, #f44336); }
+
+/* Job Cards - theme-agnostic backgrounds */
+.job-card {
+    background: rgba(128, 128, 128, 0.08);
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    transition: box-shadow 0.2s;
+    color: inherit;
+}
+.job-card:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+}
+.job-card.running {
+    border-left: 4px solid var(--nui-info, #2196f3);
+}
+.job-card.completed {
+    border-left: 4px solid var(--nui-success, #4caf50);
+}
+.job-card.failed {
+    border-left: 4px solid var(--nui-danger, #f44336);
+}
+.job-card.queued {
+    border-left: 4px solid rgba(128, 128, 128, 0.4);
+}
+.job-card.cancelled {
+    border-left: 4px solid var(--nui-warning, #ff9800);
+}
+
+.job-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+}
+.job-id {
+    font-family: monospace;
+    font-size: 0.85rem;
+    opacity: 0.7;
+}
+.job-processor {
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    background: rgba(128, 128, 128, 0.15);
+}
+.job-status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    text-transform: uppercase;
+}
+.job-status.queued { background: rgba(128,128,128,0.25); color: inherit; }
+.job-status.processing { background: var(--nui-info, #2196f3); color: #fff; }
+.job-status.completed { background: var(--nui-success, #4caf50); color: #fff; }
+.job-status.failed { background: var(--nui-danger, #f44336); color: #fff; }
+.job-status.cancelled { background: var(--nui-warning, #ff9800); color: #fff; }
+
+.job-progress {
+    width: 100%;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(128, 128, 128, 0.2);
+    overflow: hidden;
+    margin: 0.5rem 0;
+}
+.job-progress-bar {
+    height: 100%;
+    background: var(--nui-info, #2196f3);
+    transition: width 0.3s;
+}
+.job-message {
+    font-size: 0.85rem;
+    opacity: 0.8;
+}
+
+.job-output {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(128, 128, 128, 0.2);
+}
+.job-preview img,
+.job-preview audio,
+.job-preview video {
+    max-width: 100%;
+    max-height: 200px;
+    border-radius: 4px;
+}
+
+/* Dashboard stat boxes */
+.stat-box {
+    background: rgba(128, 128, 128, 0.08);
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+}
+.stat-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+}
+.stat-label {
+    opacity: 0.7;
+    font-size: 0.85rem;
+}
+
+/* Task Builder */
+.builder-section {
+    margin-bottom: 1.5rem;
+}
+.builder-section h3 {
+    margin-bottom: 0.5rem;
+    font-size: 1rem;
+}
+.option-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+}

@@ -36,6 +36,7 @@ import {
   handleGetJob,
   handleCancelJob,
   handleListJobs,
+  handleListActiveJobs,
 } from './api/routes/jobs.js';
 import { WebSocketServer } from './server/WebSocketServer.js';
 import { handleWebSocketMessage } from './api/routes/websocket.js';
@@ -69,6 +70,7 @@ router.addRoute('POST', '/v1/upload', handleUpload);
 
 // Job management endpoints
 router.addRoute('GET', '/v1/jobs', handleListJobs);
+router.addRoute('GET', '/v1/jobs/active', handleListActiveJobs);
 router.addRoute('GET', '/v1/jobs/:jobId', handleGetJob);
 router.addRoute('GET', '/v1/jobs/:jobId/progress', handleJobProgress);
 router.addRoute('DELETE', '/v1/jobs/:jobId', handleCancelJob);

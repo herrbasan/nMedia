@@ -53,6 +53,8 @@ export async function handleUpload(ctx) {
     const tempId = uuidv4();
     const tempPath = path.join(jobStore.uploadsDir, `upload-${tempId}.bin`);
 
+    logger.info('Upload started', { tempId, originalFilename, contentLength, activeUploads: activeUploads + 1 });
+
     activeUploads++;
     let uploadComplete = false;
     let bytesReceived = 0;
@@ -100,15 +102,20 @@ export async function handleUpload(ctx) {
           return;
         }
         writeStream.write(chunk);
+        if (bytesReceived % (1024 * 1024 * 50) < chunk.length) {
+          logger.info('Upload progress', { tempId, bytesReceived, percent: Math.round((bytesReceived / contentLength) * 100) });
+        }
       });
 
       await streamComplete;
 
       uploadComplete = true;
+      logger.info('Upload complete', { tempId, bytesReceived, originalFilename });
 
       // Magic byte validation
       const header = fs.readFileSync(tempPath, { length: 64 });
       const detected = MagicByteDetector.detect(header);
+      logger.info('Upload magic bytes detected', { tempId, detectedType: detected?.type, detectedMimeType: detected?.mimeType });
 
       if (!detected) {
         fs.unlinkSync(tempPath);
@@ -125,6 +132,8 @@ export async function handleUpload(ctx) {
         size: bytesReceived,
         uploadId,
       });
+
+      logger.info('Upload stored', { fileId: upload.fileId, tempPath, detectedType: detected.type, size: bytesReceived });
 
       const expiresAt = new Date(upload.expiresAt).toISOString();
 

@@ -43,7 +43,8 @@ export default {
   maxConcurrentTasks: config.workers.maxConcurrentTasks,
   workersMode: config.workers.mode ?? 'queue',
   messageTransport: config.messaging.transport,
-  allowedInputPaths: (config.media.allowedInputPaths || []).map(p => path.resolve(p)),
+  allowedInputPaths: (config.media.allowedInputPaths || []).map(p => p === '*' ? '*' : path.resolve(p)),
+  allowedOutputPaths: (config.media.allowedOutputPaths || []).map(p => p === '*' ? '*' : path.resolve(p)),
   allowUncPaths: config.media.allowUncPaths ?? false,
   maxConcurrentUploads: config.server.maxConcurrentUploads ?? 4,
 };

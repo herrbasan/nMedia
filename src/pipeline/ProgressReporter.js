@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from '../utils/uuid.js';
+import logger from '../utils/logger.js';
 
 /**
  * Manages SSE and WebSocket connections for progress reporting.
@@ -85,6 +86,10 @@ class ProgressReporter {
 
     // Send to direct connection if exists
     const directSender = this.#connections.get(jobId);
+    // Log pipeline lifecycle events (skip high-frequency progress to reduce noise)
+    if (event !== 'progress') {
+      logger.info('Progress event sent', { jobId, event, hasDirect: !!directSender, linkedCount: Array.from(this.#jobLinks.values()).filter(v => v === jobId).length });
+    }
     if (directSender) {
       this.#sendToSender(directSender, event, data, jobId);
     }
@@ -119,6 +124,11 @@ class ProgressReporter {
   progress(jobId, percent, message = '') {
     if (!jobId) return;
     this.send(jobId, 'progress', { percent, message });
+  }
+
+  start(jobId, data = {}) {
+    if (!jobId) return;
+    this.send(jobId, 'start', data);
   }
 
   /**

@@ -181,7 +181,7 @@ export class AssetCache {
       this._enforceMaxSize();
     }
 
-    logger.debug('Asset cached', { id, type, size: buffer.length });
+    logger.info('Asset stored', { id, type, size: buffer.length, mimeType, ttlSeconds: this.ttl / 1000 });
     return asset;
   }
 
@@ -222,7 +222,7 @@ export class AssetCache {
       this._enforceMaxSize();
     }
 
-    logger.debug('Asset cached from file', { id, type, size: stat.size, sourcePath });
+    logger.info('Asset stored from file', { id, type, size: stat.size, sourcePath });
     return asset;
   }
 
@@ -247,14 +247,19 @@ export class AssetCache {
    */
   get(id) {
     const asset = this.assets.get(id);
-    if (!asset) return null;
+    if (!asset) {
+      logger.info('Asset cache miss', { id });
+      return null;
+    }
 
     if (Date.now() > asset.expiresAt) {
+      logger.info('Asset expired', { id, expiredAt: new Date(asset.expiresAt).toISOString() });
       this.delete(id);
       return null;
     }
 
     asset.lastAccessed = Date.now();
+    logger.info('Asset cache hit', { id, type: asset.type, size: asset.size });
     return asset;
   }
 
@@ -319,7 +324,7 @@ export class AssetCache {
     asset.retrievedAt = Date.now();
     asset.expiresAt = Date.now(); // Expire immediately (will be cleaned on next cycle)
 
-    logger.debug('Asset marked as retrieved', { id, expiresAt: asset.expiresAt });
+    logger.info('Asset marked as retrieved', { id, expiresAt: asset.expiresAt });
     return true;
   }
 
@@ -334,7 +339,7 @@ export class AssetCache {
 
     this._deleteFile(asset);
     this.assets.delete(id);
-    logger.debug('Asset deleted', { id });
+    logger.info('Asset deleted', { id });
     return true;
   }
 

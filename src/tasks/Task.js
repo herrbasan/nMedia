@@ -1,3 +1,5 @@
+import logger from '../utils/logger.js';
+
 /**
  * Task status enum
  */
@@ -35,6 +37,8 @@ export class Task {
     this.percent = 0;
     /** @type {string|null} - Asset ID if result was stored in cache */
     this.assetId = null;
+    /** @type {string|null} - Optional filesystem path to write result to */
+    this.outputPath = null;
   }
 
   /**
@@ -43,6 +47,7 @@ export class Task {
   start() {
     this.status = TaskStatus.RUNNING;
     this.startedAt = Date.now();
+    logger.info('Task started', { taskId: this.id, type: this.type, mode: this.options?.mode });
     this.progressReporter?.send(this.id, 'start', { type: this.type });
   }
 
@@ -60,11 +65,12 @@ export class Task {
    * Mark task as completed
    * @param {Object} result - Processing result
    */
-  complete(result) {
+  complete(result, assetId = null) {
     this.status = TaskStatus.COMPLETED;
     this.completedAt = Date.now();
     this.result = result;
-    this.progressReporter?.complete(this.id, { metadata: result.metadata });
+    logger.info('Task marking complete', { taskId: this.id, assetId, duration: this.getDuration() });
+    this.progressReporter?.complete(this.id, { metadata: result.metadata, assetId });
   }
 
   /**
@@ -83,6 +89,7 @@ export class Task {
     this.status = TaskStatus.FAILED;
     this.completedAt = Date.now();
     this.error = error;
+    logger.info('Task failed', { taskId: this.id, error, duration: this.getDuration() });
     this.progressReporter?.error(this.id, error);
   }
 

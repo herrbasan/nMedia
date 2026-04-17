@@ -42,7 +42,7 @@ export class TaskQueue {
         this.queue.push(task);
         // Store resolver for when task starts
         this.waiters.set(task.id, { resolve, reject });
-        logger.debug('Task queued', { taskId: task.id, queueLength: this.queue.length });
+        logger.info('Task queued', { taskId: task.id, queueLength: this.queue.length, maxConcurrent: this.maxConcurrent, running: this.running.size });
       }
     });
   }
@@ -116,7 +116,7 @@ export class TaskQueue {
     task._onDone = cleanup;
     task._onError = cleanup;
 
-    logger.debug('Task dequeued', { taskId: task.id, running: this.running.size });
+    logger.info('Task dequeued', { taskId: task.id, running: this.running.size, queueRemaining: this.queue.length });
 
     // Call the processor if set (fire and forget, errors handled in processor)
     if (this.processor) {

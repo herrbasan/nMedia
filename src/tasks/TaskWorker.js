@@ -83,7 +83,7 @@ async function processAudio(inputSource, options, cacheDir) {
         },
         cache: false,
         onProgress: (p) => {
-          parentPort.postMessage({ type: 'progress', percent: p.percent, metadata: { speed: p.speed, bitrate: p.bitrate } });
+          parentPort.postMessage({ type: 'progress', percent: p.percent, message: `Processing: ${Math.round(p.percent)}%` });
         },
         onComplete: (result) => resolve(result),
         onError: (error) => reject(new Error(error.message || 'nVideo transcode failed')),
@@ -104,6 +104,7 @@ async function processVideo(inputSource, options, cacheDir) {
   const shouldCleanupInput = inputSource.type === 'buffer';
 
   if (mode === 'extract_audio') {
+    parentPort.postMessage({ type: 'progress', percent: 5, message: 'Mode: extract_audio' });
     const outputId = crypto.randomUUID();
     const outputPath = path.join(cacheDir, `output-${outputId}.${format}`);
 
@@ -114,7 +115,7 @@ async function processVideo(inputSource, options, cacheDir) {
           bitrate: 128000,
           cache: false,
           onProgress: (p) => {
-            parentPort.postMessage({ type: 'progress', percent: p.percent, metadata: { speed: p.speed, bitrate: p.bitrate } });
+            parentPort.postMessage({ type: 'progress', percent: p.percent, message: `Extracting audio: ${Math.round(p.percent)}%` });
           },
           onComplete: (result) => resolve(result),
           onError: (error) => reject(new Error(error.message || 'nVideo extractAudio failed')),
@@ -127,38 +128,119 @@ async function processVideo(inputSource, options, cacheDir) {
       if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
       try { fs.unlinkSync(outputPath); } catch {}
     }
-  } else {
-    // extract_keyframes
+  }
+
+  if (mode === 'transcode') {
+    parentPort.postMessage({ type: 'progress', percent: 5, message: 'Mode: transcode' });
+    const output_format = options.output_format || 'mp4';
+    const video_codec = options.video_codec || 'libx264';
+    const audio_codec = options.audio_codec || 'aac';
+    const width = options.width ? parseInt(options.width) : undefined;
+    const height = options.height ? parseInt(options.height) : undefined;
+    const crf = options.crf !== undefined ? parseInt(options.crf) : 23;
+    const preset = options.preset || 'medium';
+    const audio_bitrate = options.audio_bitrate !== undefined ? parseInt(options.audio_bitrate) : 128000;
+    const output_fps = options.fps ? parseInt(options.fps) : undefined;
+    const isNvenc = video_codec === 'h264_nvenc' || video_codec === 'hevc_nvenc';
+
+    parentPort.postMessage({ type: 'progress', percent: 10, message: 'Probing source video' });
+    const probeResult = nVideo.probe(inputPath);
+    const videoStream = probeResult.streams.find(s => s.type === 'video');
+    parentPort.postMessage({ type: 'progress', percent: 15, message: `Source: ${videoStream?.width}x${videoStream?.height}, ${probeResult.format.duration?.toFixed(1) || '?'}s` });
+    const audioStream = probeResult.streams.find(s => s.type === 'audio');
+    const sourceWidth = videoStream?.width;
+    const sourceHeight = videoStream?.height;
+    const sourceDuration = probeResult.format.duration;
+
+    let targetWidth = width;
+    let targetHeight = height;
+    if (targetWidth && !targetHeight) {
+      targetHeight = Math.round(sourceHeight * (targetWidth / sourceWidth));
+    } else if (targetHeight && !targetWidth) {
+      targetWidth = Math.round(sourceWidth * (targetHeight / sourceHeight));
+    }
+    if (targetWidth) targetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth + 1;
+    if (targetHeight) targetHeight = targetHeight % 2 === 0 ? targetHeight : targetHeight + 1;
+
+    const outputId = crypto.randomUUID();
+    const outputExt = { mp4: 'mp4', webm: 'webm', mkv: 'mkv', mov: 'mov' }[output_format] || output_format;
+    const outputPath = path.join(cacheDir, `output-${outputId}.${outputExt}`);
+
     try {
-      const probeResult = nVideo.probe(inputPath);
-      const videoStream = probeResult.streams.find(s => s.type === 'video');
-      if (!videoStream) throw new Error('No video stream found');
-
-      const duration = probeResult.format.duration;
-      const frameWidth = Math.min(max_dimension, videoStream.width);
-      const frameInterval = 1 / fps;
-      const frameCount = Math.floor(duration * fps);
-      const frames = [];
-
-      const img = await initNImage();
-
-      for (let i = 0; i < frameCount; i++) {
-        const timestamp = i * frameInterval;
-        parentPort.postMessage({ type: 'progress', percent: (i / frameCount) * 100, metadata: { frame: i + 1, total: frameCount } });
-
-        const thumb = nVideo.thumbnail(inputPath, { timestamp, width: frameWidth });
-        const jpegBuffer = await img({ data: thumb.data, width: thumb.width, height: thumb.height, channels: 3 }).jpeg({ quality: 85 }).toBuffer();
-        frames.push(jpegBuffer);
+      const transcodeOpts = {
+        cache: false,
+        video: { codec: video_codec, preset },
+      };
+      // NVENC codecs do not support CRF; omitting prevents native crash
+      if (!isNvenc) transcodeOpts.video.crf = crf;
+      if (targetWidth) transcodeOpts.video.width = targetWidth;
+      if (targetHeight) transcodeOpts.video.height = targetHeight;
+      if (output_fps) transcodeOpts.video.fps = output_fps;
+      if (audioStream) {
+        transcodeOpts.audio = { codec: audio_codec, bitrate: audio_bitrate };
       }
 
+      await new Promise((resolve, reject) => {
+        transcodeOpts.onProgress = (p) => {
+          const msg = p.speed ? `Transcoding: ${Math.round(p.percent)}% (${p.speed.toFixed(1)}x)` : `Transcoding: ${Math.round(p.percent)}%`;
+          parentPort.postMessage({ type: 'progress', percent: p.percent, message: msg });
+        };
+        transcodeOpts.onComplete = (result) => resolve(result);
+        transcodeOpts.onError = (error) => reject(new Error(error.message || 'nVideo transcode failed'));
+        nVideo.transcode(inputPath, outputPath, transcodeOpts);
+      });
+
+      const outputBuffer = fs.readFileSync(outputPath);
       return {
-        buffer: frames[0] || Buffer.alloc(0),
-        metadata: { frameCount: frames.length, mode, format: 'jpeg', fps, maxDimension: max_dimension, mimeType: 'image/jpeg' },
-        frames,
+        buffer: outputBuffer,
+        metadata: {
+          outputSize: outputBuffer.length,
+          mode: 'transcode',
+          output_format,
+          video_codec,
+          audio_codec,
+          dimensions: targetWidth && targetHeight ? `${targetWidth}x${targetHeight}` : `${sourceWidth}x${sourceHeight}`,
+          duration: sourceDuration,
+          mimeType: { mp4: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime' }[output_format] || 'video/mp4',
+        },
       };
     } finally {
       if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
+      try { fs.unlinkSync(outputPath); } catch {}
     }
+  }
+
+  // extract_keyframes
+  parentPort.postMessage({ type: 'progress', percent: 5, message: 'Mode: extract_keyframes' });
+  try {
+    const probeResult = nVideo.probe(inputPath);
+    const videoStream = probeResult.streams.find(s => s.type === 'video');
+    if (!videoStream) throw new Error('No video stream found');
+
+    const duration = probeResult.format.duration;
+    const frameWidth = Math.min(max_dimension, videoStream.width);
+    const frameInterval = 1 / fps;
+    const frameCount = Math.floor(duration * fps);
+    const frames = [];
+
+    const img = await initNImage();
+
+    for (let i = 0; i < frameCount; i++) {
+      const timestamp = i * frameInterval;
+      parentPort.postMessage({ type: 'progress', percent: (i / frameCount) * 100, message: `Extracted ${i + 1}/${frameCount} frames` });
+
+      const thumb = nVideo.thumbnail(inputPath, { timestamp, width: frameWidth });
+      const jpegBuffer = await img({ data: thumb.data, width: thumb.width, height: thumb.height, channels: 3 }).jpeg({ quality: 85 }).toBuffer();
+      frames.push(jpegBuffer);
+    }
+
+    return {
+      buffer: frames[0] || Buffer.alloc(0),
+      metadata: { frameCount: frames.length, mode, format: 'jpeg', fps, maxDimension: max_dimension, mimeType: 'image/jpeg' },
+      frames,
+    };
+  } finally {
+    if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
   }
 }
 
@@ -207,6 +289,15 @@ async function processImage(inputSource, options) {
 parentPort.on('message', async (message) => {
   const { type, mediaType, inputSource, options, cacheDir } = message;
 
+  if (type !== 'process') {
+    parentPort.postMessage({ type: 'error', message: `Unknown message type: ${type}` });
+    return;
+  }
+
+  const mode = options?.mode || 'extract_audio';
+  const inputDesc = inputSource?.type === 'path' ? inputSource.value : '<buffer>';
+  parentPort.postMessage({ type: 'progress', percent: 0, message: `TaskWorker started: ${mediaType} / ${mode}` });
+
   try {
     let result;
     if (mediaType === 'audio') {
@@ -219,6 +310,7 @@ parentPort.on('message', async (message) => {
       throw new Error(`Unknown media type: ${mediaType}`);
     }
 
+    parentPort.postMessage({ type: 'progress', percent: 99, message: 'Finalizing result' });
     parentPort.postMessage({ type: 'complete', result });
   } catch (error) {
     parentPort.postMessage({ type: 'error', message: error.message });

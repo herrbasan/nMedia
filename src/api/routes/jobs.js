@@ -151,6 +151,50 @@ export async function handleCancelJob(ctx) {
 }
 
 /**
+ * GET /v1/jobs/active
+ * List active (non-deleted) jobs for the admin monitor.
+ */
+export async function handleListActiveJobs(ctx) {
+  try {
+    const { processor, limit } = ctx.query;
+
+    let jobs = jobStore.getAllJobs();
+
+    if (processor) {
+      jobs = jobs.filter(j => j.processor === processor);
+    }
+
+    jobs.sort((a, b) => b.createdAt - a.createdAt);
+
+    const maxLimit = parseInt(limit) || 200;
+    jobs = jobs.slice(0, maxLimit);
+
+    ctx.json(200, {
+      jobs: jobs.map(j => ({
+        jobId: j.jobId,
+        fileId: j.fileId,
+        inputPath: j.inputPath,
+        processor: j.processor,
+        mode: j.mode,
+        status: j.status,
+        percent: j.percent,
+        message: j.message,
+        assetId: j.assetId,
+        outputPath: j.outputPath,
+        createdAt: new Date(j.createdAt).toISOString(),
+        startedAt: j.startedAt ? new Date(j.startedAt).toISOString() : null,
+        completedAt: j.completedAt ? new Date(j.completedAt).toISOString() : null,
+      })),
+      total: jobs.length,
+      stats: jobStore.getStats(),
+    });
+  } catch (error) {
+    logger.error('List active jobs failed', { error: error.message });
+    ctx.error(500, error.message);
+  }
+}
+
+/**
  * GET /v1/jobs
  * List all jobs with optional filters.
  */

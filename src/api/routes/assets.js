@@ -27,6 +27,8 @@ export async function handleGetAsset(ctx) {
       return;
     }
 
+    logger.info('Asset served', { id, type: asset.type, size: asset.size, mimeType: asset.mimeType });
+
     const filename = `${asset.id}.${assetCache._getExtension(asset.mimeType)}`;
     ctx.send(200, buffer, asset.mimeType, filename);
   } catch (error) {

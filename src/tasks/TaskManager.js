@@ -70,7 +70,7 @@ class TaskManager {
     const task = new Task(id, type, input, options, reporter);
 
     this.store.add(task);
-    logger.debug('Task created', { taskId: id, type });
+    logger.info('Task created', { taskId: id, type, optionsKeys: Object.keys(options || {}) });
 
     return task;
   }
@@ -89,6 +89,7 @@ class TaskManager {
    * @param {Task} task
    */
   async startTask(task) {
+    logger.info('Task starting', { taskId: task.id, type: task.type, mode: task.options?.mode, status: task.status });
     // Find an available worker
     const worker = this.workers.find((w) => !w.activeTask);
     if (worker) {

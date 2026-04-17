@@ -11,6 +11,9 @@
     },
     "allowedInputPaths": [
       "D:\\Work\\_GIT\\MediaService\\tests\\assets"
+    ],
+    "allowedOutputPaths": [
+      "D:\\Work\\_GIT\\MediaService\\tests\\converted"
     ]
   },
   "logging": {

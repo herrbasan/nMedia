@@ -39,8 +39,9 @@ export class TaskWorker {
    */
   async process(task) {
     this.activeTask = task;
-
     const jobId = task._jobId;
+    logger.info('Worker processing task', { workerId: this.id, taskId: task.id, jobId, type: task.type, mode: task.options?.mode, workerMode: this.mode });
+
     if (jobId) {
       jobStore.updateJob(jobId, JobStatus.PROCESSING, { message: 'Processing' });
     }
@@ -50,20 +51,23 @@ export class TaskWorker {
 
       let result;
       const inputSource = await this._resolveInput(task);
+      logger.info('Worker input resolved', { taskId: task.id, inputType: inputSource.type, inputValue: typeof inputSource.value === 'string' ? inputSource.value : '<buffer>' });
 
       if (this.mode === 'thread') {
+        logger.info('Worker spawning thread', { taskId: task.id });
         result = await this._processInThread(task, inputSource);
       } else {
+        logger.info('Worker running queue mode', { taskId: task.id });
         result = await this._processInQueue(task, inputSource);
       }
-
-      task.complete(result);
 
       // Store result in asset cache
       if (result?.buffer) {
         const mimeType = result.metadata?.mimeType || this._getMimeType(task.type);
+        logger.info('Worker caching result', { taskId: task.id, bufferSize: result.buffer.length, mimeType });
         const asset = assetCache.store(task.type, result.buffer, mimeType, result.metadata);
         task.setAssetId(asset.id);
+        logger.info('Worker result cached', { taskId: task.id, assetId: asset.id });
 
         if (jobId) {
           jobStore.updateJob(jobId, JobStatus.COMPLETED, {
@@ -73,13 +77,17 @@ export class TaskWorker {
           });
         }
 
-        // Send completion event with assetId to linked transports (WebSocket, SSE)
-        task.progressReporter.send(task.id, 'complete', {
-          assetId: asset.id,
-          metadata: result.metadata,
-        });
+        // Write to output path if specified
+        if (task.outputPath) {
+          fs.mkdirSync(path.dirname(task.outputPath), { recursive: true });
+          fs.writeFileSync(task.outputPath, result.buffer);
+          logger.debug('Task result written to output path', { taskId: task.id, outputPath: task.outputPath });
+        }
 
-        logger.debug('Task result cached', { taskId: task.id, assetId: asset.id });
+        task.complete(result, asset.id);
+      } else {
+        logger.info('Worker completing without buffer', { taskId: task.id, hasResult: !!result });
+        task.complete(result);
       }
 
       task._onDone?.(result);
@@ -87,8 +95,9 @@ export class TaskWorker {
       logger.info('Task completed', {
         taskId: task.id,
         type: task.type,
-        mode: this.mode,
+        workerMode: this.mode,
         duration: task.getDuration(),
+        assetId: task.assetId,
       });
     } catch (error) {
       task.fail(error.message);
@@ -175,7 +184,7 @@ export class TaskWorker {
 
       this.nativeWorker.on('message', (message) => {
         if (message.type === 'progress') {
-          task.updateProgress(message.percent, message.metadata);
+          task.updateProgress(message.percent, message.message || String(message.metadata || ''));
         } else if (message.type === 'complete') {
           resolve(message.result);
         } else if (message.type === 'error') {

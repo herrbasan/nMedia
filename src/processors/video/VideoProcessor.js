@@ -287,14 +287,15 @@ class VideoProcessor extends Processor {
     try {
       onProgress?.(20, `Transcoding: ${video_codec} → ${output_format}`);
 
+      const isNvenc = video_codec === 'h264_nvenc' || video_codec === 'hevc_nvenc';
       const transcodeOpts = {
         cache: false,
         video: {
           codec: video_codec,
-          crf,
           preset,
         },
       };
+      if (!isNvenc) transcodeOpts.video.crf = crf;
       if (targetWidth) transcodeOpts.video.width = targetWidth;
       if (targetHeight) transcodeOpts.video.height = targetHeight;
       if (fps) transcodeOpts.video.fps = fps;
@@ -375,14 +376,15 @@ class VideoProcessor extends Processor {
 
     onProgress?.(15, `Transcoding: ${video_codec} → ${output_format}`);
 
+    const isNvenc = video_codec === 'h264_nvenc' || video_codec === 'hevc_nvenc';
     const transcodeOpts = {
       cache: false,
       video: {
         codec: video_codec,
-        crf,
         preset,
       },
     };
+    if (!isNvenc) transcodeOpts.video.crf = crf;
     if (targetWidth) transcodeOpts.video.width = targetWidth;
     if (targetHeight) transcodeOpts.video.height = targetHeight;
     if (fps) transcodeOpts.video.fps = fps;
@@ -641,11 +643,12 @@ class VideoProcessor extends Processor {
       };
 
       // Build video options
+      const isNvenc = video_codec === 'h264_nvenc' || video_codec === 'hevc_nvenc';
       const videoOpts = {
         codec: video_codec,
-        crf,
         preset,
       };
+      if (!isNvenc) videoOpts.crf = crf;
       if (targetWidth) videoOpts.width = targetWidth;
       if (targetHeight) videoOpts.height = targetHeight;
       if (fps) videoOpts.fps = fps;

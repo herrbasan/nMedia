@@ -26,7 +26,8 @@ export async function handleProcess(ctx) {
       return;
     }
 
-    const { input_path, fileId, processor, mode, options = {} } = body;
+    const { input_path, fileId, processor, mode, options = {}, output_path } = body;
+    logger.info('Process request received', { processor, mode, optionsKeys: Object.keys(options), hasFileId: !!fileId, hasInputPath: !!input_path });
 
     // Validate processor type
     if (!processor || !VALID_PROCESSORS.includes(processor)) {
@@ -47,28 +48,27 @@ export async function handleProcess(ctx) {
 
     // Pattern A: Path-based processing
     if (input_path) {
-      return await _handlePathBased(ctx, input_path, processor, mode, options);
+      return await _handlePathBased(ctx, input_path, processor, mode, options, output_path);
     }
 
     // Pattern B: Upload-to-cache processing
-    return await _handleUploadBased(ctx, fileId, processor, mode, options);
+    return await _handleUploadBased(ctx, fileId, processor, mode, options, output_path);
   } catch (error) {
     logger.error('Process request failed', { error: error.message });
     ctx.error(500, error.message);
   }
 }
 
-async function _handlePathBased(ctx, inputPath, processor, mode, options) {
-  // Validate path against allowlist
-  const allowedPaths = config.allowedInputPaths || [];
-  if (allowedPaths.length === 0) {
-    ctx.error(400, 'Path-based processing requires allowedInputPaths in config.json');
+async function _handlePathBased(ctx, inputPath, processor, mode, options, outputPath) {
+  // Validate input path against allowlist
+  if (!_isPathAllowed(inputPath, config.allowedInputPaths)) {
+    ctx.error(403, `Input path not in allowed directories. Allowed: ${config.allowedInputPaths.join(', ')}`);
     return;
   }
 
-  const isAllowed = allowedPaths.some(allowed => inputPath.startsWith(allowed));
-  if (!isAllowed) {
-    ctx.error(403, `Input path not in allowed directories. Allowed: ${allowedPaths.join(', ')}`);
+  // Validate output path if provided
+  if (outputPath && !_isPathAllowed(outputPath, config.allowedOutputPaths)) {
+    ctx.error(403, `Output path not in allowed directories. Allowed: ${config.allowedOutputPaths.join(', ')}`);
     return;
   }
 
@@ -97,6 +97,7 @@ async function _handlePathBased(ctx, inputPath, processor, mode, options) {
     processor,
     mode,
     options,
+    outputPath,
   });
 
   // Create task and submit to queue
@@ -108,6 +109,7 @@ async function _handlePathBased(ctx, inputPath, processor, mode, options) {
     processor,
     mode,
     inputPath,
+    taskId: task.id,
   });
 
   ctx.json(200, {
@@ -119,7 +121,7 @@ async function _handlePathBased(ctx, inputPath, processor, mode, options) {
   });
 }
 
-async function _handleUploadBased(ctx, fileId, processor, mode, options) {
+async function _handleUploadBased(ctx, fileId, processor, mode, options, outputPath) {
   // Get upload from store
   const upload = jobStore.getUpload(fileId);
   if (!upload) {
@@ -145,6 +147,7 @@ async function _handleUploadBased(ctx, fileId, processor, mode, options) {
     processor,
     mode,
     options,
+    outputPath,
   });
 
   // Mark upload as processed (extends lifetime)
@@ -159,6 +162,8 @@ async function _handleUploadBased(ctx, fileId, processor, mode, options) {
     fileId,
     processor,
     mode,
+    taskId: task.id,
+    queuePosition: job.queuePosition,
   });
 
   ctx.json(200, {
@@ -175,12 +180,19 @@ function _createTask(job) {
     job.jobId,
     job.processor,
     job.inputPath || job.fileId,
-    { ...job.options, mode: job.mode },
+    { ...job.options, mode: (job.mode != null && job.mode !== '') ? job.mode : job.options.mode },
     ProgressReporter
   );
 
   // Store job reference on task for worker access
   task._jobId = job.jobId;
+  task.outputPath = job.outputPath || null;
 
   return task;
+}
+
+function _isPathAllowed(checkPath, allowedList) {
+  if (!allowedList || allowedList.length === 0) return false;
+  if (allowedList.includes('*')) return true;
+  return allowedList.some(allowed => checkPath.startsWith(allowed));
 }
