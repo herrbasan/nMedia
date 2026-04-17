@@ -62,9 +62,11 @@ export async function handleUpload(ctx) {
       const writeStream = fs.createWriteStream(tempPath);
       let streamError = null;
 
+      let requestEnded = false;
+
       const streamComplete = new Promise((resolve, reject) => {
         ctx.rawRequest.on('close', () => {
-          if (!uploadComplete && !streamError) {
+          if (!uploadComplete && !streamError && !requestEnded) {
             writeStream.destroy();
             try { fs.unlinkSync(tempPath); } catch {}
             reject(new Error('Connection aborted'));
@@ -84,6 +86,11 @@ export async function handleUpload(ctx) {
         writeStream.on('error', reject);
       });
 
+      ctx.rawRequest.on('end', () => {
+        requestEnded = true;
+        writeStream.end();
+      });
+
       ctx.rawRequest.on('data', (chunk) => {
         bytesReceived += chunk.length;
         if (bytesReceived > contentLength) {
@@ -93,10 +100,6 @@ export async function handleUpload(ctx) {
           return;
         }
         writeStream.write(chunk);
-      });
-
-      ctx.rawRequest.on('end', () => {
-        writeStream.end();
       });
 
       await streamComplete;

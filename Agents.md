@@ -11,8 +11,6 @@ Media Service is a stateless microservice designed to preprocess multimedia file
 | Configuration | `config.json` | All configuration settings (server, media, logging, cache, workers) |
 | Specification | `docs/media_service_spec.md` | Detailed technical specification, API design, architecture |
 | Development Plan | `docs/media_service_dev_plan.md` | Implementation roadmap, technology choices, development phases |
-| Refactor Plan | `docs/nvideo_refactor_plan.md` | nVideo integration plan, phases, file changes |
-| Task System | `docs/task_system_proposal.md` | Task system architecture and async patterns |
 
 ## Configuration
 
@@ -40,6 +38,14 @@ Test assets are located in `/tests/assets/`:
 | `tests/assets/images/` | PNG, JPG, HEIC, CR2 (Canon RAW), ORF (Olympus RAW), GIF |
 | `tests/assets/audio/` | MP3, M4A, WAV, FLAC, OGG |
 | `tests/assets/videos/` | MP4, MOV |
+
+### Test Files
+| File | Purpose |
+|------|---------|
+| `tests/index.js` | Unit test runner (processors) |
+| `tests/ws-integration-test.js` | WebSocket end-to-end test (spawns service, tests WS upload/process/download) |
+| `tests/e2e.test.js` | Legacy HTTP E2E tests (**outdated**, needs update for unified transport) |
+| `tests/manual-readme-test.js` | Manual nVideo transcoding test |
 
 ## Core Development Maxims
 - **Priorities:** Reliability > Performance > Everything else.
@@ -101,13 +107,30 @@ This project uses git submodules located in `/modules`. These are all **our own 
 | `cpu` | software | libx264, libx265 |
 
 #### ProgressReporter (`src/pipeline/ProgressReporter.js`)
-- Manages Server-Sent Events (SSE) connections for real-time progress
-- Provides job lifecycle events: start, progress, complete, error
+- Manages progress connections for real-time updates
+- Supports both **SSE** and **WebSocket** via generic `Sender` interface
+- Provides job lifecycle events: `start`, `progress`, `complete`, `error`, `cancelled`
+- Supports linking external connection IDs to internal job IDs
+
+#### WebSocket Server (`src/server/WebSocketServer.js`)
+- Raw Node.js WebSocket implementation (no external `ws` dependency)
+- Mounted on `/v1/ws`
+- Supports:
+  - Progress subscription (`subscribe` / `unsubscribe`)
+  - Binary upload (`upload_start` → binary chunks → `upload_complete`)
+  - Binary download (`download_request` → file streamed in binary frames)
+  - Ping/pong heartbeat
 
 #### API Routes (`src/api/routes/`)
-- Native HTTP routes for `/v1/process/image`, `/v1/process/audio`, `/v1/process/video`
-- Accept file uploads (multipart/form-data via custom parser) or inline base64
-- Support two response modes: base64 (synchronous JSON) or file (streaming)
+- **Unified transport** (recommended):
+  - `POST /v1/upload` - raw binary upload
+  - `POST /v1/process` - start processing from `fileId` or `input_path`
+  - `GET /v1/jobs/:jobId/progress` - SSE progress stream
+  - `GET /v1/jobs/:jobId` - polling fallback
+  - `DELETE /v1/jobs/:jobId` - cancellation
+  - `WS /v1/ws` - WebSocket progress + binary transfer
+- **Legacy endpoints** (still functional but deprecated):
+  - `POST /v1/process/image`, `/v1/process/audio`, `/v1/process/video`
 
 ### Key Processing Options
 
@@ -136,6 +159,7 @@ The task system handles asynchronous processing:
 - **Worker** (`src/tasks/Worker.js`) - Processes tasks via PipelineExecutor
 - **TaskWorker** (`src/tasks/TaskWorker.js`) - Worker thread bootstrap (thread mode)
 - **AssetCache** (`src/cache/AssetCache.js`) - Stores results with TTL
+- **JobStore** (`src/jobs/JobStore.js`) - Disk-backed job persistence and upload tracking
 
 ### Worker Execution Modes
 
@@ -143,40 +167,56 @@ Configured via `workers.mode` in `config.json`:
 
 | Mode | Behavior | Use Case |
 |------|----------|----------|
-| `queue` (default) | Tasks run on main thread, serialized by queue | Memory-constrained, simpler |
-| `thread` | Each task spawns a `worker_thread` | True parallelism, responsive event loop |
+| `thread` (default) | Each task spawns a `worker_thread` | True parallelism, protects main process from native panics |
+| `queue` | Tasks run on main thread, serialized by queue | Memory-constrained, simpler |
+
+**Thread mode is strongly recommended** for audio/video. A native module panic in nVideo will kill only the worker thread, not the main process.
 
 ### Audio/Video Processing Flow
 
 ```
-1. Client uploads file
-2. Input written to temp file in cache dir
-3. nVideo processes: input → output (all in C++ memory)
-4. Output stored in AssetCache
-5. Input temp file deleted
-6. SSE progress updates sent
-7. Client downloads result from /v1/assets/:id
-8. Asset marked as retrieved (TTL = 0)
+1. Client uploads file via POST /v1/upload (or provides input_path)
+2. Server writes input to temp file in cache dir
+3. Task queued → Worker picks up (thread mode spawns worker_thread)
+4. nVideo processes: input → output (all in C++ memory)
+5. Output stored in AssetCache
+6. Input temp file deleted
+7. SSE / WS progress updates sent
+8. Client downloads result from /v1/assets/:id
+9. Asset marked as retrieved (TTL = 0)
 ```
 
 ## Data Flow
 
-1. Client sends file or base64 payload to `/v1/process/{media_type}`
-2. Route handler validates input and extracts buffer
-3. Custom multipart parser handles upload limits
-4. PipelineExecutor routes to appropriate processor
-5. Processor performs transformation with progress callbacks
-6. Result buffer/metadata returned via JSON (base64) or streaming (file)
-7. Response includes original vs optimized size for cost tracking
+1. Client sends raw binary to `POST /v1/upload` **or** provides `input_path` to `POST /v1/process`
+2. Route handler validates input (magic bytes, path allowlist)
+3. `POST /v1/process` returns `jobId` immediately
+4. Client subscribes to progress via SSE (`/v1/jobs/:jobId/progress`) or WebSocket (`/v1/ws`)
+5. PipelineExecutor routes to appropriate processor
+6. Processor performs transformation with native progress callbacks
+7. Result stored in AssetCache; `complete` event includes `assetId`
+8. Client downloads from `/v1/assets/:assetId`
 
 ## Error Handling Contract
 
 | HTTP Status | Meaning | Gateway Action |
 |-------------|---------|----------------|
 | 200 | Success | Swap payload |
+| 202 | Accepted (async task queued) | Poll for result |
 | 413 | File too large | Return error to client |
 | 415 | Unsupported format | Pass-through original |
 | 5XX | Processing error | Circuit breaker trips, bypass MPS |
+
+## Recent Fixes & Notes
+
+### Upload Handler `end`/`close` Race
+Fixed in `src/api/routes/upload.js`: the `rawRequest` `close` event was destroying the write stream after the `end` event had already fired, causing uploads to hang indefinitely. A `requestEnded` flag now prevents this.
+
+### Progress Completion & assetId
+`PipelineExecutor.execute()` sends a `complete` progress event before caching. `Worker.js` now sends a follow-up `complete` event with the actual `assetId` after caching. WS/SSE clients should wait for the event containing `assetId`.
+
+### ESM Worker Loading
+Native modules are loaded in worker threads via `createRequire(import.meta.url)` because ESM `worker_threads` does not support direct `require()`.
 
 ## LLM Integration Notes
 

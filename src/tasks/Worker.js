@@ -73,6 +73,12 @@ export class TaskWorker {
           });
         }
 
+        // Send completion event with assetId to linked transports (WebSocket, SSE)
+        task.progressReporter.send(task.id, 'complete', {
+          assetId: asset.id,
+          metadata: result.metadata,
+        });
+
         logger.debug('Task result cached', { taskId: task.id, assetId: asset.id });
       }
 

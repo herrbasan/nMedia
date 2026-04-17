@@ -2,38 +2,29 @@
 
 ## 1. Overview
 
-Media Service is a comprehensive media processing microservice built on **Node.js** as the orchestration and HTTP platform. It provides both synchronous operations for low-latency needs and asynchronous operations for heavy media tasks. GPU acceleration (NVENC, VAAPI, QSV) is utilized when available.
+Media Service is a stateless microservice designed to preprocess multimedia files for Large Language Model (LLM) consumption. It receives large files and returns downscaled, compressed, LLM-friendly versions. GPU acceleration is utilized when available (NVENC, VAAPI, QSV).
 
 ### Platform Decisions
 
 - **Orchestration**: Node.js (HTTP server, task management, messaging)
 - **Image Processing**: Native NAPI bindings (nImage with libraw/libheif/ImageMagick)
 - **Audio/Video Processing**: Native NAPI bindings (nVideo with direct FFmpeg library integration)
-- **Unified Native Architecture**: NAPI for all media processing - zero process spawning, zero-copy decode, real-time progress
+- **Transport**: HTTP for control, SSE/WebSocket for progress, raw binary for uploads
+- **Worker Isolation**: Thread mode (`worker_threads`) is the default for native module safety
 
-### Use Cases
+### Processing Modes
 
-| Category | Operations | Execution Mode |
-|----------|------------|---------------|
-| Image | Convert, crop, resize, format | Sync |
-| Video | Transcode, crop, resize, keyframes, thumbnails | Async |
-| Audio | Transcode, resample, trim | Async |
-| Video Streaming | Real-time transcode, crop, resize, stream | Streaming |
-| Audio Streaming | Real-time resample, transcode, stream | Streaming |
+| Category | Operations | Execution |
+|----------|------------|-----------|
+| Image | Convert, crop, resize, format | Async via unified pipeline |
+| Audio | Transcode, resample | Async via unified pipeline |
+| Video | Extract audio, extract keyframes | Async via unified pipeline |
 
 ---
 
 ## 2. Architecture
 
-### 2.1 Processing Modes
-
-| Mode | Use Case | Latency | Bounded By |
-|------|----------|---------|------------|
-| **Sync** | Quick image ops (resize, crop, convert) | <500ms | Request timeout |
-| **Async** | Heavy tasks (video transcode, audio transcode) | Seconds-minutes | Task queue + workers |
-| **Streaming** | Real-time media processing | Real-time | Connection lifecycle |
-
-### 2.2 Component Overview
+### 2.1 Component Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -42,494 +33,349 @@ Media Service is a comprehensive media processing microservice built on **Node.j
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
 │  │ HTTP Server │  │ Task Queue  │  │   Messaging Layer       │  │
-│  │  (native)   │  │ (In-Memory) │  │ (SSE/WebSocket/REST)    │  │
+│  │  (native)   │  │ (In-Memory) │  │ (SSE + WebSocket)       │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────────────────────────────────────────────────────┐  │
 │  │                    Native Processors                        │  │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │  │
 │  │  │ Image       │  │ Audio       │  │ Video               │  │  │
-│  │  │ (nImage     │  │ (nVideo     │  │ (nVideo             │  │  │
-│  │  │  NAPI)      │  │  NAPI)      │  │  NAPI)              │  │  │
+│  │  │ (nImage)    │  │ (nVideo)    │  │ (nVideo)            │  │  │
 │  │  └─────────────┘  └─────────────┘  └─────────────────────┘  │  │
 │  └─────────────────────────────────────────────────────────────┘  │
 │  ┌─────────────────────────────────────────────────────────────┐  │
-│  │                    Asset Cache                             │  │
-│  │               (Disk + TTL management)                      │  │
+│  │                    Asset Cache + Job Store                  │  │
+│  │               (Disk + TTL management + Persistence)         │  │
 │  └─────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.3 Native Binding Strategy
+### 2.2 Native Binding Strategy
 
 #### Image Processing (nImage - Native NAPI)
-- **Why**: Native performance with comprehensive format support via NAPI
-- **Architecture**:
-  - **LibRaw**: RAW formats (CR2, NEF, ARW, ORF, DNG, etc.)
-  - **LibHeif**: HEIC/HEIF/AVIF formats  
-  - **Sharp/libvips**: Standard formats (JPEG, PNG, WebP, GIF, TIFF, AVIF) + transforms
-  - **ImageMagick**: 150+ additional formats (PDF, SVG, EXR, HDR, etc.)
+- **LibRaw**: RAW formats (CR2, NEF, ARW, ORF, DNG, etc.)
+- **LibHeif**: HEIC/HEIF/AVIF formats
+- **Sharp/libvips**: Standard formats (JPEG, PNG, WebP, GIF, TIFF, AVIF) + transforms
+- **ImageMagick**: 150+ additional formats (PDF, SVG, EXR, HDR, etc.)
 - **Capabilities**: Resize, crop, format conversion, EXIF stripping, region extraction
 
 #### Audio/Video Processing (nVideo - Native NAPI)
-- **Why**: Direct FFmpeg library integration - zero process spawning, zero-copy decode, native progress callbacks
-- **Architecture**:
-  - Direct FFmpeg C API (`avformat`, `avcodec`, `avfilter`, `swscale`, `swresample`)
-  - File-to-file transcoding runs entirely in C++ (no JS involvement during processing)
-  - Automatic GPU codec selection based on `config.media.gpu.platform`
-  - Support for NVENC (NVIDIA), QSV (Intel), VAAPI (Intel/AMD), D3D11VA (Windows)
-  - Audio filter graphs (`abuffer → aformat → asetnsamples → abuffersink`) for reliable transcoding
-  - Video filter graphs via libavfilter
-- **Capabilities**:
-  - `probe()`: Metadata, streams, codec info (no ffprobe spawn)
-  - `transcode()`: Full re-encode with video/audio filter graphs, HW acceleration, progress callbacks
-  - `extractAudio()`: Decode audio from video, re-encode to target format
-  - `thumbnail()`: Seek to timestamp, decode single frame
-  - `remux()`: Stream copy without re-encode
-  - `concat()`: Multi-file join with timestamp management
-  - `getWaveform()`: Audio peak amplitude generation
-  - Stateful decode: `openInput()`, `readAudio()`, `readVideoFrame()`, `seek()`, `close()`
+- Direct FFmpeg C API (`avformat`, `avcodec`, `avfilter`, `swscale`, `swresample`)
+- File-to-file transcoding runs entirely in C++ (no JS involvement during processing)
+- Automatic GPU codec selection based on `config.media.gpu.platform`
+- Audio filter graphs (`abuffer → aformat → asetnsamples → abuffersink`)
+- Native progress callbacks (percent, speed, bitrate, ETA, frame counts)
 
 ---
 
-## 3. nVideo Native Module
+## 3. Data Flow
 
-### 3.1 Architecture
-
-nVideo is a native N-API module located at `/modules/nVideo`. It links directly against FFmpeg's C libraries (no CLI spawning).
+### ID Chain
 
 ```
-modules/nVideo/
-├── src/
-│   ├── processor.cpp   # FFmpeg C API implementation (~3000 lines)
-│   ├── processor.h     # Data structures and class declarations
-│   └── binding.cpp     # N-API bindings layer
-├── lib/
-│   └── index.js        # JavaScript API wrapper with caching
-└── binding.gyp         # node-gyp build configuration
+fileId (upload) ──► jobId (processing) ──► assetId (result)
 ```
 
-### 3.2 Key Features
+All three IDs are tracked in `JobStore`:
+- `fileId` → temp file path, detected type, upload time
+- `jobId` → task state, progress, worker assignment
+- `assetId` → output file path, metadata, retrieval status
 
-| Feature | Implementation |
-|---------|----------------|
-| **I/O Mode** | File-to-file (temp files in cache dir) |
-| **Input Handling** | Write buffer → temp file → nVideo processes → read output file |
-| **GPU Acceleration** | Native HW device context (CUDA, QSV, VAAPI, D3D11VA) |
-| **Progress** | Native callback (percent, speed, bitrate, ETA, frame counts) |
-| **Cancellation** | Not yet implemented (planned) |
-| **Cleanup** | Input temp file deleted immediately; output stored in AssetCache |
-| **Caching** | SHA256-based cache with transmit-once TTL (built into nVideo) |
+### Upload + Process Flow
 
-### 3.3 GPU Platform Support
+```
+1. Client → POST /v1/upload (raw binary stream)
+           ↓
+       Server writes to temp file, validates magic bytes
+           ↓
+       Returns { fileId }
 
-| Platform | Video Decode | Video Encode | Audio |
-|----------|--------------|--------------|-------|
-| `nvenc` | h264_cuvid, hevc_cuvid | h264_nvenc, hevc_nvenc | CPU |
-| `vaapi` | h264_vaapi, hevc_vaapi | h264_vaapi, hevc_vaapi | CPU |
-| `qsv` | h264_qsv, hevc_qsv | h264_qsv, hevc_qsv | CPU |
-| `cpu` | software | libx264, libx265 | CPU |
+2. Client → POST /v1/process { fileId, processor, options }
+           ↓
+       Returns { jobId, status: "queued" }
 
-### 3.4 Progress Format
+3. Client subscribes to progress:
+       SSE: GET /v1/jobs/:jobId/progress
+       WS:  Send { type: "subscribe", jobId } over /v1/ws
+           ↓
+       Server sends start/progress/complete events
 
-nVideo provides native progress callbacks with:
-- `percent`: 0-100 completion
-- `speed`: Encoding speed multiplier
-- `bitrate`: Current bitrate
-- `timestamp`: Current stream position
-- `eta`: Estimated time remaining
+4. On complete, event includes assetId
+           ↓
+5. Client → GET /v1/assets/:assetId
+           ↓
+       Asset marked as retrieved (TTL = 0)
+```
 
-Progress callback: `(percent, { speed, bitrate, timestamp, eta })`
+### Path-Based Processing Flow
+
+```
+1. Client → POST /v1/process { input_path, processor, options }
+           ↓
+       Path validated against allowlist, fs.access() checked
+           ↓
+       Returns { jobId, status: "queued" }
+
+2. Progress and retrieval identical to upload flow
+```
 
 ---
 
-## 4. Task System
+## 4. API Specification
 
-### 4.1 Task Model
+### 4.1 Unified Transport Endpoints (Recommended)
 
-```javascript
-{
-  id: string,                    // UUID v4
-  type: 'image' | 'audio' | 'video',
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled',
-  input: Buffer | string,        // Input data (buffer or base64)
-  options: object,               // Operation-specific parameters
-  progressReporter: Sender,      // SSE connection for progress events
-  percent: number,                // 0-100 progress
-  result: {
-    buffer: Buffer,               // Output buffer
-    metadata: object,            // Processing metadata
-  },
-  assetId: string | null,        // Cached result asset ID
-  createdAt: number,             // Unix timestamp
-  startedAt: number,             // Unix timestamp
-  completedAt: number,           // Unix timestamp
-  error: string,                 // Error message if failed
-}
-```
-
-### 4.2 Task Lifecycle
-
-```
-[Create] → [Pending] → [Running] → [Completed]
-                           ↓
-                       [Failed]
-                           ↓
-                      [Cancelled]
-```
-
-### 4.3 Task System Implementation
-
-**Components:**
-- `Task` - Task state and lifecycle management
-- `TaskStore` - In-memory task storage with filtering and cleanup
-- `TaskQueue` - FIFO queue with concurrency control (maxConcurrentTasks)
-- `Worker` - Processes tasks via PipelineExecutor
-- `TaskManager` - Singleton coordinator, wires queue→workers
-
-**API Endpoints:**
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/v1/tasks` | Create and submit task (returns 202) |
-| `GET` | `/v1/tasks` | List tasks (filter by status, type) |
-| `GET` | `/v1/tasks/stats` | Queue/worker statistics |
-| `GET` | `/v1/tasks/:taskId` | Get task status |
-| `GET` | `/v1/tasks/:taskId/result` | Download result buffer |
-| `DELETE` | `/v1/tasks/:taskId` | Cancel pending task |
+| `POST` | `/v1/upload` | Stream raw binary upload. Requires `Content-Length`. Returns `fileId` |
+| `POST` | `/v1/process` | Start processing from `fileId` or `input_path`. Returns `jobId` |
+| `GET` | `/v1/jobs/:jobId/progress` | SSE progress stream (start, progress, complete, error) |
+| `GET` | `/v1/jobs/:jobId` | Poll job status and current progress |
+| `DELETE` | `/v1/jobs/:jobId` | Cancel a queued job |
+| `WS` | `/v1/ws` | WebSocket for progress, binary upload, and binary download |
 
-### 4.4 Audio/Video Task Flow
+#### POST /v1/upload
 
-```
-Client → POST /v1/process/video (file uploaded)
-            ↓
-        Route Handler writes file to temp input file
-            ↓
-        Task created with input file path
-            ↓
-        Task queued → Worker picks up
-            ↓
-        nVideo processes (file → file, all in C++ memory)
-            ↓
-        Output file stored in AssetCache
-            ↓
-        Input temp file deleted immediately
-            ↓
-        SSE: completed event with assetId
-            ↓
- Client → GET /v1/assets/:assetId (download result)
-            ↓
-        Asset marked as retrieved (TTL reduced to 0)
-```
+**Headers:**
+| Header | Required | Description |
+|--------|----------|-------------|
+| `Content-Type` | Yes | `application/octet-stream` |
+| `Content-Length` | Yes | Enables pre-flight disk space check |
+| `X-Original-Filename` | Yes | Used for format detection (sanitized) |
+| `X-Upload-Id` | No | Idempotency key for retry-safe uploads |
 
-### 4.5 Worker Execution Modes
-
-Processing can run in two modes, configured via `workers.mode`:
-
-**Queue Mode** (`"queue"` - default):
-- Tasks processed via TaskQueue → Worker → PipelineExecutor on main thread
-- Serialized execution, lower memory footprint
-- Event loop blocked during processing (acceptable for sync endpoints)
-
-**Thread Mode** (`"thread"`):
-- Each task spawns a Node.js `worker_thread`
-- nVideo runs synchronously in worker, main event loop stays free
-- True parallelism bounded by `maxConcurrentTasks`
-- Requires worker bootstrap (`src/tasks/TaskWorker.js`) with message protocol:
-  - Input: `{ type: 'process', mediaType, inputPath, outputPath, options }`
-  - Output: `{ type: 'progress', percent, metadata }` | `{ type: 'complete', result }` | `{ type: 'error', message }`
-
----
-
-## 5. Asset Cache
-
-### 5.1 Asset Model
-
-```javascript
+**Response (200):**
+```json
 {
-  id: string,                    // UUID v4
-  type: 'image' | 'audio' | 'video',
-  mimeType: string,
-  size: number,                  // Bytes
-  storagePath: string,          // Relative to cache root
-  createdAt: timestamp,
-  expiresAt: timestamp,         // TTL countdown
-  retrievedAt: timestamp|null,  // When downloaded by client
-  metadata: {
-    width?: number,
-    height?: number,
-    duration?: number,
-    codec?: string,
-  },
+  "fileId": "upload-abc-123",
+  "size": 14466896,
+  "detectedType": "audio",
+  "detectedMimeType": "audio/wav",
+  "expiresAt": "2026-04-17T05:45:29.303Z",
+  "status": "ready"
 }
 ```
 
-### 5.2 Cache Management
+**Response errors:** 411 (missing Content-Length), 413 (too large), 415 (unsupported format), 507 (insufficient disk space)
+
+#### POST /v1/process
+
+**Request body:**
+```json
+{
+  "fileId": "upload-abc-123",
+  "processor": "audio",
+  "options": {
+    "sample_rate": 16000,
+    "channels": 1,
+    "format": "mp3"
+  }
+}
+```
+
+Or with path:
+```json
+{
+  "input_path": "D:\\Media\\input.wav",
+  "processor": "audio",
+  "options": {
+    "sample_rate": 16000,
+    "channels": 1,
+    "format": "mp3"
+  }
+}
+```
+
+**Response (200):**
+```json
+{
+  "jobId": "job-def-456",
+  "status": "queued",
+  "queuePosition": 1
+}
+```
+
+#### SSE Progress Format
+
+```
+event: start
+data: {"event":"start","jobId":"job-def-456","processor":"audio"}
+
+event: progress
+data: {"event":"progress","jobId":"job-def-456","percent":25,"message":"Transcoding..."}
+
+event: complete
+data: {"event":"complete","jobId":"job-def-456","assetId":"asset-ghi-789","metadata":{...}}
+```
+
+#### WebSocket Messages
+
+**Client → Server:**
+```json
+{ "type": "subscribe", "jobId": "job-def-456" }
+{ "type": "unsubscribe", "jobId": "job-def-456" }
+{ "type": "ping" }
+```
+
+**Server → Client:**
+```json
+{ "type": "connected", "id": "conn-uuid" }
+{ "type": "subscribed", "jobId": "job-def-456" }
+{ "type": "progress", "jobId": "job-def-456", "percent": 50, "message": "Transcoding..." }
+{ "type": "complete", "jobId": "job-def-456", "assetId": "asset-ghi-789" }
+{ "type": "error", "jobId": "job-def-456", "error": "..." }
+{ "type": "pong", "timestamp": 1234567890 }
+```
+
+### 4.2 Asset Cache Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/v1/assets` | List cached assets |
+| `GET` | `/v1/assets/:id` | Download asset file |
+| `GET` | `/v1/assets/:id/metadata` | Get asset metadata |
+| `DELETE` | `/v1/assets/:id` | Delete specific asset |
+| `DELETE` | `/v1/assets` | Clear all assets |
+
+### 4.3 Legacy Endpoints
+
+The following legacy endpoints are still functional but superseded by the unified transport:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/v1/process/image` | Synchronous image processing (multipart or base64) |
+| `POST` | `/v1/process/image/crop` | Synchronous image cropping |
+| `POST` | `/v1/process/audio` | Audio processing (multipart or base64) |
+| `POST` | `/v1/process/video` | Video processing (multipart or base64) |
+| `POST` | `/v1/audio/probe` | Probe audio metadata |
+
+### 4.4 System Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health` | Health check with processor readiness |
+
+---
+
+## 5. Processing Options
+
+### Images
+- `max_dimension`: Longest edge constraint (default 1024px)
+- `quality`: Output quality 1-100 (default 85)
+- `format`: jpeg, png, webp, avif, gif
+- `crop`: region (normalized coords), center (% of image), grid (cell extraction)
+
+### Audio
+- `sample_rate`: 8000, 16000, 22050, 44100, 48000 Hz (default 16000)
+- `channels`: 1 (mono) or 2 (stereo), default mono
+- `format`: mp3, wav, ogg, m4a
+
+### Video
+- `mode`: `extract_audio` or `extract_keyframes`
+- `fps`: Frame rate for keyframe extraction (1-30)
+- `max_dimension`: Max frame dimension for extracted keyframes
+
+---
+
+## 6. Task System
+
+### Worker Execution Modes
+
+Configured via `workers.mode` in `config.json`:
+
+| Mode | Behavior | Use Case |
+|------|----------|----------|
+| `thread` (default) | Each task spawns a `worker_thread` | True parallelism, protects main process from native panics |
+| `queue` | Tasks run on main thread, serialized | Simpler, lower memory footprint |
+
+**Thread mode is the default and strongly recommended** for audio/video processing. A native module panic in nVideo will kill only the worker thread, not the main process.
+
+### Job Store & Persistence
+
+`JobStore` (`src/jobs/JobStore.js`) provides disk-backed persistence:
+- Jobs and uploads are persisted to `./cache/jobs/jobs.json`
+- On startup: processing jobs are marked `failed`, queued jobs are re-queued
+- Uploads have a 1-hour TTL if never processed
+- Background cleanup runs periodically
+
+### Progress Reporter
+
+`ProgressReporter` (`src/pipeline/ProgressReporter.js`) is transport-agnostic:
+- Implements a generic `Sender` interface
+- Supports both `SseConnection` and `WebSocketConnection`
+- Links external connections to internal job IDs for forwarding
+
+---
+
+## 7. Asset Cache
+
+### Asset Model
+
+```javascript
+{
+  id: string,
+  type: 'image' | 'audio' | 'video',
+  mimeType: string,
+  size: number,
+  storagePath: string,
+  createdAt: timestamp,
+  expiresAt: timestamp,
+  retrievedAt: timestamp|null,
+  metadata: object
+}
+```
+
+### Cache Management
 
 - **Storage**: Local disk (`./cache/assets/`)
 - **Default TTL**: 1 hour (configurable)
 - **Retrieved TTL**: 0 (immediate cleanup on next cycle)
 - **Max Cache Size**: 10GB (configurable)
 - **Cleanup**: Background job every 5 minutes
-- **Naming**: `{asset_id}.{extension}`
-
-### 5.3 TTL Strategy
-
-| Scenario | TTL Action |
-|----------|-----------|
-| Task created | Default TTL (1 hour) |
-| Asset retrieved | TTL set to 0 (cleanup next cycle) |
-| Explicit delete | Immediate removal |
-
-### 5.4 Cache Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/v1/assets/:id` | Download asset file |
-| `GET` | `/v1/assets/:id/metadata` | Get asset metadata |
-| `DELETE` | `/v1/assets/:id` | Delete specific asset |
-| `DELETE` | `/v1/assets` | Clear all assets (admin) |
+- **Range Support**: `GET /v1/assets/:id` supports HTTP Range requests
 
 ---
 
-## 6. API Specification
+## 8. Security & Resource Constraints
 
-### 6.1 Task Endpoints
+### Path Validation
+- `input_path` must start with a prefix from `config.media.allowedInputPaths`
+- Pre-flight `fs.access(path, fs.constants.R_OK)` check before queuing
+- UNC paths blocked unless explicitly allowed
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/v1/tasks` | Create new task |
-| `GET` | `/v1/tasks/:id` | Get task details |
-| `GET` | `/v1/tasks/:id/status` | Get task status (polling) |
-| `GET` | `/v1/tasks` | List tasks (with filters) |
-| `DELETE` | `/v1/tasks/:id` | Cancel task |
+### Upload Resource Management
+- `Content-Length` header is **required** — enables pre-flight disk space check
+- Upload concurrency limited by config
+- Partial uploads are cleaned up on connection abort
+- Magic byte validation runs after upload completes
 
-### 6.2 Sync Endpoints (Image)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/v1/process/image` | Process image synchronously |
-| `POST` | `/v1/process/image/crop` | Crop image synchronously |
-
-### 6.3 Async Endpoints (Audio/Video)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/v1/process/audio` | Process audio asynchronously |
-| `POST` | `/v1/process/video` | Process video asynchronously |
-| `GET` | `/v1/process/progress/:jobId` | SSE progress stream |
-
-### 6.4 Asset Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/v1/assets/:id` | Download asset |
-| `GET` | `/v1/assets/:id/metadata` | Get metadata |
-| `DELETE` | `/v1/assets/:id` | Delete asset |
-
-### 6.5 System Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | Health check |
-| `GET` | `/v1/events` | SSE events stream |
-| `WS` | `/v1/ws` | WebSocket connection (future) |
+### GPU Slot Management
+- NVENC has max concurrent sessions (3-5 on consumer cards)
+- Configurable `media.gpu.maxConcurrentSessions`
 
 ---
 
-## 7. Detailed Endpoint Specifications
+## 9. Error Handling Contract
 
-### 7.1 POST /v1/process/audio
-
-Asynchronous audio processing.
-
-**Request:**
-- `multipart/form-data` with `file` field
-- OR JSON with `base64` field
-
-**Parameters:**
-| Name | Type | Default | Description |
-|------|------|---------|-------------|
-| `sample_rate` | int | 16000 | Output sample rate (8000/16000/22050/44100/48000) |
-| `channels` | int | 1 | Output channels (1=mono, 2=stereo) |
-| `format` | string | mp3 | Output format: mp3, wav, ogg, m4a |
-| `response_type` | string | base64 | base64 or file |
-
-**Response (202 Accepted when async):**
-```json
-{
-  "taskId": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "queued",
-  "progressUrl": "/v1/process/progress/550e8400-..."
-}
-```
-
-**Response (200 OK when sync):**
-```json
-{
-  "original_size_bytes": 5242880,
-  "optimized_size_bytes": 102400,
-  "sampleRate": 16000,
-  "channels": 1,
-  "format": "mp3",
-  "base64": "data:audio/mpeg;base64,..."
-}
-```
-
-### 7.2 POST /v1/process/video
-
-Asynchronous video processing.
-
-**Request:**
-- `multipart/form-data` with `file` field
-- OR JSON with `base64` field
-
-**Parameters:**
-| Name | Type | Default | Description |
-|------|------|---------|-------------|
-| `mode` | string | extract_audio | extract_audio or extract_keyframes |
-| `fps` | int | 1 | Frames per second for keyframes (1-30) |
-| `max_dimension` | int | 1024 | Max dimension for extracted frames |
-| `format` | string | jpeg | Output format for keyframes |
-| `response_type` | string | base64 | base64 or file |
-
-**Response (202 Accepted):**
-```json
-{
-  "taskId": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "queued",
-  "progressUrl": "/v1/process/progress/550e8400-..."
-}
-```
-
-### 7.3 POST /v1/process/image
-
-Synchronous image processing.
-
-**Request:**
-- `multipart/form-data` with `file` field
-- OR JSON with `base64` field
-
-**Parameters:**
-| Name | Type | Default | Description |
-|------|------|---------|-------------|
-| `max_dimension` | int | 1024 | Longest edge in pixels |
-| `quality` | int | 85 | Output quality 1-100 |
-| `format` | string | jpeg | jpeg, png, webp, avif, gif |
-| `strip_exif` | bool | true | Remove EXIF data |
-| `response_type` | string | base64 | base64 or file |
-
-**Response (200 OK):**
-```json
-{
-  "original_size_bytes": 5242880,
-  "optimized_size_bytes": 102400,
-  "width": 1024,
-  "height": 768,
-  "format": "jpeg",
-  "base64": "data:image/jpeg;base64,..."
-}
-```
+| HTTP Status | Meaning | Gateway Action |
+|-------------|---------|----------------|
+| 200 | Success | Swap payload |
+| 202 | Accepted (async task queued) | Poll for result |
+| 400 | Bad request | Return error |
+| 404 | Not found | Return error |
+| 413 | File too large | Return error to client |
+| 415 | Unsupported format | Pass-through original |
+| 5XX | Processing error | Circuit breaker trips, bypass MPS |
 
 ---
 
-## 8. Configuration
+## 10. Known Issues & Notes
 
-All configuration via `config.json`. No `.env` defaults are used.
+### Upload Handler `end`/`close` Race
+Fixed in `src/api/routes/upload.js`: the `rawRequest` `close` event was destroying the write stream after the `end` event had already fired, causing the stream `finish` event to never emit and the upload promise to hang indefinitely. A `requestEnded` flag now prevents the `close` handler from interfering with successful completions.
 
-| Field | Required | Description |
-|----------|---------|-------------|
-| `server.port` | Yes | HTTP server port |
-| `server.host` | No | Host to bind (default: 0.0.0.0) |
-| `media.maxFileSizeMb` | No | Max upload size in MB (default: 300) |
-| `media.gpu.platform` | **Yes** | GPU platform: `nvenc`, `vaapi`, `qsv`, `cpu` |
-| `media.gpu.device` | No | GPU device index (default: 0) |
-| `logging.level` | No | Log level: error, warn, info, debug (default: info) |
-| `logging.logsDir` | **Yes** | Directory for log files |
-| `logging.sessionPrefix` | No | Log file prefix (default: ms) |
-| `logging.retentionDays` | No | Days to keep logs (default: 7) |
-| `cache.dir` | No | Cache directory (default: ./cache/assets) |
-| `cache.ttl` | No | Asset TTL in seconds (default: 3600) |
-| `cache.maxSize` | No | Max cache size in bytes (default: 10GB) |
-| `workers.maxConcurrentTasks` | No | Max parallel async tasks (default: 4) |
-| `workers.mode` | No | Execution mode: `queue` or `thread` (default: queue) |
-| `messaging.transport` | No | Transport: sse, ws, polling (default: sse) |
+### ESM Worker Loading
+Native modules (nVideo, nImage) are loaded in worker threads via `createRequire(import.meta.url)` because `worker_threads` in ESM mode does not support direct `require()`.
 
----
-
-## 9. Error Handling
-
-| HTTP Status | Code | Description |
-|-------------|------|-------------|
-| 400 | INVALID_REQUEST | Malformed request body |
-| 400 | INVALID_OPTIONS | Invalid operation parameters |
-| 404 | TASK_NOT_FOUND | Task does not exist |
-| 404 | ASSET_NOT_FOUND | Asset does not exist |
-| 409 | TASK_CONFLICT | Task already exists |
-| 413 | FILE_TOO_LARGE | Upload exceeds max size |
-| 415 | UNSUPPORTED_FORMAT | Input format not supported |
-| 500 | PROCESSING_ERROR | Task processing failed |
-| 503 | SERVICE_UNAVAILABLE | System overloaded |
-
----
-
-## 10. Technology Stack
-
-### Core Platform
-- **Node.js 18+**: HTTP server, orchestration, task management
-- **Native HTTP**: Node.js built-in `http` module with custom Router and multipart parser
-- **Native FS**: Node.js built-in `fs` module for file operations
-- **Worker Threads**: Node.js `worker_threads` for parallel processing (thread mode)
-
-**Note**: No Express, Multer, fluent-ffmpeg, or FFmpeg CLI - the service uses custom lightweight implementations and native N-API modules.
-
-### Bundled Modules (Submodules)
-Located in `/modules`:
-- **nLogger**: Structured logging with detailed formatting
-- **nImage**: Native image processing (RAW, HEIC, 150+ formats via libraw/libheif/ImageMagick)
-- **nVideo**: Native audio/video processing (direct FFmpeg library integration via N-API)
-- **nui_wc2**: Web UI for monitoring and testing
-
-### External Dependencies
-- **FFmpeg libraries**: Linked by nVideo (avformat, avcodec, avutil, swscale, swresample, avfilter)
-- **No FFmpeg CLI required**: nVideo replaces all CLI functionality
-
----
-
-## 11. Acceptance Criteria
-
-### Phase 1: Core Foundation ✅ COMPLETE
-- [x] Node.js HTTP server with native `http` module (no Express/Multer)
-- [x] Custom multipart parser for file uploads
-- [x] Task system (create, status, queue, workers)
-- [x] SSE messaging adapter (ProgressReporter decoupled via Sender interface)
-- [x] Basic asset caching with TTL
-
-### Phase 2: Image Processing ✅ COMPLETE
-- [x] nImage for all image processing (resize, crop, convert, strip_exif)
-- [x] HEIC/HEIF support via libheif (part of nImage)
-- [x] RAW format support (CR2, ORF, NEF, ARW, DNG, etc.) via nImage/libraw
-
-### Phase 3: Audio/Video Processing (FFmpeg CLI) ✅ COMPLETE → REPLACED
-- [x] FFmpeg CLI integration (custom wrapper, not fluent-ffmpeg) - *superseded by nVideo*
-- [x] Audio transcoding/resampling (MP3, WAV, OGG, M4A) - *migrated to nVideo*
-- [x] Video audio extraction - *migrated to nVideo*
-- [x] Video keyframe extraction - *migrated to nVideo*
-- [x] GPU acceleration (NVENC, VAAPI, QSV) with auto-selection - *migrated to nVideo*
-- [x] File-based processing for reliability - *retained with nVideo*
-- [x] Progress parsing from FFmpeg stderr - *replaced by nVideo native callbacks*
-
-### Phase 4: nVideo Integration ✅ COMPLETE
-- [x] Add nVideo as git submodule (`/modules/nVideo`)
-- [x] Rewrite AudioProcessor to use nVideo (`transcode()`, `extractAudio()`, `probe()`)
-- [x] Rewrite VideoProcessor to use nVideo (`extractAudio()`, `thumbnail()`, `transcode()`)
-- [x] Remove FFmpeg CLI wrapper (`src/utils/ffmpeg/`)
-- [x] Remove FFmpeg binary dependency (`bin/ffmpeg.exe`)
-- [x] Add configurable worker execution mode (`queue` vs `thread`)
-- [x] Implement TaskWorker for thread mode (`src/tasks/TaskWorker.js`)
-
-### Phase 5: Advanced Features 🔄 PARTIAL
-- [x] REST polling adapter (`GET /v1/jobs/:jobId`)
-- [x] Cache size management (LRU eviction in AssetCache)
-- [ ] WebSocket messaging adapter
-- [ ] Task retry logic with exponential backoff
-- [ ] Adaptive sync/async logic (auto-detect based on file size)
+### Progress Completion & assetId
+`PipelineExecutor.execute()` sends a `complete` progress event before the result is cached. `Worker.js` now sends a follow-up `complete` event containing the actual `assetId` after caching. WebSocket and SSE clients should listen for the event that includes `assetId`.

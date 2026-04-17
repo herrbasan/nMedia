@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import fs from 'fs';
 import crypto from 'crypto';
+import { createRequire } from 'module';
 
 // Guard: only run when executed as a worker_thread
 if (!parentPort) {
@@ -11,6 +12,7 @@ if (!parentPort) {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
 
 // Load nVideo for audio/video processing
 const nVideoPath = path.join(__dirname, '../../modules/nVideo/lib/index.js');
@@ -172,9 +174,19 @@ async function processImage(inputSource, options) {
   const img = await initNImage();
 
   let pipeline = img(inputBuffer);
+  const meta = await img(inputBuffer).metadata();
+  let width = meta.width;
+  let height = meta.height;
 
-  if (max_dimension) {
-    pipeline = pipeline.resize({ width: max_dimension, height: max_dimension, fit: 'inside', withoutEnlargement: true });
+  if (max_dimension && (width > max_dimension || height > max_dimension)) {
+    if (width > height) {
+      height = Math.round((height / width) * max_dimension);
+      width = max_dimension;
+    } else {
+      width = Math.round((width / height) * max_dimension);
+      height = max_dimension;
+    }
+    pipeline = pipeline.resize(width, height, { fit: 'inside' });
   }
 
   if (format === 'jpeg') pipeline = pipeline.jpeg({ quality });
@@ -183,11 +195,11 @@ async function processImage(inputSource, options) {
   else if (format === 'avif') pipeline = pipeline.avif({ quality });
 
   const outputBuffer = await pipeline.toBuffer();
-  const meta = await img(outputBuffer).metadata();
+  const outputMeta = await img(outputBuffer).metadata();
 
   return {
     buffer: outputBuffer,
-    metadata: { outputSize: outputBuffer.length, width: meta.width, height: meta.height, format, mimeType: `image/${format === 'jpeg' ? 'jpeg' : format}` },
+    metadata: { outputSize: outputBuffer.length, width: outputMeta.width, height: outputMeta.height, format, mimeType: `image/${format === 'jpeg' ? 'jpeg' : format}` },
   };
 }
 

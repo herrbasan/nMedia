@@ -37,6 +37,8 @@ import {
   handleCancelJob,
   handleListJobs,
 } from './api/routes/jobs.js';
+import { WebSocketServer } from './server/WebSocketServer.js';
+import { handleWebSocketMessage } from './api/routes/websocket.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -107,12 +109,43 @@ const server = createServer((req, res) => {
   HttpServer.handle(req, res, router);
 });
 
+// WebSocket server
+const wsServer = new WebSocketServer();
+
+wsServer.on('connection', (conn, req) => {
+  logger.info('WebSocket connection established', { id: conn.id, url: req.url });
+
+  conn.on('message', (message) => {
+    handleWebSocketMessage(conn, message, req);
+  });
+
+  conn.on('close', () => {
+    logger.info('WebSocket connection closed', { id: conn.id });
+  });
+
+  conn.on('error', (err) => {
+    logger.error('WebSocket error', { id: conn.id, error: err.message });
+  });
+
+  // Send welcome
+  conn.send({ type: 'connected', id: conn.id });
+});
+
+server.on('upgrade', (req, socket, head) => {
+  if (req.url === '/v1/ws') {
+    wsServer.handleUpgrade(req, socket, head);
+  } else {
+    socket.destroy();
+  }
+});
+
 // Start server
 server.listen(config.port, () => {
   logger.info(`Media Service started on port ${config.port}`);
   logger.info(`Max file size: ${config.maxFileSizeMb}MB`);
   logger.info(`Log level: ${config.logLevel}`);
   logger.info(`Admin UI available at http://localhost:${config.port}/admin/`);
+  logger.info(`WebSocket endpoint: ws://localhost:${config.port}/v1/ws`);
 });
 
 export default server;

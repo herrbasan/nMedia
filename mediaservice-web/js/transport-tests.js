@@ -1,10 +1,16 @@
-const API_BASE = 'http://localhost:3500';
+const API_BASE = 'http://localhost:3501';
+const WS_BASE = 'ws://localhost:3501';
 
 export function initTransportTestsPage(element, nui) {
     console.log('transport tests init');
 
     let selectedFile = null;
     let testResultsData = [];
+    let ws = null;
+    let wsDownloadBuffer = [];
+    let wsDownloadExpected = null;
+    let lastJobId = null;
+    let lastAssetId = null;
 
     const workflowSelect = element.querySelector('#workflow-select select');
     const pathInputContainer = element.querySelector('#path-input-container');
@@ -27,6 +33,15 @@ export function initTransportTestsPage(element, nui) {
     const testsResultsSection = element.querySelector('#transport-tests-results-section');
     const testSummary = element.querySelector('#transport-test-summary');
     const testResults = element.querySelector('#transport-test-results');
+    const transportModeSelect = element.querySelector('#transport-mode-select select');
+    const wsStatusContainer = element.querySelector('#websocket-status');
+    const wsStatusDot = element.querySelector('#ws-status-dot');
+    const wsStatusText = element.querySelector('#ws-status-text');
+    const eventLogSection = element.querySelector('#transport-event-log-section');
+    const eventLog = element.querySelector('#transport-event-log');
+    const wsBinaryUploadBtn = element.querySelector('#ws-binary-upload-btn');
+    const wsBinaryDownloadBtn = element.querySelector('#ws-binary-download-btn');
+    const wsBinaryInfo = element.querySelector('#ws-binary-info');
 
     workflowSelect?.addEventListener('change', () => {
         const workflow = workflowSelect.value;
@@ -54,6 +69,18 @@ export function initTransportTestsPage(element, nui) {
         }
     });
 
+    transportModeSelect?.addEventListener('change', () => {
+        const mode = transportModeSelect.value;
+        wsStatusContainer.style.display = mode === 'websocket' ? 'block' : 'none';
+        if (mode === 'websocket') {
+            ensureWebSocket();
+        } else if (ws) {
+            ws.close();
+            ws = null;
+            updateWsStatus('disconnected');
+        }
+    });
+
     runUploadBtn?.addEventListener('click', () => {
         if (!selectedFile) {
             nui.components.banner.show({ content: 'Please select a file first', priority: 'alert', placement: 'bottom', autoClose: 3000 });
@@ -72,6 +99,171 @@ export function initTransportTestsPage(element, nui) {
     });
 
     runAllBtn?.addEventListener('click', runAllTransportTests);
+
+    wsBinaryUploadBtn?.addEventListener('click', () => {
+        if (!selectedFile) {
+            nui.components.banner.show({ content: 'Please select a file first', priority: 'alert', placement: 'bottom', autoClose: 3000 });
+            return;
+        }
+        runWsBinaryUpload(selectedFile);
+    });
+
+    wsBinaryDownloadBtn?.addEventListener('click', () => {
+        if (lastAssetId) {
+            runWsBinaryDownload(lastAssetId);
+        }
+    });
+
+    function updateWsStatus(state) {
+        if (!wsStatusDot || !wsStatusText) return;
+        if (state === 'connected') {
+            wsStatusDot.style.background = '#4caf50';
+            wsStatusText.textContent = 'WebSocket connected';
+        } else if (state === 'connecting') {
+            wsStatusDot.style.background = '#ff9800';
+            wsStatusText.textContent = 'WebSocket connecting...';
+        } else {
+            wsStatusDot.style.background = '#888';
+            wsStatusText.textContent = 'WebSocket disconnected';
+        }
+    }
+
+    function ensureWebSocket() {
+        if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+            return Promise.resolve(ws);
+        }
+        return new Promise((resolve, reject) => {
+            updateWsStatus('connecting');
+            ws = new WebSocket(`${WS_BASE}/v1/ws`);
+
+            ws.onopen = () => {
+                updateWsStatus('connected');
+                logTransportEvent('→', { type: 'connect', url: `${WS_BASE}/v1/ws` });
+                resolve(ws);
+            };
+
+            ws.onclose = () => {
+                updateWsStatus('disconnected');
+                logTransportEvent('→', { type: 'disconnect' });
+                ws = null;
+            };
+
+            ws.onerror = (err) => {
+                updateWsStatus('disconnected');
+                logTransportEvent('→', { type: 'error', message: 'WebSocket error' });
+                nui.components.banner.show({ content: 'WebSocket error', priority: 'alert', placement: 'bottom', autoClose: 3000 });
+                reject(err);
+            };
+
+            ws.onmessage = (msg) => {
+                if (msg.data instanceof Blob) {
+                    handleWsBinaryMessage(msg.data);
+                    return;
+                }
+                try {
+                    const data = JSON.parse(msg.data);
+                    logTransportEvent('←', data);
+
+                    if (data.type === 'upload_ready') {
+                        wsBinaryInfo.innerHTML = `<strong>Upload ready:</strong> fileId=${data.fileId}, type=${data.detectedType}, size=${formatFileSize(data.size)}`;
+                        nui.components.banner.show({ content: `Upload ready: ${data.fileId}`, priority: 'info', placement: 'bottom', autoClose: 3000 });
+                    }
+
+                    if (data.type === 'download_ready') {
+                        wsDownloadExpected = data.assetId;
+                        wsDownloadBuffer = [];
+                    }
+
+                    if (data.type === 'download_complete') {
+                        finalizeWsDownload();
+                    }
+                } catch {
+                    logTransportEvent('←', { type: 'raw', data: msg.data });
+                }
+            };
+        });
+    }
+
+    async function handleWsBinaryMessage(blob) {
+        const arrayBuffer = await blob.arrayBuffer();
+        wsDownloadBuffer.push(new Uint8Array(arrayBuffer));
+        logTransportEvent('←', { type: 'binary', size: arrayBuffer.byteLength });
+    }
+
+    function finalizeWsDownload() {
+        if (!wsDownloadExpected || wsDownloadBuffer.length === 0) return;
+        let totalLength = 0;
+        wsDownloadBuffer.forEach(b => totalLength += b.length);
+        const combined = new Uint8Array(totalLength);
+        let offset = 0;
+        wsDownloadBuffer.forEach(b => {
+            combined.set(b, offset);
+            offset += b.length;
+        });
+        const blob = new Blob([combined]);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ws-download-${wsDownloadExpected}`;
+        a.click();
+        URL.revokeObjectURL(url);
+        wsBinaryInfo.innerHTML = `<strong>Download complete:</strong> assetId=${wsDownloadExpected}, size=${formatFileSize(totalLength)}`;
+        wsDownloadExpected = null;
+        wsDownloadBuffer = [];
+    }
+
+    async function runWsBinaryUpload(file) {
+        await ensureWebSocket();
+        wsBinaryInfo.innerHTML = 'Starting WebSocket binary upload...';
+
+        const uploadId = `ws-upload-${Date.now()}`;
+        ws.send(JSON.stringify({
+            type: 'upload_start',
+            uploadId,
+            filename: file.name,
+            size: file.size,
+        }));
+
+        const chunkSize = 64 * 1024;
+        const arrayBuffer = await file.arrayBuffer();
+        let offset = 0;
+
+        while (offset < arrayBuffer.byteLength) {
+            const chunk = arrayBuffer.slice(offset, offset + chunkSize);
+            ws.send(chunk);
+            offset += chunkSize;
+        }
+
+        ws.send(JSON.stringify({
+            type: 'upload_complete',
+            uploadId,
+        }));
+
+        wsBinaryInfo.innerHTML = `Sent ${formatFileSize(file.size)} via WebSocket. Waiting for server...`;
+    }
+
+    async function runWsBinaryDownload(assetId) {
+        await ensureWebSocket();
+        wsBinaryInfo.innerHTML = `Requesting download for ${assetId}...`;
+        ws.send(JSON.stringify({
+            type: 'download_request',
+            assetId,
+        }));
+    }
+
+    function logTransportEvent(direction, data) {
+        if (!eventLog) return;
+        eventLogSection.style.display = 'block';
+        const entry = document.createElement('div');
+        entry.style.marginBottom = '0.25rem';
+        entry.style.borderBottom = '1px solid var(--nui-border)';
+        entry.style.paddingBottom = '0.25rem';
+        const time = new Date().toLocaleTimeString();
+        const color = direction === '→' ? '#4da6ff' : '#7ee787';
+        entry.innerHTML = `<span style="color: var(--nui-text-muted);">[${time}]</span> <span style="color: ${color}; font-weight: 600;">${direction}</span> <code style="font-size: 0.75rem;">${escapeHtml(JSON.stringify(data))}</code>`;
+        eventLog.appendChild(entry);
+        eventLog.scrollTop = eventLog.scrollHeight;
+    }
 
     function getProcessingOptions() {
         const processor = processorSelect.value;
@@ -96,6 +288,7 @@ export function initTransportTestsPage(element, nui) {
         resetProgress();
         hideResult();
         showProgress();
+        clearEventLog();
 
         const { processor, options } = getProcessingOptions();
 
@@ -126,6 +319,7 @@ export function initTransportTestsPage(element, nui) {
         resetProgress();
         hideResult();
         showProgress();
+        clearEventLog();
 
         const { processor, options } = getProcessingOptions();
 
@@ -157,11 +351,7 @@ export function initTransportTestsPage(element, nui) {
         addLog(`Step 2: Submitting processing job (processor: ${processor})...`);
         updateProgress(25, 'Submitting job...');
 
-        const processBody = {
-            fileId,
-            processor,
-            options,
-        };
+        const processBody = { fileId, processor, options };
 
         const processResponse = await fetch(`${API_BASE}/v1/process`, {
             method: 'POST',
@@ -176,20 +366,24 @@ export function initTransportTestsPage(element, nui) {
 
         const processData = await processResponse.json();
         const jobId = processData.jobId;
+        lastJobId = jobId;
         addLog(`Job created: ${jobId}, status: ${processData.status}`);
 
-        await pollJobProgress(jobId);
+        const transportMode = transportModeSelect.value;
+        if (transportMode === 'sse') {
+            await trackJobWithSse(jobId);
+        } else if (transportMode === 'websocket') {
+            await trackJobWithWebSocket(jobId);
+        } else {
+            await pollJobProgress(jobId);
+        }
     }
 
     async function processWithPath(inputPath, processor, options) {
         addLog(`Step 1: Submitting path-based job...`);
         updateProgress(10, 'Submitting job...');
 
-        const processBody = {
-            input_path: inputPath,
-            processor,
-            options,
-        };
+        const processBody = { input_path: inputPath, processor, options };
 
         const processResponse = await fetch(`${API_BASE}/v1/process`, {
             method: 'POST',
@@ -204,9 +398,118 @@ export function initTransportTestsPage(element, nui) {
 
         const processData = await processResponse.json();
         const jobId = processData.jobId;
+        lastJobId = jobId;
         addLog(`Job created: ${jobId}, status: ${processData.status}`);
 
-        await pollJobProgress(jobId);
+        const transportMode = transportModeSelect.value;
+        if (transportMode === 'sse') {
+            await trackJobWithSse(jobId);
+        } else if (transportMode === 'websocket') {
+            await trackJobWithWebSocket(jobId);
+        } else {
+            await pollJobProgress(jobId);
+        }
+    }
+
+    function trackJobWithSse(jobId) {
+        return new Promise((resolve, reject) => {
+            addLog('Connecting to SSE progress stream...');
+            const source = new EventSource(`${API_BASE}/v1/jobs/${jobId}/progress`);
+            let resolved = false;
+
+            source.onopen = () => {
+                logTransportEvent('→', { type: 'sse_connect', jobId });
+            };
+
+            source.onmessage = (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    logTransportEvent('←', { type: e.type, ...data });
+
+                    if (data.event === 'progress') {
+                        updateProgress(data.percent || 0, data.message || 'Processing...');
+                        if (data.percent) {
+                            addLog(`Progress: ${data.percent}% - ${data.message || ''}`);
+                        }
+                    } else if (data.event === 'complete') {
+                        updateProgress(100, 'Complete');
+                        source.close();
+                        if (!resolved) {
+                            resolved = true;
+                            resolve({ jobId, ...data });
+                        }
+                    } else if (data.event === 'error') {
+                        source.close();
+                        if (!resolved) {
+                            resolved = true;
+                            reject(new Error(data.error));
+                        }
+                    }
+                } catch (err) {
+                    logTransportEvent('←', { type: 'sse_raw', data: e.data });
+                }
+            };
+
+            source.onerror = (err) => {
+                logTransportEvent('←', { type: 'sse_error' });
+                if (!resolved) {
+                    resolved = true;
+                    reject(new Error('SSE connection failed'));
+                }
+            };
+        }).then(async (job) => {
+            await showResult({ jobId, assetId: job.result?.assetId || job.assetId });
+        }).catch((err) => {
+            addLog(`ERROR: ${err.message}`);
+            updateProgress(0, 'Failed');
+            throw err;
+        });
+    }
+
+    async function trackJobWithWebSocket(jobId) {
+        await ensureWebSocket();
+        return new Promise((resolve, reject) => {
+            addLog('Subscribing to job via WebSocket...');
+            ws.send(JSON.stringify({ type: 'subscribe', jobId }));
+            logTransportEvent('→', { type: 'subscribe', jobId });
+
+            const handler = (msg) => {
+                if (msg.data instanceof Blob) return;
+                let data;
+                try { data = JSON.parse(msg.data); } catch { return; }
+                if (data.jobId !== jobId) return;
+
+                if (data.type === 'progress') {
+                    updateProgress(data.percent || 0, data.message || 'Processing...');
+                    if (data.percent) {
+                        addLog(`Progress: ${data.percent}% - ${data.message || ''}`);
+                    }
+                } else if (data.type === 'complete') {
+                    const assetId = data.assetId || data.result?.assetId;
+                    if (assetId) {
+                        ws.removeEventListener('message', handler);
+                        updateProgress(100, 'Complete');
+                        resolve(data);
+                    } else {
+                        addLog('Progress: 100% - Waiting for asset ID...');
+                    }
+                } else if (data.type === 'error') {
+                    ws.removeEventListener('message', handler);
+                    reject(new Error(data.error));
+                } else if (data.type === 'cancelled') {
+                    ws.removeEventListener('message', handler);
+                    reject(new Error('Job cancelled'));
+                }
+            };
+
+            ws.addEventListener('message', handler);
+        }).then(async (data) => {
+            await showResult({ jobId, assetId: data.assetId || data.result?.assetId });
+        }).catch((err) => {
+            addLog(`ERROR: ${err.message}`);
+            updateProgress(0, 'Failed');
+            throw err;
+        });
     }
 
     async function pollJobProgress(jobId) {
@@ -258,6 +561,9 @@ export function initTransportTestsPage(element, nui) {
     }
 
     async function showResult(job) {
+        lastAssetId = job.assetId;
+        wsBinaryDownloadBtn.disabled = !lastAssetId;
+
         if (!job.assetId) {
             resultContent.innerHTML = `<p>Job completed but no asset was produced.</p>`;
             showResultSection();
@@ -268,7 +574,7 @@ export function initTransportTestsPage(element, nui) {
         const assetMeta = assetResponse.ok ? await assetResponse.json() : null;
 
         let html = `<div style="margin-bottom: 1rem;">`;
-        html += `<p><strong>Job ID:</strong> ${job.jobId}</p>`;
+        html += `<p><strong>Job ID:</strong> ${job.jobId || lastJobId}</p>`;
         html += `<p><strong>Asset ID:</strong> ${job.assetId}</p>`;
         if (assetMeta) {
             html += `<p><strong>Output size:</strong> ${formatFileSize(assetMeta.size)}</p>`;
@@ -308,6 +614,7 @@ export function initTransportTestsPage(element, nui) {
         await runTransportTest('upload-audio', 'Upload + Audio Process');
         await runTransportTest('path-audio', 'Path + Audio Process');
         await runTransportTest('upload-image', 'Upload + Image Process');
+        await runTransportTest('websocket-e2e', 'WebSocket E2E Binary');
 
         updateTestSummary();
     }
@@ -324,6 +631,8 @@ export function initTransportTestsPage(element, nui) {
                 result = await testPathAudio();
             } else if (testId === 'upload-image') {
                 result = await testUploadImage();
+            } else if (testId === 'websocket-e2e') {
+                result = await testWebSocketE2E();
             }
 
             const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
@@ -435,6 +744,82 @@ export function initTransportTestsPage(element, nui) {
         };
     }
 
+    async function testWebSocketE2E() {
+        const testFile = await fetchTestFile('tests/assets/audio/Vangengel.wav');
+        if (!testFile) throw new Error('Test file not found: Vangengel.wav');
+
+        await ensureWebSocket();
+
+        const uploadResponse = await uploadFile(testFile);
+        if (!uploadResponse.ok) throw new Error(`Upload failed: HTTP ${uploadResponse.status}`);
+
+        const uploadData = await uploadResponse.json();
+        if (!uploadData.fileId) throw new Error('No fileId in upload response');
+
+        const processResponse = await fetch(`${API_BASE}/v1/process`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                fileId: uploadData.fileId,
+                processor: 'audio',
+                options: { sample_rate: 16000, channels: 1, format: 'mp3' },
+            }),
+        });
+
+        if (!processResponse.ok) throw new Error(`Process failed: HTTP ${processResponse.status}`);
+
+        const processData = await processResponse.json();
+
+        const wsResult = await new Promise((resolve, reject) => {
+            const jobId = processData.jobId;
+            ws.send(JSON.stringify({ type: 'subscribe', jobId }));
+
+            const handler = (msg) => {
+                if (msg.data instanceof Blob) return;
+                let data;
+                try { data = JSON.parse(msg.data); } catch { return; }
+                if (data.jobId !== jobId) return;
+
+                if (data.type === 'complete') {
+                    const assetId = data.assetId || data.result?.assetId;
+                    if (assetId) {
+                        ws.removeEventListener('message', handler);
+                        resolve(data);
+                    }
+                } else if (data.type === 'error') {
+                    ws.removeEventListener('message', handler);
+                    reject(new Error(data.error));
+                } else if (data.type === 'cancelled') {
+                    ws.removeEventListener('message', handler);
+                    reject(new Error('Job cancelled'));
+                }
+            };
+
+            ws.addEventListener('message', handler);
+
+            setTimeout(() => {
+                ws.removeEventListener('message', handler);
+                reject(new Error('WebSocket progress timeout'));
+            }, 30000);
+        });
+
+        const assetId = wsResult.assetId || wsResult.result?.assetId;
+        if (!assetId) throw new Error('assetId is required');
+
+        const downloadResponse = await fetch(`${API_BASE}/v1/assets/${assetId}`);
+        if (!downloadResponse.ok) throw new Error(`Download failed: HTTP ${downloadResponse.status}`);
+
+        const downloadedBlob = await downloadResponse.blob();
+        if (!downloadedBlob.size) throw new Error('Downloaded asset is empty');
+
+        return {
+            fileId: uploadData.fileId,
+            jobId: processData.jobId,
+            assetId,
+            downloadSize: downloadedBlob.size,
+        };
+    }
+
     async function pollUntilComplete(jobId) {
         return new Promise((resolve, reject) => {
             const poll = async () => {
@@ -477,6 +862,11 @@ export function initTransportTestsPage(element, nui) {
         progressLog.innerHTML = '';
         if (progressBar) progressBar.value = 0;
         if (progressStatus) progressStatus.textContent = '';
+    }
+
+    function clearEventLog() {
+        if (eventLog) eventLog.innerHTML = '';
+        eventLogSection.style.display = 'none';
     }
 
     function updateProgress(percent, message) {
@@ -565,6 +955,12 @@ export function initTransportTestsPage(element, nui) {
                 </div>
             `;
         }).join('');
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
     function formatFileSize(bytes) {

@@ -1,7 +1,7 @@
 <div class="page-transport-tests">
 <header>
     <h2><nui-icon name="swap_horiz">🔄</nui-icon> Transport Architecture Tests</h2>
-    <p class="lead">Test the new upload-to-cache and path-based processing workflows</p>
+    <p class="lead">Test the new upload-to-cache and path-based processing workflows with polling, SSE, and WebSocket transports</p>
 </header>
 
 <section>
@@ -20,6 +20,23 @@
             <p style="font-size: 0.8rem; color: var(--nui-text-muted); margin-top: 0.5rem;">
                 Path must be within an allowedInputPaths directory in config.json
             </p>
+        </div>
+    </nui-card>
+</section>
+
+<section>
+    <nui-card style="overflow: visible;">
+        <div class="nui-headline">Transport Mode</div>
+        <nui-select id="transport-mode-select" label="Progress Transport">
+            <select>
+                <option value="polling">HTTP Polling</option>
+                <option value="sse">SSE EventStream</option>
+                <option value="websocket">WebSocket</option>
+            </select>
+        </nui-select>
+        <div id="websocket-status" style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--nui-text-muted); display: none;">
+            <span id="ws-status-dot" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #888; margin-right: 6px;"></span>
+            <span id="ws-status-text">WebSocket disconnected</span>
         </div>
     </nui-card>
 </section>
@@ -107,12 +124,41 @@
     </nui-card>
 </section>
 
+<section id="transport-binary-section">
+    <nui-card>
+        <div class="nui-headline">WebSocket Binary Transfer</div>
+        <p style="font-size: 0.85rem; color: var(--nui-text-muted); margin-bottom: 0.75rem;">
+            Test raw binary upload and download over WebSocket.
+        </p>
+        <nui-button-container align="start" style="gap: 0.5rem; flex-wrap: wrap;">
+            <nui-button variant="primary" id="ws-binary-upload-btn">
+                <button type="button">
+                    <nui-icon name="upload">⬆</nui-icon> WS Binary Upload
+                </button>
+            </nui-button>
+            <nui-button id="ws-binary-download-btn" disabled>
+                <button type="button">
+                    <nui-icon name="download">⬇</nui-icon> WS Binary Download
+                </button>
+            </nui-button>
+        </nui-button-container>
+        <div id="ws-binary-info" style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--nui-text-muted);"></div>
+    </nui-card>
+</section>
+
 <section id="transport-progress-section" style="display: none;">
     <nui-card>
         <div class="nui-headline">Processing Progress</div>
         <div id="transport-progress-status" style="margin-bottom: 0.5rem;"></div>
         <nui-progress id="transport-progress-bar" value="0"></nui-progress>
         <div id="transport-progress-log" style="margin-top: 0.5rem; font-family: monospace; font-size: 0.8rem; max-height: 200px; overflow-y: auto;"></div>
+    </nui-card>
+</section>
+
+<section id="transport-event-log-section" style="display: none;">
+    <nui-card>
+        <div class="nui-headline">Transport Event Log</div>
+        <div id="transport-event-log" style="font-family: monospace; font-size: 0.8rem; max-height: 300px; overflow-y: auto; background: var(--nui-surface-2); padding: 0.75rem; border-radius: 6px;"></div>
     </nui-card>
 </section>
 

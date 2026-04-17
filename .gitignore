@@ -1,6 +1,7 @@
 # Folders
 tests/
 cache/
+_Archive/
 
 # Dependencies
 node_modules/
@@ -16,6 +17,10 @@ deps/
 # Binaries
 bin/*.exe
 !bin/.gitkeep
+
+# Temp server logs
+server*.log
+upload_debug.log
 
 # Build output
 dist/

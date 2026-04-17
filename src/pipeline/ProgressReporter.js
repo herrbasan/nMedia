@@ -1,18 +1,18 @@
 import { v4 as uuidv4 } from '../utils/uuid.js';
 
 /**
- * Manages SSE connections for progress reporting.
- * Uses generic Sender interface (SseConnection).
- * Supports linking SSE connections to internal job IDs for progress forwarding.
+ * Manages SSE and WebSocket connections for progress reporting.
+ * Uses generic Sender interface (SseConnection, WebSocketConnection).
+ * Supports linking connections to internal job IDs for progress forwarding.
  */
 class ProgressReporter {
   #connections = new Map();
-  #jobLinks = new Map(); // sseJobId -> internal jobId
+  #jobLinks = new Map(); // connectionId -> internal jobId
 
   /**
    * Create a new job with SSE connection.
    * @param {Sender} sender - Object implementing Sender interface
-   * @returns {string} - Job ID
+   * @returns {string} - Connection ID
    */
   createJob(sender) {
     const jobId = uuidv4();
@@ -37,28 +37,45 @@ class ProgressReporter {
   }
 
   /**
-   * Link an SSE connection to an internal job ID.
-   * Progress events for the internal job will be forwarded to this SSE connection.
-   * @param {string} sseJobId - SSE connection ID
+   * Register a generic connection (e.g., WebSocket).
+   * @param {Sender} sender
+   * @returns {string} - Connection ID
+   */
+  registerConnection(sender) {
+    const connId = uuidv4();
+    this.#connections.set(connId, sender);
+
+    sender.onClose(() => {
+      this.#connections.delete(connId);
+      this.#jobLinks.delete(connId);
+    });
+
+    return connId;
+  }
+
+  /**
+   * Link a connection to an internal job ID.
+   * Progress events for the internal job will be forwarded to this connection.
+   * @param {string} connectionId - Connection ID
    * @param {string} internalJobId - Internal job ID
    */
-  linkJob(sseJobId, internalJobId) {
-    if (this.#connections.has(sseJobId)) {
-      this.#jobLinks.set(sseJobId, internalJobId);
+  linkJob(connectionId, internalJobId) {
+    if (this.#connections.has(connectionId)) {
+      this.#jobLinks.set(connectionId, internalJobId);
     }
   }
 
   /**
-   * Get internal job ID linked to an SSE connection.
-   * @param {string} sseJobId
+   * Get internal job ID linked to a connection.
+   * @param {string} connectionId
    * @returns {string|null}
    */
-  getLinkedJob(sseJobId) {
-    return this.#jobLinks.get(sseJobId) || null;
+  getLinkedJob(connectionId) {
+    return this.#jobLinks.get(connectionId) || null;
   }
 
   /**
-   * Send progress event to a job.
+   * Send progress event to a job and all linked connections.
    * @param {string|null} jobId - Job ID (can be null for no-op)
    * @param {string} event - Event type: start, progress, complete, error
    * @param {Object} data - Event data
@@ -66,12 +83,31 @@ class ProgressReporter {
   send(jobId, event, data = {}) {
     if (!jobId) return;
 
-    const sender = this.#connections.get(jobId);
-    if (!sender) return;
+    // Send to direct connection if exists
+    const directSender = this.#connections.get(jobId);
+    if (directSender) {
+      this.#sendToSender(directSender, event, data, jobId);
+    }
 
-    const payload = JSON.stringify({ event, ...data });
-    sender.write(`event: ${event}\n`);
-    sender.write(`data: ${payload}\n\n`);
+    // Forward to all linked connections
+    for (const [connId, linkedJobId] of this.#jobLinks) {
+      if (linkedJobId === jobId) {
+        const sender = this.#connections.get(connId);
+        if (sender) {
+          this.#sendToSender(sender, event, data, jobId);
+        }
+      }
+    }
+  }
+
+  #sendToSender(sender, event, data, jobId) {
+    if (typeof sender.sendEvent === 'function') {
+      sender.sendEvent(event, { jobId, ...data });
+    } else {
+      const payload = JSON.stringify({ event, jobId, ...data });
+      sender.write(`event: ${event}\n`);
+      sender.write(`data: ${payload}\n\n`);
+    }
   }
 
   /**
