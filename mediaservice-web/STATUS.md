@@ -117,6 +117,7 @@ mediaservice-web/
 | `DELETE` | `/v1/jobs/:jobId` | Cancel a queued job |
 | `GET` | `/v1/assets/:id` | Download asset file |
 | `GET` | `/v1/assets/:id/metadata` | Get asset metadata |
+| `GET` | `/v1/capabilities` | Get FFmpeg codecs, filters, formats, hwaccels |
 | `WS` | `/v1/ws` | WebSocket for progress + binary transfer |
 
 ### Legacy Endpoints
@@ -151,6 +152,47 @@ mediaservice-web/
 1. **Port Configuration:** Web UI defaults to port 3501. Ensure Media Service config matches.
 2. **Video Keyframes:** Gallery display may need refinement for high frame counts.
 3. **WebSocket Reconnection:** Transport tests do not auto-reconnect WebSocket on disconnect.
+
+## Capabilities Integration
+
+The Web UI dynamically populates codec and format options from the Media Service's nVideo and nImage capabilities:
+
+### Endpoint: `GET /v1/capabilities`
+
+Query parameters:
+- `?module=nvideo` - nVideo capabilities only
+- `?module=nimage` - nImage capabilities only
+- `?section=build` - FFmpeg version, configuration, protocols, hwaccels
+- `?section=codecs` - All available codecs
+- `?section=common` - Curated encoder/decoder lists by hardware type
+- `?section=filters` - All available filters
+- `?section=formats` - All container formats
+- `?section=hwaccels` - Hardware acceleration info
+- No param - Full capabilities object (both nVideo and nImage)
+
+### nVideo Capabilities
+
+**Audio Processor:**
+- Audio codec dropdown populated from `commonCodecs.encoders.audio`
+
+**Video Processor:**
+- Container formats from `formats` (filtered by mux capability)
+- Video codecs from `commonCodecs.encoders.video.cpu`
+- Audio codecs from `commonCodecs.encoders.audio`
+- Hardware acceleration from `videoEncodersByHwaccel` (nvenc, qsv, vaapi, etc.)
+- Recommended presets displayed from `commonCodecs.recommended`
+
+### nImage Capabilities
+
+**Image Processor:**
+- Output formats from `encoders` (jpeg, png, webp, avif, tiff)
+- Supported input formats displayed by decoder type (RAW, HEIC, Sharp, ImageMagick)
+- Module state (isLoaded, hasSharp, version)
+
+### Transport Tests:
+- All above options available in the processing options card
+- HWAccel selection affects which encoder is used (CPU vs GPU)
+- Image format dropdown populated dynamically from nImage encoders
 
 ## API Response Formats
 
@@ -238,6 +280,6 @@ data: {"event":"complete","jobId":"job-def-456","assetId":"asset-ghi-789","metad
 1. Add batch processing - Multiple files at once
 2. Add copy-to-clipboard for base64 results
 3. Theme persistence - Remember dark/light mode
-4. Add transcode presets (web, mobile, archive)
-5. Video keyframe gallery improvements for high frame counts
-6. Add job history/management UI
+4. Video keyframe gallery improvements for high frame counts
+5. Add job history/management UI
+6. Add filter selection UI (scale, crop, fps, eq, etc.)

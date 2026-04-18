@@ -31,6 +31,7 @@ import {
 } from './api/routes/assets.js';
 import { handleUpload } from './api/routes/upload.js';
 import { handleProcess } from './api/routes/process.js';
+import { handleCapabilities } from './api/routes/capabilities.js';
 import {
   handleJobProgress,
   handleGetJob,
@@ -89,6 +90,9 @@ router.addRoute('GET', '/v1/assets/:id', handleGetAsset);
 router.addRoute('GET', '/v1/assets/:id/metadata', handleGetAssetMetadata);
 router.addRoute('DELETE', '/v1/assets/:id', handleDeleteAsset);
 router.addRoute('DELETE', '/v1/assets', handleClearAssets);
+
+// Capabilities endpoint
+router.addRoute('GET', '/v1/capabilities', handleCapabilities);
 
 // Static file serving for Admin UI
 const publicDir = path.join(__dirname, '../public');

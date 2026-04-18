@@ -90,6 +90,7 @@ The Web UI expects the Media Service running on `http://localhost:3501`:
 | `GET` | `/v1/jobs/:jobId` | Poll job status |
 | `DELETE` | `/v1/jobs/:jobId` | Cancel a queued job |
 | `GET` | `/v1/assets/:id` | Download asset file |
+| `GET` | `/v1/capabilities` | Get nVideo/nImage codecs, filters, formats, hwaccels |
 | `WS` | `/v1/ws` | WebSocket for progress + binary transfer |
 
 ### Legacy Endpoints (Still Functional)

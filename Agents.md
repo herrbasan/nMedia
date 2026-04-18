@@ -6,11 +6,28 @@ Media Service is a stateless microservice designed to preprocess multimedia file
 
 ## Documentation
 
+### Working Documents (`/docs`)
+
+Internal working documents for planning and specification.
+
 | Document | Location | Purpose |
 |----------|----------|---------|
 | Configuration | `config.json` | All configuration settings (server, media, logging, cache, workers) |
 | Specification | `docs/media_service_spec.md` | Detailed technical specification, API design, architecture |
 | Development Plan | `docs/media_service_dev_plan.md` | Implementation roadmap, technology choices, development phases |
+
+### Project Documentation (`/documentation`)
+
+Proper documentation for the project, similar in style to nImage and nVideo module docs.
+
+| Document | Location | Purpose |
+|----------|----------|---------|
+| API Reference | `documentation/README.md` | Main API documentation, quick start, endpoints |
+| Architecture | `documentation/ARCHITECTURE.md` | Component overview, data flow, security |
+| Capabilities | `documentation/CAPABILITIES.md` | Capabilities endpoint full reference |
+| Processing | `documentation/PROCESSING.md` | Processing workflows, native module details |
+
+**Note:** `/docs` is for working documents (specs, plans, drafts). `/documentation` is for the proper, published documentation of the project.
 
 ## Configuration
 

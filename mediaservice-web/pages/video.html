@@ -144,6 +144,19 @@
                             </select>
                         </nui-select>
                     </nui-input-group>
+
+                    <nui-input-group>
+                        <label>Hardware Acceleration</label>
+                        <nui-select id="hwaccel-select">
+                            <select>
+                                <option value="">Auto (CPU)</option>
+                                <option value="nvenc">NVIDIA NVENC</option>
+                                <option value="qsv">Intel QuickSync</option>
+                                <option value="vaapi">VAAPI (Linux)</option>
+                            </select>
+                        </nui-select>
+                        <span class="description">GPU acceleration for faster encoding</span>
+                    </nui-input-group>
                 </div>
 
                 <nui-button-container align="end" style="margin-top: 1.5rem;">

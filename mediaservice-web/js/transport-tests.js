@@ -1,8 +1,125 @@
 const API_BASE = 'http://localhost:3501';
 const WS_BASE = 'ws://localhost:3501';
 
+let capabilitiesCache = null;
+
+async function fetchCapabilities() {
+    if (capabilitiesCache) return capabilitiesCache;
+    try {
+        const response = await fetch(`${API_BASE}/v1/capabilities`);
+        if (response.ok) {
+            const result = await response.json();
+            if (result.success) {
+                capabilitiesCache = result.data;
+                return capabilitiesCache;
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to fetch capabilities:', e);
+    }
+    return null;
+}
+
+function populateAudioCodecs(caps) {
+    const select = document.querySelector('#transport-audio-codec-select');
+    if (!select || !caps) return;
+    const encoders = caps.commonCodecs?.encoders?.audio || [];
+    select.innerHTML = '<option value="">Auto</option>';
+    encoders.forEach(codec => {
+        const opt = document.createElement('option');
+        opt.value = codec;
+        opt.textContent = codec;
+        select.appendChild(opt);
+    });
+}
+
+function populateImageFormats(caps) {
+    if (!caps) return;
+
+    const formatSelect = document.querySelector('#transport-image-format select');
+    if (formatSelect) {
+        const encoders = caps.encoders || ['jpeg', 'png', 'webp', 'avif', 'tiff'];
+        formatSelect.innerHTML = '';
+        encoders.forEach(fmt => {
+            const opt = document.createElement('option');
+            opt.value = fmt;
+            opt.textContent = fmt.toUpperCase();
+            formatSelect.appendChild(opt);
+        });
+    }
+}
+
+function populateVideoOptions(caps) {
+    if (!caps) return;
+
+    const containerSelect = document.querySelector('#transport-video-container-select');
+    if (containerSelect) {
+        const videoFormats = (caps.formats || []).filter(f => f.canMux && ['mp4', 'mkv', 'webm', 'avi', 'mov', 'ts', 'flv', 'ogg'].some(ext => f.extensions?.includes(ext)));
+        containerSelect.innerHTML = '<option value="">Auto</option>';
+        videoFormats.forEach(f => {
+            const opt = document.createElement('option');
+            opt.value = f.extensions[0];
+            opt.textContent = f.name;
+            containerSelect.appendChild(opt);
+        });
+    }
+
+    const codecSelect = document.querySelector('#transport-video-codec-select');
+    if (codecSelect) {
+        const allVideoEncoders = caps.commonCodecs?.encoders?.video || {};
+        const cpuEncoders = allVideoEncoders.cpu || [];
+        codecSelect.innerHTML = '<option value="">Auto</option>';
+        cpuEncoders.forEach(codec => {
+            const opt = document.createElement('option');
+            opt.value = codec;
+            opt.textContent = codec;
+            codecSelect.appendChild(opt);
+        });
+    }
+
+    const audioCodecSelect = document.querySelector('#transport-video-audio-codec-select');
+    if (audioCodecSelect) {
+        const audioEncoders = caps.commonCodecs?.encoders?.audio || [];
+        audioCodecSelect.innerHTML = '<option value="">Auto</option>';
+        audioEncoders.forEach(codec => {
+            const opt = document.createElement('option');
+            opt.value = codec;
+            opt.textContent = codec;
+            audioCodecSelect.appendChild(opt);
+        });
+    }
+
+    const hwaccelSelect = document.querySelector('#transport-video-hwaccel-select');
+    if (hwaccelSelect) {
+        const hwaccels = caps.commonCodecs?.videoEncodersByHwaccel || {};
+        hwaccelSelect.innerHTML = '<option value="">Auto</option>';
+        Object.keys(hwaccels).forEach(hw => {
+            if (hw !== 'cpu') {
+                const opt = document.createElement('option');
+                opt.value = hw;
+                opt.textContent = hw.toUpperCase();
+                hwaccelSelect.appendChild(opt);
+            }
+        });
+    }
+
+    const recommendedDiv = document.querySelector('#transport-video-recommended');
+    if (recommendedDiv && caps.commonCodecs?.recommended) {
+        const rec = caps.commonCodecs.recommended;
+        recommendedDiv.innerHTML = `<strong>Recommended:</strong> ${Object.entries(rec).map(([k, v]) => `${k}: ${v.video || ''}/${v.audio || ''}`).join(' | ')}`;
+    }
+}
+
 export function initTransportTestsPage(element, nui) {
     console.log('transport tests init');
+
+    fetchCapabilities().then(caps => {
+        const nVideoCaps = caps?.nVideo || caps;
+        const nImageCaps = caps?.nImage || {};
+        populateAudioCodecs(nVideoCaps);
+        populateVideoOptions(nVideoCaps);
+        populateImageFormats(nImageCaps);
+    });
 
     let selectedFile = null;
     let testResultsData = [];
@@ -60,6 +177,14 @@ export function initTransportTestsPage(element, nui) {
         audioOptions.style.display = proc === 'audio' ? '' : 'none';
         videoOptions.style.display = proc === 'video' ? '' : 'none';
         imageOptions.style.display = proc === 'image' ? '' : 'none';
+    });
+
+    const videoModeSelect = element.querySelector('#transport-video-mode select');
+    const transcodeOptionsDiv = element.querySelector('#transport-video-transcode-options');
+    videoModeSelect?.addEventListener('change', () => {
+        if (transcodeOptionsDiv) {
+            transcodeOptionsDiv.style.display = videoModeSelect.value === 'transcode' ? 'block' : 'none';
+        }
     });
 
     filePicker?.addEventListener('nui-file-selected', (e) => {
@@ -273,8 +398,21 @@ export function initTransportTestsPage(element, nui) {
             options.sample_rate = parseInt(element.querySelector('#transport-audio-samplerate select')?.value || '16000');
             options.format = element.querySelector('#transport-audio-format select')?.value || 'mp3';
             options.channels = 1;
+            const audioCodec = element.querySelector('#transport-audio-codec-select')?.value;
+            if (audioCodec) options.audio_codec = audioCodec;
         } else if (processor === 'video') {
-            options.mode = element.querySelector('#transport-video-mode select')?.value || 'extract_audio';
+            const mode = element.querySelector('#transport-video-mode select')?.value || 'extract_audio';
+            options.mode = mode;
+            if (mode === 'transcode') {
+                const container = element.querySelector('#transport-video-container-select')?.value;
+                const videoCodec = element.querySelector('#transport-video-codec-select')?.value;
+                const audioCodec = element.querySelector('#transport-video-audio-codec-select')?.value;
+                const hwaccel = element.querySelector('#transport-video-hwaccel-select')?.value;
+                if (container) options.output_format = container;
+                if (videoCodec) options.video_codec = videoCodec;
+                if (audioCodec) options.audio_codec = audioCodec;
+                if (hwaccel) options.hwaccel = hwaccel;
+            }
         } else if (processor === 'image') {
             options.max_dimension = parseInt(element.querySelector('#transport-image-maxdim input')?.value || '1024');
             options.format = element.querySelector('#transport-image-format select')?.value || 'jpeg';

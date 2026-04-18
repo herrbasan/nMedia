@@ -3,7 +3,7 @@
  * Handles communication with the Media Service backend
  */
 
-const API_BASE = 'http://localhost:3500';
+const API_BASE = 'http://localhost:3501';
 
 /**
  * Upload and process an image file

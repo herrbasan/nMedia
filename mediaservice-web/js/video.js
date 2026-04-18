@@ -1,7 +1,43 @@
-const API_BASE = 'http://localhost:3500';
+const API_BASE = 'http://localhost:3501';
+
+async function fetchVideoCapabilities() {
+    try {
+        const response = await fetch(`${API_BASE}/v1/capabilities?section=hwaccels`);
+        if (response.ok) {
+            const result = await response.json();
+            if (result.success) return result.data;
+        }
+    } catch (e) {
+        console.warn('Failed to fetch video capabilities:', e);
+    }
+    return null;
+}
+
+function populateVideoCapabilities(caps) {
+    if (!caps) return;
+
+    const hwaccelSelect = document.querySelector('#hwaccel-select select');
+    if (hwaccelSelect) {
+        const hwaccels = caps.hwaccels || [];
+        const encodersByHw = caps.videoEncodersByHwaccel || {};
+        hwaccelSelect.innerHTML = '<option value="">Auto (CPU)</option>';
+        hwaccels.forEach(hw => {
+            if (hw !== 'cpu' && encodersByHw[hw]) {
+                const opt = document.createElement('option');
+                opt.value = hw;
+                opt.textContent = hw.toUpperCase();
+                hwaccelSelect.appendChild(opt);
+            }
+        });
+    }
+}
 
 export function initVideoPage(element, nui) {
     console.log('video init');
+
+    fetchVideoCapabilities().then(caps => {
+        populateVideoCapabilities(caps);
+    });
     let currentFile = null;
     let processedData = null;
     let originalVideoUrl = null;
@@ -91,6 +127,7 @@ export function initVideoPage(element, nui) {
             const presetEl = element.querySelector('#preset-select select');
             const widthEl = element.querySelector('#transcode-width');
             const heightEl = element.querySelector('#transcode-height');
+            const hwaccelEl = element.querySelector('#hwaccel-select select');
 
             options.output_format = outputFormatEl?.value || 'mp4';
             options.video_codec = videoCodecEl?.value || 'libx264';
@@ -99,6 +136,7 @@ export function initVideoPage(element, nui) {
             options.preset = presetEl?.value || 'medium';
             if (widthEl?.value) options.width = parseInt(widthEl.value);
             if (heightEl?.value) options.height = parseInt(heightEl.value);
+            if (hwaccelEl?.value) options.hwaccel = hwaccelEl.value;
         }
 
         try {

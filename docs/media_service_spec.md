@@ -18,7 +18,7 @@ Media Service is a stateless microservice designed to preprocess multimedia file
 |----------|------------|-----------|
 | Image | Convert, crop, resize, format | Async via unified pipeline |
 | Audio | Transcode, resample | Async via unified pipeline |
-| Video | Extract audio, extract keyframes | Async via unified pipeline |
+| Video | Extract audio, extract keyframes, transcode | Async via unified pipeline |
 
 ---
 
@@ -132,6 +132,7 @@ All three IDs are tracked in `JobStore`:
 | `GET` | `/v1/jobs/:jobId/progress` | SSE progress stream (start, progress, complete, error) |
 | `GET` | `/v1/jobs/:jobId` | Poll job status and current progress |
 | `DELETE` | `/v1/jobs/:jobId` | Cancel a queued job |
+| `GET` | `/v1/capabilities` | Query nVideo/nImage codecs, filters, formats, hwaccels |
 | `WS` | `/v1/ws` | WebSocket for progress, binary upload, and binary download |
 
 #### POST /v1/upload
@@ -227,6 +228,71 @@ data: {"event":"complete","jobId":"job-def-456","assetId":"asset-ghi-789","metad
 { "type": "pong", "timestamp": 1234567890 }
 ```
 
+### 4.1.1 Capabilities Endpoint
+
+`GET /v1/capabilities` returns runtime capabilities from the native modules (nVideo and nImage). This allows clients to discover available codecs, formats, filters, and hardware acceleration at runtime.
+
+**Query Parameters:**
+
+| Parameter | Values | Description |
+|-----------|--------|-------------|
+| `module` | `nvideo`, `nimage` | Filter to specific module. Omit for both. |
+| `section` | See below | Filter to specific capability section |
+
+**nVideo sections:**
+- `build` - FFmpeg version, configuration, protocols, hwaccels
+- `codecs` - All available codecs (786+)
+- `common` - Curated encoder/decoder lists by hardware type
+- `filters` - All available filters (568+)
+- `formats` - All container formats (416+)
+- `hwaccels` - Hardware acceleration info with recommended presets
+
+**nImage sections:**
+- `formats` - All supported input formats
+- `state` - Module load state (isLoaded, hasSharp, version)
+- `raw` - RAW format list (LibRaw)
+- `heic` - HEIC/AVIF format list (LibHeif)
+- `imagemagick` - ImageMagick fallback format list
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "nVideo": {
+      "buildInfo": { "version": "7.1", "hwaccels": ["nvenc", "qsv"], ... },
+      "commonCodecs": {
+        "encoders": { "video": { "cpu": [...], "nvidia": [...] }, "audio": [...] },
+        "decoders": { "video": [...], "audio": [...] },
+        "videoEncodersByHwaccel": { "cpu": [...], "nvidia": [...] },
+        "recommended": { "webStreaming": {...}, "archiving": {...} }
+      },
+      "filters": [...],
+      "formats": [...]
+    },
+    "nImage": {
+      "version": { "major": 0, "minor": 1, "patch": 0 },
+      "decoders": {
+        "raw": { "library": "libraw", "formats": [...], "features": [...] },
+        "heic": { "library": "libheif", "formats": [...], "features": [...] },
+        "sharp": { "library": "sharp/libvips", "formats": [...], "features": [...] },
+        "magick": { "library": "imagemagick", "formats": [...], "features": [...] }
+      },
+      "encoders": ["jpeg", "png", "webp", "avif", "tiff"]
+    },
+    "nImageState": {
+      "isLoaded": true,
+      "hasSharp": true,
+      "version": { "major": 0, "minor": 1, "patch": 0 },
+      "supportedFormats": [...],
+      "rawFormats": [...],
+      "heicFormats": [...],
+      "imagemagickFormats": [...]
+    }
+  }
+}
+```
+
 ### 4.2 Asset Cache Endpoints
 
 | Method | Endpoint | Description |
@@ -271,9 +337,16 @@ The following legacy endpoints are still functional but superseded by the unifie
 - `format`: mp3, wav, ogg, m4a
 
 ### Video
-- `mode`: `extract_audio` or `extract_keyframes`
+- `mode`: `extract_audio`, `extract_keyframes`, or `transcode`
 - `fps`: Frame rate for keyframe extraction (1-30)
 - `max_dimension`: Max frame dimension for extracted keyframes
+- `output_format`: Container format (mp4, webm, mkv, mov)
+- `video_codec`: Video codec (libx264, libx265, h264_nvenc, etc.)
+- `audio_codec`: Audio codec (aac, libmp3lame, libopus, copy)
+- `hwaccel`: Hardware acceleration (nvenc, qsv, vaapi)
+- `crf`: Quality factor (0-51, default 23)
+- `preset`: Encoding speed preset (ultrafast to veryslow)
+- `width`, `height`: Optional output dimensions
 
 ---
 

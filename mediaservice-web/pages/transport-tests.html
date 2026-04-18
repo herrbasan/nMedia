@@ -85,7 +85,7 @@
         </nui-select>
         <div id="transport-audio-options" style="margin-top: 0.5rem;">
             <nui-select id="transport-audio-format" label="Output Format">
-                <select>
+                <select id="transport-audio-format-select">
                     <option value="mp3">MP3</option>
                     <option value="wav">WAV</option>
                     <option value="ogg">OGG</option>
@@ -99,6 +99,11 @@
                     <option value="48000">48000 Hz (Video)</option>
                 </select>
             </nui-select>
+            <nui-select id="transport-audio-codec" label="Audio Codec">
+                <select id="transport-audio-codec-select">
+                    <option value="">Auto</option>
+                </select>
+            </nui-select>
         </div>
         <div id="transport-video-options" style="display: none; margin-top: 0.5rem;">
             <nui-select id="transport-video-mode" label="Mode">
@@ -108,6 +113,29 @@
                     <option value="transcode">Transcode</option>
                 </select>
             </nui-select>
+            <div id="transport-video-transcode-options" style="display: none; margin-top: 0.5rem;">
+                <nui-select id="transport-video-container" label="Container Format">
+                    <select id="transport-video-container-select">
+                        <option value="">Auto</option>
+                    </select>
+                </nui-select>
+                <nui-select id="transport-video-codec" label="Video Codec">
+                    <select id="transport-video-codec-select">
+                        <option value="">Auto</option>
+                    </select>
+                </nui-select>
+                <nui-select id="transport-video-audio-codec" label="Audio Codec">
+                    <select id="transport-video-audio-codec-select">
+                        <option value="">Auto</option>
+                    </select>
+                </nui-select>
+                <nui-select id="transport-video-hwaccel" label="Hardware Acceleration">
+                    <select id="transport-video-hwaccel-select">
+                        <option value="">Auto</option>
+                    </select>
+                </nui-select>
+                <div id="transport-video-recommended" style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--nui-text-muted);"></div>
+            </div>
         </div>
         <div id="transport-image-options" style="display: none; margin-top: 0.5rem;">
             <nui-textfield id="transport-image-maxdim" label="Max Dimension" type="number">

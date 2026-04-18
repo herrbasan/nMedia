@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:3500';
+const API_BASE = 'http://localhost:3501';
 
 export function initSettingsPage(element, nui) {
     console.log('settings init');

@@ -1,7 +1,52 @@
-const API_BASE = 'http://localhost:3500';
+const API_BASE = 'http://localhost:3501';
+
+async function fetchImageCapabilities() {
+    try {
+        const response = await fetch(`${API_BASE}/v1/capabilities?module=nimage`);
+        if (response.ok) {
+            const result = await response.json();
+            if (result.success) return result.data;
+        }
+    } catch (e) {
+        console.warn('Failed to fetch image capabilities:', e);
+    }
+    return null;
+}
+
+function populateImageFormats(caps) {
+    if (!caps) return;
+
+    const formatSelect = document.querySelector('#format-select select');
+    if (formatSelect) {
+        const encoders = caps.encoders || ['jpeg', 'png', 'webp', 'avif', 'tiff'];
+        formatSelect.innerHTML = '';
+        encoders.forEach(fmt => {
+            const opt = document.createElement('option');
+            opt.value = fmt;
+            opt.textContent = fmt.toUpperCase();
+            formatSelect.appendChild(opt);
+        });
+    }
+
+    const supportedInfo = document.querySelector('#supported-formats-info');
+    if (supportedInfo && caps.decoders) {
+        const rawCount = caps.decoders.raw?.formats?.length || 0;
+        const heicCount = caps.decoders.heic?.formats?.length || 0;
+        const sharpCount = caps.decoders.sharp?.formats?.length || 0;
+        const magickCount = caps.decoders.magick?.formats?.length || 0;
+        supportedInfo.innerHTML = `
+            <strong>Input formats:</strong> 
+            RAW (${rawCount}), HEIC/AVIF (${heicCount}), Standard (${sharpCount}), ImageMagick (${magickCount}+)
+        `;
+    }
+}
 
 export function initImagePage(element, nui) {
     console.log('image init');
+
+    fetchImageCapabilities().then(caps => {
+        populateImageFormats(caps);
+    });
     let currentFile = null;
     let processedData = null;
 

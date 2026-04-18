@@ -108,7 +108,7 @@ function toggleTheme() {
 // Footer health check
 const footerInfo = document.getElementById('appFooterInfo');
 if (footerInfo) {
-    const API_BASE = 'http://localhost:3500';
+    const API_BASE = 'http://localhost:3501';
     fetch(`${API_BASE}/health`)
         .then(res => {
             if (res.ok) {
