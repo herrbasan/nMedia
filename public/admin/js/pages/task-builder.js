@@ -8,7 +8,8 @@ export function initTaskBuilderPage(element, nui) {
     const processorSelect = element.querySelector('#builder-processor select');
     const optionsPanel = element.querySelector('#builder-options');
     const outputTypeRadios = element.querySelectorAll('[name="output-type"]');
-    const outputPathInput = element.querySelector('#builder-output-path');
+    const outputPathPanel = element.querySelector('#output-path-panel');
+    const outputPathInput = element.querySelector('#builder-output-path input');
     const runBtn = element.querySelector('#run-builder-btn');
     const resultPanel = element.querySelector('#builder-result');
 
@@ -100,6 +101,15 @@ export function initTaskBuilderPage(element, nui) {
 
     processorSelect?.addEventListener('change', renderOptions);
     renderOptions();
+
+    // Toggle output path panel
+    outputTypeRadios.forEach(r => {
+        r.addEventListener('change', () => {
+            if (outputPathPanel) {
+                outputPathPanel.style.display = r.value === 'path' ? '' : 'none';
+            }
+        });
+    });
 
     function getSelectedInputType() {
         for (const r of inputTypeTabs) if (r.checked) return r.value;

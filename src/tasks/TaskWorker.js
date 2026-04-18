@@ -65,7 +65,11 @@ function resolveInputPath(inputSource, cacheDir) {
 }
 
 async function processAudio(inputSource, options, cacheDir) {
-  const { sample_rate = 16000, channels = 1, format = 'mp3' } = options;
+  const rawSampleRate = options.sample_rate ?? '16000';
+  const rawChannels = options.channels ?? '1';
+  const format = options.format || 'mp3';
+  const sampleRate = rawSampleRate === 'source' ? 0 : parseInt(rawSampleRate, 10);
+  const channelCount = rawChannels === 'source' ? 0 : parseInt(rawChannels, 10);
 
   const inputPath = resolveInputPath(inputSource, cacheDir);
   const shouldCleanupInput = inputSource.type === 'buffer';
@@ -77,8 +81,8 @@ async function processAudio(inputSource, options, cacheDir) {
       nVideo.transcode(inputPath, outputPath, {
         audio: {
           codec: AUDIO_CODECS[format],
-          sampleRate: sample_rate,
-          channels: channels,
+          sampleRate,
+          channels: channelCount,
           bitrate: format === 'mp3' || format === 'm4a' ? 128000 : 0,
         },
         cache: false,
@@ -91,7 +95,7 @@ async function processAudio(inputSource, options, cacheDir) {
     });
 
     const outputBuffer = fs.readFileSync(outputPath);
-    return { buffer: outputBuffer, metadata: { outputSize: outputBuffer.length, sampleRate: sample_rate, channels, format, mimeType: MIME_TYPES[format] } };
+    return { buffer: outputBuffer, metadata: { outputSize: outputBuffer.length, sampleRate, channels: channelCount, format, mimeType: MIME_TYPES[format] } };
   } finally {
     if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
     try { fs.unlinkSync(outputPath); } catch {}
@@ -154,6 +158,18 @@ async function processVideo(inputSource, options, cacheDir) {
 
     let targetWidth = width;
     let targetHeight = height;
+
+    // Apply max_dimension if no explicit width/height set
+    const maxDim = options.max_dimension ? parseInt(options.max_dimension) : undefined;
+    if (!targetWidth && !targetHeight && maxDim && maxDim > 0) {
+      const sourceLongEdge = Math.max(sourceWidth, sourceHeight);
+      if (sourceLongEdge > maxDim) {
+        const scale = maxDim / sourceLongEdge;
+        targetWidth = Math.round(sourceWidth * scale);
+        targetHeight = Math.round(sourceHeight * scale);
+      }
+    }
+
     if (targetWidth && !targetHeight) {
       targetHeight = Math.round(sourceHeight * (targetWidth / sourceWidth));
     } else if (targetHeight && !targetWidth) {

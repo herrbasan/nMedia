@@ -79,9 +79,24 @@ export class TaskWorker {
 
         // Write to output path if specified
         if (task.outputPath) {
-          fs.mkdirSync(path.dirname(task.outputPath), { recursive: true });
-          fs.writeFileSync(task.outputPath, result.buffer);
-          logger.debug('Task result written to output path', { taskId: task.id, outputPath: task.outputPath });
+          let outputPath = task.outputPath;
+          // If path is a directory, auto-generate filename
+          try {
+            const stat = fs.statSync(outputPath);
+            if (stat.isDirectory()) {
+              const ext = { image: 'jpg', audio: 'mp3', video: 'mp4' }[task.type] || 'bin';
+              outputPath = path.join(outputPath, `output-${Date.now()}.${ext}`);
+            }
+          } catch {
+            // path doesn't exist yet, check if it looks like a directory (no extension)
+            if (!path.extname(outputPath)) {
+              const ext = { image: 'jpg', audio: 'mp3', video: 'mp4' }[task.type] || 'bin';
+              outputPath = path.join(outputPath, `output-${Date.now()}.${ext}`);
+            }
+          }
+          fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+          fs.writeFileSync(outputPath, result.buffer);
+          logger.info('Task result written to output path', { taskId: task.id, outputPath });
         }
 
         task.complete(result, asset.id);

@@ -6,7 +6,9 @@ A web interface for testing the Media Service API. Built with [NUI](https://gith
 
 - **Image Processor** - Resize, convert, optimize images (JPEG, PNG, WebP, AVIF, GIF)
 - **Audio Processor** - Convert audio formats with metadata probe
-- **Video Processor** - Extract audio or keyframes
+- **Video Processor** - Extract audio, keyframes, or transcode video
+- **API Tests** - Automated tests for legacy processor endpoints
+- **Transport Tests** - End-to-end tests for unified transport (upload → process → download)
 
 ## Quick Start
 
@@ -27,7 +29,7 @@ npx serve .
 - **NUI Router** - SPA routing with page fragments
 - **Module scripts** - ES modules with `type="nui/page"` initialization
 - **Page logic** - Each page has a dedicated JS file in `js/` (e.g., `js/image.js`)
-- **Direct API calls** - Fetch to Media Service on port 3500
+- **API Client** - Shared client in `js/api.js` + direct API calls per page
 - **NUI submodule** - Uses `modules/nui_wc2/NUI/` directly (no copy)
 
 ## Page Structure
@@ -76,15 +78,41 @@ All init functions are registered in `js/app.js` on `window.app`.
 
 ## Backend API
 
-The Web UI expects the Media Service running on `http://localhost:3500`:
+The Web UI expects the Media Service running on `http://localhost:3501`:
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/v1/process/image` | POST | Process image |
-| `/v1/process/audio` | POST | Process audio |
-| `/v1/audio/probe` | POST | Get audio metadata |
-| `/v1/process/video` | POST | Process video |
+### Unified Transport (Recommended)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/v1/upload` | Stream raw binary upload |
+| `POST` | `/v1/process` | Start processing from `fileId` or `input_path` |
+| `GET` | `/v1/jobs/:jobId/progress` | SSE progress stream |
+| `GET` | `/v1/jobs/:jobId` | Poll job status |
+| `DELETE` | `/v1/jobs/:jobId` | Cancel a queued job |
+| `GET` | `/v1/assets/:id` | Download asset file |
+| `WS` | `/v1/ws` | WebSocket for progress + binary transfer |
+
+### Legacy Endpoints (Still Functional)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/v1/process/image` | Process image (multipart/form-data) |
+| `POST` | `/v1/process/audio` | Process audio (multipart/form-data) |
+| `POST` | `/v1/process/video` | Process video (multipart/form-data) |
+| `POST` | `/v1/audio/probe` | Get audio metadata |
+| `GET` | `/health` | Health check |
+
+## Testing
+
+### API Tests (`#page=tests`)
+Automated tests for legacy processor endpoints using test files from `tests/assets/`.
+
+### Transport Tests (`#page=transport-tests`)
+End-to-end tests for the unified transport layer:
+- Upload workflow (file → upload → process → download)
+- Path workflow (input_path → process → download)
+- WebSocket E2E (binary upload/download via WebSocket)
+- Progress tracking via SSE, WebSocket, or polling
 
 ## Development
 

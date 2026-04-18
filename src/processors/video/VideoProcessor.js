@@ -272,6 +272,18 @@ class VideoProcessor extends Processor {
 
     let targetWidth = width;
     let targetHeight = height;
+
+    // Apply max_dimension if no explicit width/height set
+    const maxDim = options.max_dimension;
+    if (!targetWidth && !targetHeight && maxDim && maxDim > 0) {
+      const sourceLongEdge = Math.max(sourceWidth, sourceHeight);
+      if (sourceLongEdge > maxDim) {
+        const scale = maxDim / sourceLongEdge;
+        targetWidth = Math.round(sourceWidth * scale);
+        targetHeight = Math.round(sourceHeight * scale);
+      }
+    }
+
     if (targetWidth && !targetHeight) {
       targetHeight = Math.round(sourceHeight * (targetWidth / sourceWidth));
     } else if (targetHeight && !targetWidth) {
@@ -366,6 +378,18 @@ class VideoProcessor extends Processor {
 
     let targetWidth = width;
     let targetHeight = height;
+
+    // Apply max_dimension if no explicit width/height set
+    const maxDim = options.max_dimension;
+    if (!targetWidth && !targetHeight && maxDim && maxDim > 0) {
+      const sourceLongEdge = Math.max(sourceWidth, sourceHeight);
+      if (sourceLongEdge > maxDim) {
+        const scale = maxDim / sourceLongEdge;
+        targetWidth = Math.round(sourceWidth * scale);
+        targetHeight = Math.round(sourceHeight * scale);
+      }
+    }
+
     if (targetWidth && !targetHeight) {
       targetHeight = Math.round(sourceHeight * (targetWidth / sourceWidth));
     } else if (targetHeight && !targetWidth) {
@@ -617,6 +641,18 @@ class VideoProcessor extends Processor {
       // Calculate dimensions - ensure even numbers for codecs
       let targetWidth = width;
       let targetHeight = height;
+
+      // Apply max_dimension if no explicit width/height set
+      const maxDim = options.max_dimension;
+      if (!targetWidth && !targetHeight && maxDim && maxDim > 0) {
+        const sourceLongEdge = Math.max(sourceWidth, sourceHeight);
+        if (sourceLongEdge > maxDim) {
+          const scale = maxDim / sourceLongEdge;
+          targetWidth = Math.round(sourceWidth * scale);
+          targetHeight = Math.round(sourceHeight * scale);
+        }
+      }
+
       if (targetWidth && !targetHeight) {
         targetHeight = Math.round(sourceHeight * (targetWidth / sourceWidth));
       } else if (targetHeight && !targetWidth) {
