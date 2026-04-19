@@ -199,8 +199,7 @@ Full video transcode with codec and quality options.
   "crf": 23,
   "preset": "medium",
   "width": 1920,
-  "height": 1080,
-  "hwaccel": "nvenc"
+  "height": 1080
 }
 ```
 
@@ -211,6 +210,54 @@ Full video transcode with codec and quality options.
 2. Build video/audio filter graphs
 3. Transcode with hardware acceleration if specified
 4. Return processed video
+
+#### CLI Passthrough
+
+FFmpeg CLI flag passthrough for advanced encoding control. Parse CLI-style flags into structured options.
+
+```json
+{
+  "mode": "cli",
+  "output_format": "mp4",
+  "video_codec": "h264_nvenc",
+  "audio_codec": "aac",
+  "preset": "medium",
+  "crf": 23,
+  "videoOptions": {
+    "rc": "constqp",
+    "qp": "21",
+    "tune": "hq"
+  },
+  "audioOptions": {
+    "b": "128000"
+  }
+}
+```
+
+**Supported CLI flags (parsed from `videoOptions`/`audioOptions`):**
+
+| Flag | Maps To | Description |
+|------|---------|-------------|
+| `-c:v` | `video_codec` | Video codec |
+| `-c:a` | `audio_codec` | Audio codec |
+| `-preset` | `preset` | Encoding preset |
+| `-crf` | `crf` | Quality (CPU codecs) |
+| `-cq` / `-qp` | `crf` | Quality (NVENC) |
+| `-b:v` | `videoOptions.b` | Video bitrate |
+| `-b:a` | `audioOptions.b` | Audio bitrate |
+| `-ar` | `audioOptions.ar` | Audio sample rate |
+| `-ac` | `audioOptions.ac` | Audio channels |
+| `-r` | `fps` | Frame rate |
+| `-s` | `width`/`height` | Resolution |
+| `-vf` | `filters` | Video filter graph |
+| `-af` | `audioOptions.af` | Audio filter graph |
+| `-pix_fmt` | `videoOptions.pix_fmt` | Pixel format |
+| `-g` | `videoOptions.g` | GOP size |
+| `-threads` | `videoOptions.threads` | Thread count |
+| `-an` | `no_audio: true` | Disable audio |
+| `-vn` | `no_video: true` | Disable video |
+
+All other flags are passed through as-is to the encoder via `av_opt_set()`.
 
 ### Hardware Acceleration
 

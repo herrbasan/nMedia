@@ -555,13 +555,16 @@ Crop types: `region` (normalized coords 0-1), `center` (% of image), `grid` (cel
 | `fps` | number | 1 | Frame rate for keyframe extraction (1-30) |
 | `max_dimension` | number | 1024 | Max frame dimension for keyframes |
 | `output_format` | string | mp4 | Container: mp4, webm, mkv, mov |
-| `video_codec` | string | libx264 | Video codec |
+| `video_codec` | string | libx264 | Video codec (use `*_nvenc` / `*_qsv` for HW accel) |
 | `audio_codec` | string | aac | Audio codec |
-| `hwaccel` | string | - | Hardware acceleration: nvenc, qsv, vaapi |
 | `crf` | number | 23 | Quality factor (0-51) |
 | `preset` | string | medium | Encoding preset (ultrafast to veryslow) |
 | `width` | number | - | Output width |
 | `height` | number | - | Output height |
+| `videoOptions` | object | - | Arbitrary video encoder options (CLI mode) |
+| `audioOptions` | object | - | Arbitrary audio encoder options (CLI mode) |
+| `no_video` | boolean | false | Disable video stream (`-vn`) |
+| `no_audio` | boolean | false | Disable audio stream (`-an`) |
 
 **Video Modes:**
 
@@ -570,6 +573,7 @@ Crop types: `region` (normalized coords 0-1), `center` (% of image), `grid` (cel
 | `extract_audio` | Extract audio track from video |
 | `extract_keyframes` | Extract keyframes at specified FPS |
 | `transcode` | Full video transcode with codec options |
+| `cli` | FFmpeg CLI passthrough via `videoOptions`/`audioOptions` |
 
 ---
 
