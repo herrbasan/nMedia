@@ -64,6 +64,45 @@ A web interface for the Media Service microservice that preprocesses multimedia 
 - Service connection test
 - Supported formats reference
 
+### Task Builder Pages
+
+#### Image Tasks (`pages/image-tasks.html`)
+- Upload or path-based input
+- **Dynamic Options:** Format list from nImage capabilities, quality slider, max dimension
+- **Crop Testing:** Region (normalized coords), center (%), grid extraction
+- **Batch Tests:**
+  - Format Matrix: jpeg/png/webp/avif with size comparison
+  - Quality Sweep: 10/25/50/75/85/95/100 with savings %
+- Preset save/load/delete (localStorage)
+- Custom JSON options override
+
+#### Audio Tasks (`pages/audio-tasks.html`)
+- Upload or path-based input
+- **Probe:** Shows source metadata before processing
+- **Dynamic Options:** Codec list from nVideo capabilities, sample rate, channels, format
+- **Batch Tests:**
+  - All Formats × Sample Rates matrix (mp3/wav/ogg/m4a × 16k/44k)
+- Preset save/load/delete
+- Custom JSON options override
+
+#### Video Tasks (`pages/video-tasks.html`)
+- Upload or path-based input
+- **Mode Tabs:** Extract Audio | Extract Keyframes | Transcode
+- **Dynamic Options:** Video/audio codecs, hwaccel (NVENC/QSV/VAAPI), CRF, presets
+- **Batch Tests:**
+  - Run All Modes: extract_audio, keyframes, transcode
+- Preset save/load/delete
+- Custom FFmpeg filter input
+
+### Shared Task Builder Features
+- **`js/task-builder.js`** - Common utilities:
+  - Capabilities fetching and caching
+  - WebSocket connection management
+  - Progress tracking (SSE, WebSocket, polling)
+  - Task execution (upload → process → download)
+  - Preset management (localStorage)
+  - UI helpers (formatFileSize, showProgress, showResult)
+
 ## Technical Implementation
 
 **NUI Patterns Used:**
@@ -85,9 +124,13 @@ mediaservice-web/
 ├── js/
 │   ├── app.js              # Router, navigation, global handlers, page init registry
 │   ├── api.js              # Shared API client functions
+│   ├── task-builder.js     # Shared task utilities (upload, process, progress, presets)
 │   ├── audio.js            # Audio processor logic
 │   ├── image.js            # Image processor logic
 │   ├── video.js            # Video processor logic
+│   ├── audio-tasks.js      # Audio task builder logic
+│   ├── image-tasks.js      # Image task builder logic
+│   ├── video-tasks.js      # Video task builder logic
 │   ├── settings.js         # Settings page logic
 │   ├── tests.js            # API tests page logic
 │   └── transport-tests.js  # Transport tests page logic
@@ -96,6 +139,9 @@ mediaservice-web/
 │   ├── image.html          # Image processor (markup only)
 │   ├── audio.html          # Audio processor (markup only)
 │   ├── video.html          # Video processor (markup only)
+│   ├── image-tasks.html    # Image task builder (markup only)
+│   ├── audio-tasks.html    # Audio task builder (markup only)
+│   ├── video-tasks.html    # Video task builder (markup only)
 │   ├── settings.html       # Settings page (markup only)
 │   ├── tests.html          # API tests page (markup only)
 │   └── transport-tests.html # Transport tests page (markup only)
@@ -277,9 +323,11 @@ data: {"event":"complete","jobId":"job-def-456","assetId":"asset-ghi-789","metad
 
 ## TODO
 
-1. Add batch processing - Multiple files at once
-2. Add copy-to-clipboard for base64 results
-3. Theme persistence - Remember dark/light mode
-4. Video keyframe gallery improvements for high frame counts
-5. Add job history/management UI
-6. Add filter selection UI (scale, crop, fps, eq, etc.)
+1. Add copy-to-clipboard for base64 results
+2. Theme persistence - Remember dark/light mode
+3. Video keyframe gallery improvements for high frame counts
+4. Add job history/management UI
+5. Add filter selection UI with visual filter builder (scale, crop, fps, eq, etc.)
+6. Side-by-side comparison view for batch results (image format matrix, quality sweep)
+7. Export batch results as CSV/JSON
+8. Add CRF sweep for video transcoding

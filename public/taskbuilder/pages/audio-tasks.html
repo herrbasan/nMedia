@@ -1,0 +1,192 @@
+<div class="page-audio-tasks">
+<header>
+    <h2><nui-icon name="graphic_eq">🎵</nui-icon> Audio Task Builder</h2>
+    <p class="lead">Test all audio processing options with dynamic codec discovery</p>
+</header>
+
+<section>
+    <nui-card>
+        <div class="nui-headline">Input Source</div>
+        <nui-tabs id="audio-input-tabs">
+            <nav>
+                <button>Upload File</button>
+                <button>File Path</button>
+            </nav>
+            <div>
+                <nui-button id="audio-select-file-btn">
+                    <input type="file" class="nui-hidden" id="audio-file-input" accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac,.wma" />
+                    <button type="button">
+                        <nui-icon name="upload">⬆</nui-icon> Select Audio File
+                    </button>
+                </nui-button>
+                <div id="audio-file-info" style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--nui-text-muted);"></div>
+            </div>
+            <div>
+                <nui-textfield id="audio-input-path" label="Input file path" fullwidth>
+                    <input type="text" placeholder="D:\Work\_GIT\MediaService\tests\assets\audio\test.mp3" />
+                </nui-textfield>
+                <p style="font-size: 0.8rem; color: var(--nui-text-muted); margin-top: 0.5rem;">
+                    Path must be within an allowedInputPaths directory in config.json
+                </p>
+            </div>
+        </nui-tabs>
+    </nui-card>
+</section>
+
+<section>
+    <nui-card>
+        <div class="nui-headline">Source Metadata</div>
+        <nui-button variant="primary" id="audio-probe-btn">
+            <button type="button">
+                <nui-icon name="info">ℹ</nui-icon> Probe File
+            </button>
+        </nui-button>
+        <div id="audio-probe-result" style="margin-top: 1rem; font-family: monospace; font-size: 0.85rem; background: var(--nui-surface-2); padding: 0.75rem; border-radius: 6px; display: none;">
+        </div>
+    </nui-card>
+</section>
+
+<section>
+    <nui-card>
+        <div class="nui-headline">Processing Options</div>
+
+        <nui-input-group>
+            <label>Sample Rate</label>
+            <nui-select id="audio-sample-rate">
+                <select>
+                    <option value="">Same as source</option>
+                    <option value="8000">8000 Hz (Telephony)</option>
+                    <option value="16000" selected>16000 Hz (STT)</option>
+                    <option value="22050">22050 Hz</option>
+                    <option value="44100">44100 Hz (CD)</option>
+                    <option value="48000">48000 Hz (Video)</option>
+                </select>
+            </nui-select>
+        </nui-input-group>
+
+        <nui-input-group>
+            <label>Channels</label>
+            <nui-select id="audio-channels">
+                <select>
+                    <option value="">Same as source</option>
+                    <option value="1" selected>Mono</option>
+                    <option value="2">Stereo</option>
+                </select>
+            </nui-select>
+        </nui-input-group>
+
+        <nui-input-group>
+            <label>Output Format</label>
+            <nui-select id="audio-format">
+                <select id="audio-format-select">
+                    <option value="mp3" selected>MP3</option>
+                    <option value="wav">WAV</option>
+                    <option value="ogg">OGG</option>
+                    <option value="m4a">M4A</option>
+                </select>
+            </nui-select>
+        </nui-input-group>
+
+        <nui-input-group>
+            <label>Audio Codec</label>
+            <nui-select id="audio-codec">
+                <select id="audio-codec-select">
+                    <option value="">Auto</option>
+                </select>
+            </nui-select>
+        </nui-input-group>
+
+        <details style="margin-top: 1rem;">
+            <summary style="cursor: pointer; color: var(--nui-text-secondary);">Advanced: Custom JSON Options</summary>
+            <nui-textarea id="audio-custom-options" label="Custom options (JSON)" fullwidth style="margin-top: 0.5rem;">
+                <textarea rows="4" placeholder='{"sample_rate": 16000, "channels": 1, "format": "mp3"}'></textarea>
+            </nui-textarea>
+        </details>
+    </nui-card>
+</section>
+
+<section>
+    <nui-card>
+        <div class="nui-headline">Transport Mode</div>
+        <nui-select id="audio-transport-mode">
+            <select>
+                <option value="sse" selected>SSE EventStream</option>
+                <option value="websocket">WebSocket</option>
+                <option value="polling">HTTP Polling</option>
+            </select>
+        </nui-select>
+    </nui-card>
+</section>
+
+<section>
+    <nui-card>
+        <div class="nui-headline">Presets</div>
+        <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+            <nui-select id="audio-preset-select" style="flex: 1; min-width: 200px;">
+                <select>
+                    <option value="">Select preset...</option>
+                </select>
+            </nui-select>
+            <nui-button id="audio-load-preset-btn">
+                <button type="button">Load</button>
+            </nui-button>
+            <nui-button id="audio-save-preset-btn">
+                <button type="button">Save As...</button>
+            </nui-button>
+            <nui-button id="audio-delete-preset-btn" variant="danger">
+                <button type="button">Delete</button>
+            </nui-button>
+        </div>
+    </nui-card>
+</section>
+
+<section>
+    <nui-card>
+        <div class="nui-headline">Test Controls</div>
+        <nui-button-container align="start" style="gap: 0.5rem; flex-wrap: wrap;">
+            <nui-button variant="primary" id="audio-run-task-btn">
+                <button type="button">
+                    <nui-icon name="play_arrow">▶</nui-icon> Run Task
+                </button>
+            </nui-button>
+            <nui-button id="audio-run-batch-btn">
+                <button type="button">
+                    <nui-icon name="playlist_play">▶</nui-icon> Run Batch (All Formats)
+                </button>
+            </nui-button>
+        </nui-button-container>
+    </nui-card>
+</section>
+
+<section id="audio-progress-section" style="display: none;">
+    <nui-card>
+        <div class="nui-headline">Processing Progress</div>
+        <div id="audio-progress-status" style="margin-bottom: 0.5rem;"></div>
+        <nui-progress id="audio-progress-bar" value="0"></nui-progress>
+        <div id="audio-progress-log" style="margin-top: 0.5rem; font-family: monospace; font-size: 0.8rem; max-height: 200px; overflow-y: auto;"></div>
+    </nui-card>
+</section>
+
+<section id="audio-result-section" style="display: none;">
+    <nui-card>
+        <div class="nui-headline">Result</div>
+        <div id="audio-result-content"></div>
+        <nui-button-container align="center" style="margin-top: 1rem;">
+            <nui-button variant="primary" id="audio-download-btn" style="display: none;">
+                <button type="button">
+                    <nui-icon name="download">⬇</nui-icon> Download
+                </button>
+            </nui-button>
+        </nui-button-container>
+    </nui-card>
+</section>
+
+<section id="audio-batch-results-section" style="display: none;">
+    <nui-card>
+        <div class="nui-headline">Batch Results</div>
+        <div id="audio-batch-results"></div>
+    </nui-card>
+</section>
+
+<script type="nui/page">function init(element, params, nui) { app.initAudioTasksPage(element, nui)}</script>
+</div>

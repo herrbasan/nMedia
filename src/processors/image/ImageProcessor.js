@@ -27,7 +27,7 @@ class ImageProcessor extends Processor {
   }
 
   validateOptions(options) {
-    const { max_dimension, quality, format, crop } = options;
+    const { max_dimension, quality, format, crop, rotate, flip, flop, grayscale, normalize, blur } = options;
 
     if (max_dimension !== undefined && (max_dimension < 1 || max_dimension > 10000)) {
       throw new Error('max_dimension must be between 1 and 10000');
@@ -37,6 +37,12 @@ class ImageProcessor extends Processor {
     }
     if (format !== undefined && !['jpeg', 'png', 'webp', 'avif', 'gif'].includes(format)) {
       throw new Error('format must be jpeg, png, webp, avif, or gif');
+    }
+    if (rotate !== undefined && ![90, 180, 270].includes(rotate)) {
+      throw new Error('rotate must be 90, 180, or 270');
+    }
+    if (blur !== undefined && (blur < 0 || blur > 20)) {
+      throw new Error('blur sigma must be between 0 and 20');
     }
     if (crop !== undefined) {
       if (typeof crop !== 'object') {
@@ -53,7 +59,7 @@ class ImageProcessor extends Processor {
    * Process crop operations
    */
   async processCrop(input, metadata, cropOptions, format, quality, onProgress, originalSize) {
-    const { type, left, top, right, bottom, width: widthPercent, height: heightPercent, grid } = cropOptions;
+    const { type, left, top, right, bottom, width: widthPercent, height: heightPercent, cols: gridCols, rows: gridRows, cells: gridCells = [] } = cropOptions;
     const results = [];
 
     if (type === 'region') {
@@ -85,7 +91,9 @@ class ImageProcessor extends Processor {
 
       results.push({ index: null, buffer: cropped, bounds: { left: leftPx, top: topPx, width: cropWidth, height: cropHeight } });
     } else if (type === 'grid') {
-      const { cols, rows, cells = [] } = grid;
+      const cols = gridCols || 3;
+      const rows = gridRows || 3;
+      const cells = gridCells.length > 0 ? gridCells : [];
       const cellWidth = Math.floor(metadata.width / cols);
       const cellHeight = Math.floor(metadata.height / rows);
 
@@ -113,7 +121,7 @@ class ImageProcessor extends Processor {
       const encodedBuffer = await this.encodeBuffer(r.buffer, format, quality);
       return {
         cell_index: r.index,
-        base64: `data:image/${format === 'jpeg' ? 'jpeg' : format};base64,${encodedBuffer.toString('base64')}`,
+        buffer: encodedBuffer,
         width: r.bounds.width,
         height: r.bounds.height,
       };
@@ -121,15 +129,29 @@ class ImageProcessor extends Processor {
 
     onProgress?.(100, 'Complete');
 
+    const firstBuffer = encoded[0]?.buffer || Buffer.alloc(0);
+
     return {
-      buffer: encoded[0]?.base64 || null,
+      buffer: firstBuffer,
       metadata: {
         originalSize: originalSize || (Buffer.isBuffer(input) ? input.length : 0),
-        crops: encoded,
+        outputSize: firstBuffer.length,
+        width: encoded[0]?.width,
+        height: encoded[0]?.height,
         format,
+        mimeType: `image/${format === 'jpeg' ? 'jpeg' : format}`,
+        cropType: type,
+        cropCount: encoded.length,
+        crops: encoded.map((e, i) => ({
+          index: e.cell_index ?? i,
+          width: e.width,
+          height: e.height,
+          size: e.buffer.length,
+        })),
         originalWidth: metadata.width,
         originalHeight: metadata.height,
       },
+      extraBuffers: encoded.slice(1).map(e => e.buffer),
     };
   }
 
@@ -166,6 +188,12 @@ class ImageProcessor extends Processor {
       format = 'jpeg',
       strip_exif = true,
       crop = null,
+      rotate = null,
+      flip = false,
+      flop = false,
+      grayscale = false,
+      normalize = false,
+      blur = 0,
       _inputSource,
     } = options;
 
@@ -196,6 +224,22 @@ class ImageProcessor extends Processor {
 
     let pipeline = nImage(inputSource);
 
+    // Apply transforms
+    if (rotate) {
+      onProgress?.(20, `Rotating ${rotate}°`);
+      pipeline.rotate(rotate);
+    }
+
+    if (flip) {
+      onProgress?.(22, 'Flipping vertically');
+      pipeline.flip();
+    }
+
+    if (flop) {
+      onProgress?.(24, 'Flopping horizontally');
+      pipeline.flop();
+    }
+
     let width = metadata.width;
     let height = metadata.height;
     const needsResize = width > max_dimension || height > max_dimension;
@@ -211,6 +255,21 @@ class ImageProcessor extends Processor {
 
       onProgress?.(30, `Resizing to ${width}x${height}`);
       pipeline.resize(width, height, { fit: 'inside' });
+    }
+
+    if (grayscale) {
+      onProgress?.(40, 'Converting to grayscale');
+      pipeline.grayscale();
+    }
+
+    if (normalize) {
+      onProgress?.(45, 'Normalizing contrast');
+      pipeline.normalize();
+    }
+
+    if (blur > 0) {
+      onProgress?.(48, `Applying blur (sigma: ${blur})`);
+      pipeline.blur(blur);
     }
 
     if (!strip_exif) {
@@ -248,6 +307,7 @@ class ImageProcessor extends Processor {
       outputSize: outputBuffer.length,
       dimensions: `${outputMetadata.width}x${outputMetadata.height}`,
       format,
+      transforms: { rotate, flip, flop, grayscale, normalize, blur },
     });
 
     onProgress?.(100, 'Complete');

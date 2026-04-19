@@ -107,6 +107,15 @@ router.addRoute('GET', '/admin', (ctx) => {
   ctx.rawResponse.end();
 });
 
+// Task Builder UI - serves from public/taskbuilder
+router.addRoute('GET', '/taskbuilder/*', StaticFileServer.createHandler(path.join(publicDir, 'taskbuilder')));
+
+// Redirect /taskbuilder to /taskbuilder/
+router.addRoute('GET', '/taskbuilder', (ctx) => {
+  ctx.rawResponse.writeHead(302, { 'Location': '/taskbuilder/' });
+  ctx.rawResponse.end();
+});
+
 // Modules access for NUI (so NUI files can be loaded from modules/nui_wc2)
 router.addRoute('GET', '/modules/*', StaticFileServer.createHandler(modulesDir));
 
@@ -147,11 +156,13 @@ server.on('upgrade', (req, socket, head) => {
 
 // Start server
 server.listen(config.port, () => {
-  logger.info(`Media Service started on port ${config.port}`);
-  logger.info(`Max file size: ${config.maxFileSizeMb}MB`);
-  logger.info(`Log level: ${config.logLevel}`);
-  logger.info(`Admin UI available at http://localhost:${config.port}/admin/`);
-  logger.info(`WebSocket endpoint: ws://localhost:${config.port}/v1/ws`);
+  logger.info(`Media Service started on port ${config.port}`, {}, 'System', { console: true });
+  logger.info(`Max file size: ${config.maxFileSizeMb}MB`, {}, 'System', { console: true });
+  logger.info(`Log level: ${config.logLevel}`, {}, 'System', { console: true });
+  logger.info(`Admin UI available at http://localhost:${config.port}/admin/`, {}, 'System', { console: true });
+  logger.info(`Task Builder UI available at http://localhost:${config.port}/taskbuilder/`, {}, 'System', { console: true });
+  logger.info(`WebSocket endpoint: ws://localhost:${config.port}/v1/ws`, {}, 'System', { console: true });
+  logger.info(`Capabilities endpoint: http://localhost:${config.port}/v1/capabilities`, {}, 'System', { console: true });
 });
 
 export default server;

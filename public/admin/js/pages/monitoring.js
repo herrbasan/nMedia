@@ -1,7 +1,9 @@
-import { fetchActiveJobs, cancelJob } from '../api-client.js';
+import { fetchHealth, fetchActiveJobs, cancelJob } from '../api-client.js';
 import { adminWs } from '../ws-client.js';
 
-export function initQueueMonitorPage(element, nui) {
+export function initMonitoringPage(element, nui) {
+    const statsGrid = element.querySelector('#stats-grid');
+    const processorList = element.querySelector('#processor-list');
     const jobList = element.querySelector('#job-list');
     const filterSelect = element.querySelector('#job-filter select');
     const refreshBtn = element.querySelector('#refresh-jobs-btn');
@@ -10,18 +12,50 @@ export function initQueueMonitorPage(element, nui) {
     let jobs = [];
     let subscribedJobs = new Set();
 
+    async function loadDashboard() {
+        try {
+            const [health, active] = await Promise.all([
+                fetchHealth().catch(() => null),
+                fetchActiveJobs({ limit: 1 }).catch(() => null),
+            ]);
+
+            if (health) {
+                processorList.innerHTML = Object.entries(health.processors || {}).map(([name, status]) => `
+                    <div style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem;background:var(--nui-surface-2);border-radius:6px;">
+                        <span class="status-dot ${status === 'ready' ? 'connected' : 'disconnected'}"></span>
+                        <span style="text-transform:capitalize;font-weight:600;">${name}</span>
+                        <span style="margin-left:auto;font-size:0.8rem;color:var(--nui-text-muted);">${status}</span>
+                    </div>
+                `).join('');
+            }
+
+            if (active && active.stats) {
+                const s = active.stats;
+                statsGrid.innerHTML = `
+                    <div class="stat-box"><div class="stat-value">${s.queued}</div><div class="stat-label">Queued</div></div>
+                    <div class="stat-box"><div class="stat-value">${s.processing}</div><div class="stat-label">Processing</div></div>
+                    <div class="stat-box"><div class="stat-value">${s.completed}</div><div class="stat-label">Completed</div></div>
+                    <div class="stat-box"><div class="stat-value">${s.failed}</div><div class="stat-label">Failed</div></div>
+                    <div class="stat-box"><div class="stat-value">${s.uploads}</div><div class="stat-label">Uploads</div></div>
+                `;
+            }
+        } catch (e) {
+            console.error('Dashboard load failed', e);
+        }
+    }
+
     async function loadJobs() {
         try {
             const data = await fetchActiveJobs({ limit: 100 });
             jobs = data.jobs || [];
-            render();
+            renderJobs();
             subscribeVisible();
         } catch (e) {
             jobList.innerHTML = `<nui-banner priority="alert">Failed to load jobs: ${e.message}</nui-banner>`;
         }
     }
 
-    function render() {
+    function renderJobs() {
         const filter = filterSelect?.value || 'all';
         const visible = jobs.filter(j => filter === 'all' || j.status === filter);
 
@@ -32,7 +66,6 @@ export function initQueueMonitorPage(element, nui) {
 
         jobList.innerHTML = visible.map(j => renderJobCard(j)).join('');
 
-        // Attach cancel handlers
         jobList.querySelectorAll('[data-action="cancel-job"]').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const jobId = btn.dataset.jobId;
@@ -47,7 +80,6 @@ export function initQueueMonitorPage(element, nui) {
     }
 
     function renderJobCard(j) {
-        const isDone = j.status === 'completed' || j.status === 'failed' || j.status === 'cancelled';
         const percent = j.percent || 0;
         const preview = j.status === 'completed' && j.assetId ? renderPreview(j) : '';
         const outputInfo = j.outputPath ? `<div style="font-size:0.8rem;color:var(--nui-text-muted);margin-top:0.25rem;">Output path: ${j.outputPath}</div>` : '';
@@ -87,7 +119,6 @@ export function initQueueMonitorPage(element, nui) {
     }
 
     function subscribeVisible() {
-        // Unsubscribe from old
         for (const id of subscribedJobs) {
             adminWs.unsubscribe(id);
         }
@@ -109,11 +140,9 @@ export function initQueueMonitorPage(element, nui) {
         const idx = jobs.findIndex(j => j.jobId === jobId);
         if (idx === -1) return;
         jobs[idx] = { ...jobs[idx], ...updates };
-        // Re-render just this card by replacing innerHTML of the list container? Simpler to re-render all for now
-        render();
+        renderJobs();
     }
 
-    // WS listeners
     adminWs.on('progress', (data) => {
         updateJobCard(data.jobId, { percent: data.percent, message: data.message, status: 'processing' });
     });
@@ -137,11 +166,12 @@ export function initQueueMonitorPage(element, nui) {
     });
 
     refreshBtn?.addEventListener('click', loadJobs);
-    filterSelect?.addEventListener('change', () => { render(); subscribeVisible(); });
+    filterSelect?.addEventListener('change', () => { renderJobs(); subscribeVisible(); });
     clearCompletedBtn?.addEventListener('click', () => {
         jobs = jobs.filter(j => j.status !== 'completed' && j.status !== 'failed' && j.status !== 'cancelled');
-        render();
+        renderJobs();
     });
 
+    loadDashboard();
     loadJobs();
 }

@@ -1,3 +1,4 @@
+import fs from 'fs';
 import PipelineExecutor from '../../pipeline/PipelineExecutor.js';
 import ProgressReporter from '../../pipeline/ProgressReporter.js';
 import logger from '../../utils/logger.js';
@@ -10,30 +11,36 @@ import AudioProcessor from '../../processors/audio/AudioProcessor.js';
 export async function handleAudioProbe(ctx) {
   try {
     let inputBuffer;
-    
-    // Debug logging
-    logger.info('Audio probe request', { 
-      hasFile: !!ctx.file, 
+    let inputPath = ctx.body?.input_path;
+
+    logger.info('Audio probe request', {
+      hasFile: !!ctx.file,
       hasBody: !!ctx.body,
+      hasInputPath: !!inputPath,
       contentType: ctx.headers['content-type'],
       fileField: ctx.file ? { name: ctx.file.fieldname, size: ctx.file.size } : null
     });
-    
-    // Handle file upload or base64 input
+
+    // Handle file upload, base64 input, or input_path
     if (ctx.file) {
       inputBuffer = ctx.file.buffer;
     } else if (ctx.body?.base64) {
       const base64Data = ctx.body.base64.replace(/^data:[^;]+;base64,/, '');
       inputBuffer = Buffer.from(base64Data, 'base64');
+    } else if (inputPath) {
+      if (!fs.existsSync(inputPath)) {
+        return ctx.json(400, { error: `File not found: ${inputPath}` });
+      }
+      inputBuffer = fs.readFileSync(inputPath);
     } else {
-      return ctx.json(400, { error: 'No file provided' });
+      return ctx.json(400, { error: 'No file, base64 data, or input_path provided' });
     }
 
     // Get the audio processor and probe
     const processor = new AudioProcessor();
-    
+
     const metadata = await processor.probe(inputBuffer);
-    
+
     return ctx.json(200, {
       success: true,
       metadata,

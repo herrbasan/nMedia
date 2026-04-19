@@ -23,7 +23,6 @@ export async function handleCapabilities(ctx) {
     if (module === 'nvideo' || (!module && ['build', 'codecs', 'common', 'filters', 'hwaccels'].includes(section))) {
       return handleVideoCapabilities(ctx, section);
     }
-    // Default: return both
     const caps = {
       nVideo: nVideo.getCapabilities(),
       nImage: nImage.getCapabilities(),
@@ -37,33 +36,32 @@ export async function handleCapabilities(ctx) {
         imagemagickFormats: nImage.IMAGEMAGICK_FORMATS,
       },
     };
-    ctx.body = { success: true, data: caps };
+    ctx.json(200, { success: true, data: caps });
   } catch (error) {
-    ctx.body = { success: false, error: error.message };
-    ctx.status = 500;
+    ctx.error(500, error.message);
   }
 }
 
 function handleImageCapabilities(ctx, section) {
   if (section === 'formats') {
-    ctx.body = { success: true, data: nImage.getSupportedFormats() };
+    ctx.json(200, { success: true, data: nImage.getSupportedFormats() });
   } else if (section === 'state') {
-    ctx.body = {
+    ctx.json(200, {
       success: true,
       data: {
         isLoaded: nImage.isLoaded,
         hasSharp: nImage.hasSharp,
         version: nImage.version,
       },
-    };
+    });
   } else if (section === 'raw') {
-    ctx.body = { success: true, data: nImage.RAW_FORMATS };
+    ctx.json(200, { success: true, data: nImage.RAW_FORMATS });
   } else if (section === 'heic') {
-    ctx.body = { success: true, data: nImage.HEIC_FORMATS };
+    ctx.json(200, { success: true, data: nImage.HEIC_FORMATS });
   } else if (section === 'imagemagick') {
-    ctx.body = { success: true, data: nImage.IMAGEMAGICK_FORMATS };
+    ctx.json(200, { success: true, data: nImage.IMAGEMAGICK_FORMATS });
   } else {
-    ctx.body = {
+    ctx.json(200, {
       success: true,
       data: {
         ...nImage.getCapabilities(),
@@ -74,38 +72,38 @@ function handleImageCapabilities(ctx, section) {
         },
         supportedFormats: nImage.getSupportedFormats(),
       },
-    };
+    });
   }
 }
 
 function handleVideoCapabilities(ctx, section) {
   if (section === 'build') {
     const buildInfo = nVideo.getBuildInfo();
-    ctx.body = { success: true, data: buildInfo };
+    ctx.json(200, { success: true, data: buildInfo });
   } else if (section === 'codecs') {
     const codecs = nVideo.getCapabilities().codecs;
-    ctx.body = { success: true, data: codecs };
+    ctx.json(200, { success: true, data: codecs });
   } else if (section === 'common') {
     const common = nVideo.getCapabilities().commonCodecs;
-    ctx.body = { success: true, data: common };
+    ctx.json(200, { success: true, data: common });
   } else if (section === 'filters') {
     const filters = nVideo.getCapabilities().filters;
-    ctx.body = { success: true, data: filters };
+    ctx.json(200, { success: true, data: filters });
   } else if (section === 'formats') {
     const formats = nVideo.getCapabilities().formats;
-    ctx.body = { success: true, data: formats };
+    ctx.json(200, { success: true, data: formats });
   } else if (section === 'hwaccels') {
     const buildInfo = nVideo.getBuildInfo();
-    ctx.body = {
+    ctx.json(200, {
       success: true,
       data: {
         hwaccels: buildInfo.hwaccels || [],
         videoEncodersByHwaccel: nVideo.getCapabilities().commonCodecs.videoEncodersByHwaccel || {},
         recommended: nVideo.getCapabilities().commonCodecs.recommended || {},
       },
-    };
+    });
   } else {
     const caps = nVideo.getCapabilities();
-    ctx.body = { success: true, data: caps };
+    ctx.json(200, { success: true, data: caps });
   }
 }

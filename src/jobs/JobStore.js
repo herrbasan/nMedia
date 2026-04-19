@@ -115,7 +115,7 @@ export class JobStore {
         logger.info('Loaded persisted jobs', {
           uploads: this.uploads.size,
           jobs: this.jobs.size,
-        });
+        }, 'System', { console: true });
       }
     } catch (err) {
       logger.warn('Failed to load persisted jobs', { error: err.message });

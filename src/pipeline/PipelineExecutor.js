@@ -15,7 +15,7 @@ class PipelineExecutor {
    */
   register(type, processor) {
     this.processors.set(type, processor);
-    logger.info(`Registered processor: ${type}`);
+    logger.info(`Registered processor: ${type}`, {}, 'System', { console: true });
   }
 
   /**

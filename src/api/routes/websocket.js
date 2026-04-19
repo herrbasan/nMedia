@@ -64,8 +64,11 @@ function handleSubscribe(conn, payload) {
     return;
   }
 
-  const connId = ProgressReporter.registerConnection(conn);
-  conn._progressReporterId = connId;
+  let connId = conn._progressReporterId;
+  if (!connId) {
+    connId = ProgressReporter.registerConnection(conn);
+    conn._progressReporterId = connId;
+  }
   ProgressReporter.linkJob(connId, jobId);
 
   const job = jobStore.getJob(jobId);

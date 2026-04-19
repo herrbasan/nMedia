@@ -1,31 +1,13 @@
 import { nui } from '../../modules/nui_wc2/NUI/nui.js';
-import { initQueueMonitorPage } from './pages/queue-monitor.js';
-import { initTaskBuilderPage } from './pages/task-builder.js';
-import { initDashboardPage } from './pages/dashboard.js';
+import { initMonitoringPage } from './pages/monitoring.js';
 import { adminWs } from './ws-client.js';
 
 window.adminApp = {
-    initQueueMonitorPage,
-    initTaskBuilderPage,
-    initDashboardPage,
+    initMonitoringPage,
 };
 
 const navigationData = [
-    {
-        label: 'Overview',
-        icon: 'dashboard',
-        items: [
-            { label: 'Dashboard', href: '#page=dashboard' },
-        ]
-    },
-    {
-        label: 'Operations',
-        icon: 'queue',
-        items: [
-            { label: 'Queue Monitor', href: '#page=queue-monitor' },
-            { label: 'Task Builder', href: '#page=task-builder' },
-        ]
-    },
+    { label: 'Monitoring', icon: 'dashboard', href: '#page=monitoring' },
 ];
 
 const linkList = document.querySelector('nui-link-list');
@@ -37,7 +19,7 @@ nui.setupRouter({
     container: 'nui-main',
     navigation: 'nui-sidebar',
     basePath: 'pages',
-    defaultPage: 'dashboard'
+    defaultPage: 'monitoring'
 });
 
 document.addEventListener('click', (e) => {

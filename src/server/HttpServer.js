@@ -30,7 +30,7 @@ export class HttpServer {
 
       // Parse body for methods that typically have bodies
       // Skip for /v1/upload - handler streams raw binary directly
-      if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.url !== '/v1/upload') {
+      if (['POST', 'PUT', 'PATCH'].includes(req.method) && !req.url.startsWith('/v1/upload')) {
         await ctx.parseBody();
       }
 
@@ -65,7 +65,7 @@ export class HttpServer {
   static sendCors(res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Original-Filename, Content-Length');
     res.setHeader('Access-Control-Max-Age', '86400');
   }
 }

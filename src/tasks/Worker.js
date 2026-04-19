@@ -69,11 +69,23 @@ export class TaskWorker {
         task.setAssetId(asset.id);
         logger.info('Worker result cached', { taskId: task.id, assetId: asset.id });
 
+        // Cache extra buffers (multi-crop results)
+        if (result.extraBuffers && result.extraBuffers.length > 0) {
+          const cropAssets = [asset.id];
+          for (const extraBuf of result.extraBuffers) {
+            const extraAsset = assetCache.store(task.type, extraBuf, mimeType, { ...result.metadata, outputSize: extraBuf.length });
+            cropAssets.push(extraAsset.id);
+          }
+          result.metadata.cropAssetIds = cropAssets;
+          logger.info('Worker crop results cached', { taskId: task.id, cropCount: cropAssets.length, assetIds: cropAssets });
+        }
+
         if (jobId) {
           jobStore.updateJob(jobId, JobStatus.COMPLETED, {
             assetId: asset.id,
             message: 'Complete',
             percent: 100,
+            metadata: result.metadata,
           });
         }
 

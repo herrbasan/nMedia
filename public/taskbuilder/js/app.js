@@ -1,76 +1,61 @@
 import { nui } from '../../modules/nui_wc2/NUI/nui.js';
-import { initAudioPage } from './audio.js';
-import { initImagePage } from './image.js';
-import { initVideoPage } from './video.js';
-import { initSettingsPage } from './settings.js';
 import { initTestsPage } from './tests.js';
 import { initTransportTestsPage } from './transport-tests.js';
+import { initAudioTasksPage } from './audio-tasks.js';
+import { initImageTasksPage } from './image-tasks.js';
+import { initVideoTasksPage } from './video-tasks.js';
 
 
 window.app = {
-    'initAudioPage': initAudioPage,
-    'initImagePage': initImagePage,
-    'initVideoPage': initVideoPage,
-    'initSettingsPage': initSettingsPage,
     'initTestsPage': initTestsPage,
     'initTransportTestsPage': initTransportTestsPage,
+    'initAudioTasksPage': initAudioTasksPage,
+    'initImageTasksPage': initImageTasksPage,
+    'initVideoTasksPage': initVideoTasksPage,
 }
 
 const navigationData = [
     {
-        "label": "Media Processors",
-        "icon": "image",
+        "label": "Task Builder",
+        "icon": "build",
         "items": [
-            {
-                "label": "Image",
-                "href": "#page=image"
-            },
-            {
-                "label": "Audio",
-                "href": "#page=audio"
-            },
-            {
-                "label": "Video",
-                "href": "#page=video"
-            }
-        ]
-    },
-    {
-        "label": "Settings",
-        "icon": "settings",
-        "items": [
-            {
-                "label": "Preferences",
-                "href": "#page=settings"
-            }
+            { "label": "Image Tasks", "href": "#page=image-tasks" },
+            { "label": "Audio Tasks", "href": "#page=audio-tasks" },
+            { "label": "Video Tasks", "href": "#page=video-tasks" }
         ]
     },
     {
         "label": "Testing",
         "icon": "bug_report",
         "items": [
-            {
-                "label": "API Tests",
-                "href": "#page=tests"
-            },
-            {
-                "label": "Transport Tests",
-                "href": "#page=transport-tests"
-            }
+            { "label": "API Tests", "href": "#page=tests" },
+            { "label": "Transport Tests", "href": "#page=transport-tests" }
         ]
     }
 ];
 
 const linkList = document.querySelector('nui-link-list');
 if (linkList) {
-    linkList.loadData(navigationData);
+    requestAnimationFrame(() => {
+        linkList.loadData(navigationData);
+    });
+} else {
+    // Retry if component not ready yet
+    const observer = new MutationObserver(() => {
+        const ll = document.querySelector('nui-link-list');
+        if (ll) {
+            ll.loadData(navigationData);
+            observer.disconnect();
+        }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
 }
 
 nui.setupRouter({
     container: 'nui-main',
     navigation: 'nui-sidebar',
     basePath: 'pages',
-    defaultPage: 'image'
+    defaultPage: 'image-tasks'
 });
 
 document.addEventListener('click', (e) => {
@@ -125,4 +110,4 @@ if (footerInfo) {
         });
 }
 
-console.log('mediaservice-web initialized');
+console.log('taskbuilder initialized');

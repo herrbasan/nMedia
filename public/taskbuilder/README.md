@@ -7,6 +7,10 @@ A web interface for testing the Media Service API. Built with [NUI](https://gith
 - **Image Processor** - Resize, convert, optimize images (JPEG, PNG, WebP, AVIF, GIF)
 - **Audio Processor** - Convert audio formats with metadata probe
 - **Video Processor** - Extract audio, keyframes, or transcode video
+- **Task Builder** - Advanced testing with dynamic options, presets, batch runs
+  - **Image Tasks** - Format matrix, quality sweep, crop testing
+  - **Audio Tasks** - Codec testing, sample rate matrix, batch format runs
+  - **Video Tasks** - All modes (extract audio/keyframes/transcode), hwaccel, CRF sweep
 - **API Tests** - Automated tests for legacy processor endpoints
 - **Transport Tests** - End-to-end tests for unified transport (upload → process → download)
 
@@ -29,6 +33,7 @@ npx serve .
 - **NUI Router** - SPA routing with page fragments
 - **Module scripts** - ES modules with `type="nui/page"` initialization
 - **Page logic** - Each page has a dedicated JS file in `js/` (e.g., `js/image.js`)
+- **Shared utilities** - `js/task-builder.js` provides common task execution, progress tracking, preset management
 - **API Client** - Shared client in `js/api.js` + direct API calls per page
 - **NUI submodule** - Uses `modules/nui_wc2/NUI/` directly (no copy)
 
@@ -104,6 +109,33 @@ The Web UI expects the Media Service running on `http://localhost:3501`:
 | `GET` | `/health` | Health check |
 
 ## Testing
+
+### Task Builder (Advanced Testing)
+
+Dedicated pages for comprehensive testing of all processing options with dynamic codec discovery from `/v1/capabilities`.
+
+**Image Tasks** (`#page=image-tasks`):
+- Upload or path-based input
+- Dynamic format selection from nImage capabilities
+- Crop testing (region, center, grid)
+- **Format Matrix**: Run same image through all output formats
+- **Quality Sweep**: Test quality 10-100 with size comparison
+- Preset save/load/delete (localStorage)
+- Custom JSON options override
+
+**Audio Tasks** (`#page=audio-tasks`):
+- Probe file before processing
+- Dynamic codec selection from nVideo capabilities
+- **Batch Run**: Test all format × sample rate combinations
+- Preset save/load/delete
+- Custom JSON options override
+
+**Video Tasks** (`#page=video-tasks`):
+- Mode tabs: Extract Audio | Extract Keyframes | Transcode
+- Hardware acceleration selection (NVENC, QSV, VAAPI)
+- CRF slider, preset selection, custom filters
+- **Run All Modes**: Batch test extract_audio, keyframes, transcode
+- Preset save/load/delete
 
 ### API Tests (`#page=tests`)
 Automated tests for legacy processor endpoints using test files from `tests/assets/`.

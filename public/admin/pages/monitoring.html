@@ -1,0 +1,59 @@
+<div class="page-monitoring">
+<header>
+    <h2><nui-icon name="dashboard">📊</nui-icon> Monitoring</h2>
+    <p class="lead">System overview and live job queue</p>
+</header>
+
+<section>
+    <nui-card>
+        <div class="nui-headline">Processors</div>
+        <div id="processor-list" style="display:grid;gap:0.5rem;">
+            <p style="color:var(--nui-text-muted)">Loading...</p>
+        </div>
+    </nui-card>
+</section>
+
+<section style="margin-top:1rem;">
+    <nui-card>
+        <div class="nui-headline">Job Stats</div>
+        <div id="stats-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1rem;margin-top:0.5rem;">
+            <p style="color:var(--nui-text-muted)">Loading...</p>
+        </div>
+    </nui-card>
+</section>
+
+<section style="margin-top:1rem;">
+    <nui-card>
+        <div class="nui-headline">Active Jobs</div>
+        <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem;">
+            <nui-button id="refresh-jobs-btn">
+                <button type="button"><nui-icon name="refresh">↻</nui-icon> Refresh</button>
+            </nui-button>
+            <nui-button id="clear-completed-btn">
+                <button type="button"><nui-icon name="clear">✕</nui-icon> Clear Completed</button>
+            </nui-button>
+            <nui-select id="job-filter" style="min-width:140px;">
+                <select>
+                    <option value="all">All</option>
+                    <option value="queued">Queued</option>
+                    <option value="processing">Processing</option>
+                    <option value="completed">Completed</option>
+                    <option value="failed">Failed</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+            </nui-select>
+        </div>
+        <div id="job-list">
+            <p style="color:var(--nui-text-muted)">Loading jobs...</p>
+        </div>
+    </nui-card>
+</section>
+
+<style>
+.stat-box { background:var(--nui-surface-2); border-radius:8px; padding:1rem; text-align:center; }
+.stat-value { font-size:1.75rem; font-weight:700; }
+.stat-label { color:var(--nui-text-muted); font-size:0.85rem; }
+</style>
+
+<script type="nui/page">function init(element, params, nui) { adminApp.initMonitoringPage(element, nui); }</script>
+</div>

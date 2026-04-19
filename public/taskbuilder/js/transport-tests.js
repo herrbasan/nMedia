@@ -27,8 +27,8 @@ function populateAudioCodecs(caps) {
     select.innerHTML = '<option value="">Auto</option>';
     encoders.forEach(codec => {
         const opt = document.createElement('option');
-        opt.value = codec;
-        opt.textContent = codec;
+        opt.value = codec.name;
+        opt.textContent = codec.longName || codec.name;
         select.appendChild(opt);
     });
 }
@@ -38,7 +38,7 @@ function populateImageFormats(caps) {
 
     const formatSelect = document.querySelector('#transport-image-format select');
     if (formatSelect) {
-        const encoders = caps.encoders || ['jpeg', 'png', 'webp', 'avif', 'tiff'];
+        const encoders = caps.encoders?.formats || ['jpeg', 'png', 'webp', 'avif', 'tiff'];
         formatSelect.innerHTML = '';
         encoders.forEach(fmt => {
             const opt = document.createElement('option');
@@ -71,8 +71,8 @@ function populateVideoOptions(caps) {
         codecSelect.innerHTML = '<option value="">Auto</option>';
         cpuEncoders.forEach(codec => {
             const opt = document.createElement('option');
-            opt.value = codec;
-            opt.textContent = codec;
+            opt.value = codec.name;
+            opt.textContent = codec.longName || codec.name;
             codecSelect.appendChild(opt);
         });
     }
@@ -83,8 +83,8 @@ function populateVideoOptions(caps) {
         audioCodecSelect.innerHTML = '<option value="">Auto</option>';
         audioEncoders.forEach(codec => {
             const opt = document.createElement('option');
-            opt.value = codec;
-            opt.textContent = codec;
+            opt.value = codec.name;
+            opt.textContent = codec.longName || codec.name;
             audioCodecSelect.appendChild(opt);
         });
     }

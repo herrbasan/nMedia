@@ -39,7 +39,7 @@ class TaskManager {
     for (let i = 0; i < config.maxConcurrentTasks; i++) {
       this.workers.push(new TaskWorker(`worker-${i}`, this.queue, this.store, mode));
     }
-    logger.info(`Created ${this.workers.length} workers (mode: ${mode})`);
+    logger.info(`Created ${this.workers.length} workers (mode: ${mode})`, {}, 'System', { console: true });
   }
 
   /**

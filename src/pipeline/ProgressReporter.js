@@ -162,7 +162,12 @@ class ProgressReporter {
     if (sender) {
       sender.end();
       this.#connections.delete(jobId);
-      this.#jobLinks.delete(jobId);
+    }
+    // Clean up all jobLinks pointing to this jobId
+    for (const [connId, linkedJobId] of this.#jobLinks) {
+      if (linkedJobId === jobId) {
+        this.#jobLinks.delete(connId);
+      }
     }
   }
 
