@@ -229,6 +229,7 @@
                                 <option value="-c:v h264_nvenc -preset llhq -rc constqp -qp 21 -c:a aac -b:a 128k">NVENC H264</option>
                                 <option value="-c:v hevc_nvenc -preset hq">NVENC H265</option>
                                 <option value="-c:v av1_nvenc -tune:v hq -preset:v p7 -rc:v vbr -cq:v 23 -c:a aac">NVENC AV1</option>
+                                <option value="-c:v av1_nvenc -preset p7 -tune hq -rc vbr_hq -cq 23 -pix_fmt p010le -multipass 2 -spatial_aq 1 -temporal_aq 1 -c:a aac">NVENC AV1 (Quality)</option>
                                 <option value="-c:v libvpx-vp9 -pix_fmt yuva420p -crf 30 -b:v 0 -c:a libopus -threads 12 -row-mt 1 -speed 4">WebM Fast (VP9)</option>
                                 <option value="-g 1 -c:v libvpx-vp9 -pix_fmt yuva420p -crf 30 -b:v 0 -an -threads 6">WebM All iFrame</option>
                                 <option value="-c:v libsvtav1 -crf 30">AV1 SVT</option>
