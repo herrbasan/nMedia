@@ -61,8 +61,11 @@
                         <select id="video-audio-format-select">
                             <option value="mp3" selected>MP3</option>
                             <option value="wav">WAV</option>
-                            <option value="ogg">OGG</option>
-                            <option value="m4a">M4A</option>
+                            <option value="ogg">OGG (Vorbis)</option>
+                            <option value="m4a">M4A (AAC)</option>
+                            <option value="flac">FLAC</option>
+                            <option value="aac">AAC (Raw)</option>
+                            <option value="opus">Opus</option>
                         </select>
                     </nui-select>
                 </nui-input-group>
@@ -76,14 +79,14 @@
                 </nui-input-group>
                 <nui-input-group>
                     <label>Sample Rate</label>
-                    <nui-select id="video-audio-samplerate">
-                        <select>
-                            <option value="">Same as source</option>
-                            <option value="16000">16000 Hz (STT)</option>
-                            <option value="44100">44100 Hz (CD)</option>
-                            <option value="48000">48000 Hz (Video)</option>
-                        </select>
-                    </nui-select>
+                <nui-select id="video-audio-samplerate">
+                    <select>
+                        <option value="source" selected>Same as source</option>
+                        <option value="16000">16000 Hz (STT)</option>
+                        <option value="44100">44100 Hz (CD)</option>
+                        <option value="48000">48000 Hz (Video)</option>
+                    </select>
+                </nui-select>
                 </nui-input-group>
             </div>
 
@@ -125,31 +128,25 @@
                             <option value="webm">WebM</option>
                             <option value="mkv">MKV</option>
                             <option value="mov">MOV</option>
+                            <option value="avi">AVI</option>
+                            <option value="ts">MPEG-TS</option>
+                            <option value="flv">FLV</option>
+                            <option value="3gp">3GP</option>
+                            <option value="ogv">OGV</option>
+                            <option value="wmv">WMV</option>
                         </select>
                     </nui-select>
                 </nui-input-group>
                 <nui-input-group>
                     <label>Video Codec</label>
                     <nui-select id="video-transcode-vcodec">
-                        <select id="video-transcode-vcodec-select">
-                            <option value="libx264" selected>H.264 (CPU)</option>
-                        </select>
+                        <select id="video-transcode-vcodec-select"></select>
                     </nui-select>
                 </nui-input-group>
                 <nui-input-group>
                     <label>Audio Codec</label>
                     <nui-select id="video-transcode-acodec">
-                        <select id="video-transcode-acodec-select">
-                            <option value="aac" selected>AAC</option>
-                        </select>
-                    </nui-select>
-                </nui-input-group>
-                <nui-input-group>
-                    <label>Hardware Acceleration</label>
-                    <nui-select id="video-transcode-hwaccel">
-                        <select id="video-transcode-hwaccel-select">
-                            <option value="">Auto (CPU)</option>
-                        </select>
+                        <select id="video-transcode-acodec-select"></select>
                     </nui-select>
                 </nui-input-group>
                 <div id="video-transcode-recommended" style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--nui-text-muted);"></div>

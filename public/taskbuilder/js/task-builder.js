@@ -24,7 +24,11 @@ export function formatDuration(seconds) {
 export async function fetchCapabilities() {
     const res = await fetch(`${API_BASE}/v1/capabilities`);
     if (!res.ok) throw new Error(`Failed to fetch capabilities: ${res.status}`);
-    return res.json();
+    const result = await res.json();
+    const data = result.data || result;
+    console.log('[fetchCapabilities] raw result keys:', Object.keys(result));
+    console.log('[fetchCapabilities] returned data keys:', Object.keys(data));
+    return data;
 }
 
 export function loadPresets() {
@@ -196,8 +200,11 @@ export async function getAssetMetadata(assetId) {
 
 export function showProgress(section, bar, status, log, percent, message) {
     if (section) section.style.display = '';
-    if (bar) bar.style.width = `${percent}%`;
-    if (status) status.textContent = `${percent}% - ${message}`;
+    if (bar) {
+        bar.value = percent;
+        if (bar.style) bar.style.width = `${percent}%`;
+    }
+    if (status) status.textContent = `${Math.round(percent)}% - ${message}`;
     if (log) {
         const entry = document.createElement('div');
         entry.textContent = `[${new Date().toLocaleTimeString()}] ${percent}% - ${message}`;

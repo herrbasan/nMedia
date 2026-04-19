@@ -145,7 +145,7 @@ async function processVideo(inputSource, options, cacheDir) {
     const preset = options.preset || 'medium';
     const audio_bitrate = options.audio_bitrate !== undefined ? parseInt(options.audio_bitrate) : 128000;
     const output_fps = options.fps ? parseInt(options.fps) : undefined;
-    const isNvenc = video_codec === 'h264_nvenc' || video_codec === 'hevc_nvenc';
+    const isNvenc = video_codec && video_codec.includes('nvenc');
 
     parentPort.postMessage({ type: 'progress', percent: 10, message: 'Probing source video' });
     const probeResult = nVideo.probe(inputPath);
@@ -179,16 +179,23 @@ async function processVideo(inputSource, options, cacheDir) {
     if (targetHeight) targetHeight = targetHeight % 2 === 0 ? targetHeight : targetHeight + 1;
 
     const outputId = crypto.randomUUID();
-    const outputExt = { mp4: 'mp4', webm: 'webm', mkv: 'mkv', mov: 'mov' }[output_format] || output_format;
+    const outputExt = { mp4: 'mp4', webm: 'webm', mkv: 'mkv', mov: 'mov', avi: 'avi', ts: 'ts', flv: 'flv', '3gp': '3gp', ogv: 'ogv', wmv: 'wmv' }[output_format] || output_format;
     const outputPath = path.join(cacheDir, `output-${outputId}.${outputExt}`);
 
     try {
       const transcodeOpts = {
         cache: false,
-        video: { codec: video_codec, preset },
+        video: { codec: video_codec },
       };
-      // NVENC codecs do not support CRF; omitting prevents native crash
-      if (!isNvenc) transcodeOpts.video.crf = crf;
+      if (isNvenc) {
+        // NVENC uses p1-p7 presets and cq (not crf)
+        const presetMap = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', faster: 'p4', fast: 'p5', medium: 'p4', slow: 'p6', slower: 'p7', veryslow: 'p7' };
+        transcodeOpts.video.preset = presetMap[preset] || preset;
+        transcodeOpts.video.cq = crf;
+      } else {
+        transcodeOpts.video.preset = preset;
+        transcodeOpts.video.crf = crf;
+      }
       if (targetWidth) transcodeOpts.video.width = targetWidth;
       if (targetHeight) transcodeOpts.video.height = targetHeight;
       if (output_fps) transcodeOpts.video.fps = output_fps;
@@ -217,7 +224,7 @@ async function processVideo(inputSource, options, cacheDir) {
           audio_codec,
           dimensions: targetWidth && targetHeight ? `${targetWidth}x${targetHeight}` : `${sourceWidth}x${sourceHeight}`,
           duration: sourceDuration,
-          mimeType: { mp4: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime' }[output_format] || 'video/mp4',
+          mimeType: { mp4: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime', avi: 'video/x-msvideo', ts: 'video/mp2t', flv: 'video/x-flv', '3gp': 'video/3gpp', ogv: 'video/ogg', wmv: 'video/x-ms-wmv' }[output_format] || 'video/mp4',
         },
       };
     } finally {

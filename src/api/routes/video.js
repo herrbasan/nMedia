@@ -1,10 +1,18 @@
 import fs from 'fs';
 import path from 'path';
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from '../../utils/uuid.js';
 import config from '../../config/config.js';
 import PipelineExecutor from '../../pipeline/PipelineExecutor.js';
 import ProgressReporter from '../../pipeline/ProgressReporter.js';
 import logger from '../../utils/logger.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const nVideoPath = path.join(__dirname, '../../../modules/nVideo/lib/index.js');
+const require = createRequire(import.meta.url);
+const nVideo = require(nVideoPath);
 
 /**
  * POST /v1/process/video
@@ -236,6 +244,78 @@ async function handleVideoUpload(ctx, options) {
       ctx.send(200, result.buffer, result.metadata.mimeType, `transcoded.${ext}`);
     } else {
       ctx.send(200, result.buffer, 'image/jpeg', 'frames.jpg');
+    }
+  }
+}
+
+/**
+ * POST /v1/video/probe
+ * Extract metadata from video file
+ */
+export async function handleVideoProbe(ctx) {
+  let probePath = null;
+  let shouldCleanup = false;
+
+  try {
+    let inputPath = ctx.body?.input_path;
+
+    logger.info('Video probe request', {
+      hasFile: !!ctx.file,
+      hasBody: !!ctx.body,
+      hasInputPath: !!inputPath,
+    });
+
+    // Use existing temp file, input_path, or write base64 to temp
+    if (ctx.file?.tempPath) {
+      probePath = ctx.file.tempPath;
+    } else if (inputPath) {
+      if (!fs.existsSync(inputPath)) {
+        return ctx.json(400, { error: `File not found: ${inputPath}` });
+      }
+      probePath = inputPath;
+    } else if (ctx.body?.base64) {
+      const base64Data = ctx.body.base64.replace(/^data:[^;]+;base64,/, '');
+      const buf = Buffer.from(base64Data, 'base64');
+      const tempDir = config.media.cacheDir || path.join(process.cwd(), 'cache');
+      probePath = path.join(tempDir, `probe-${uuidv4()}.tmp`);
+      fs.writeFileSync(probePath, buf);
+      shouldCleanup = true;
+    } else {
+      return ctx.json(400, { error: 'No file, base64 data, or input_path provided' });
+    }
+
+    const metadata = nVideo.probe(probePath);
+    const videoStream = metadata.streams.find(s => s.type === 'video');
+    const audioStream = metadata.streams.find(s => s.type === 'audio');
+
+    return ctx.json(200, {
+      success: true,
+      metadata: {
+        format: metadata.format?.formatName,
+        duration: metadata.format?.duration,
+        bitrate: metadata.format?.bitrate,
+        video: videoStream ? {
+          codec: videoStream.codec,
+          width: videoStream.width,
+          height: videoStream.height,
+          fps: videoStream.fps,
+          bitrate: videoStream.bitrate,
+        } : null,
+        audio: audioStream ? {
+          codec: audioStream.codec,
+          sampleRate: audioStream.sampleRate,
+          channels: audioStream.channels,
+          bitrate: audioStream.bitrate,
+        } : null,
+      },
+    });
+  } catch (error) {
+    const errStr = typeof error === 'string' ? error : (error?.message || JSON.stringify(error));
+    logger.error('Video probe failed', { error: errStr });
+    return ctx.json(500, { error: errStr });
+  } finally {
+    if (shouldCleanup && probePath) {
+      try { fs.unlinkSync(probePath); } catch {}
     }
   }
 }

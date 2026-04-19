@@ -112,8 +112,11 @@ export async function handleUpload(ctx) {
       uploadComplete = true;
       logger.info('Upload complete', { tempId, bytesReceived, originalFilename });
 
-      // Magic byte validation
-      const header = fs.readFileSync(tempPath, { length: 64 });
+      // Magic byte validation — read only first 64 bytes
+      const header = Buffer.alloc(64);
+      const fd = fs.openSync(tempPath, 'r');
+      fs.readSync(fd, header, 0, 64, 0);
+      fs.closeSync(fd);
       let detected = MagicByteDetector.detect(header);
       logger.info('Upload magic bytes detected', { tempId, detectedType: detected?.type, detectedMimeType: detected?.mimeType });
 

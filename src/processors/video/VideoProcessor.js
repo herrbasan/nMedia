@@ -126,8 +126,8 @@ class VideoProcessor extends Processor {
           bitrate: 128000,
           cache: false,
           onProgress: (p) => {
-            const mappedPercent = 10 + Math.round(p.percent * 0.8);
-            onProgress?.(mappedPercent, `Extracting: ${Math.round(p.percent)}%`);
+            const mappedPercent = Math.min(95, 10 + Math.round(Math.min(100, p.percent) * 0.8));
+            onProgress?.(mappedPercent, `Extracting: ${Math.round(Math.min(100, p.percent))}%`);
           },
           onComplete: (result) => resolve(result),
           onError: (error) => reject(new Error(error.message || 'nVideo extractAudio failed')),
@@ -166,8 +166,8 @@ class VideoProcessor extends Processor {
         bitrate: 128000,
         cache: false,
         onProgress: (p) => {
-          const mappedPercent = 10 + Math.round(p.percent * 0.8);
-          onProgress?.(mappedPercent, `Extracting: ${Math.round(p.percent)}%`);
+          const mappedPercent = Math.min(95, 10 + Math.round(Math.min(100, p.percent) * 0.8));
+          onProgress?.(mappedPercent, `Extracting: ${Math.round(Math.min(100, p.percent))}%`);
         },
         onComplete: (result) => resolve(result),
         onError: (error) => reject(new Error(error.message || 'nVideo extractAudio failed')),
@@ -299,15 +299,21 @@ class VideoProcessor extends Processor {
     try {
       onProgress?.(20, `Transcoding: ${video_codec} → ${output_format}`);
 
-      const isNvenc = video_codec === 'h264_nvenc' || video_codec === 'hevc_nvenc';
+      const isNvenc = video_codec && video_codec.includes('nvenc');
       const transcodeOpts = {
         cache: false,
         video: {
           codec: video_codec,
-          preset,
         },
       };
-      if (!isNvenc) transcodeOpts.video.crf = crf;
+      if (isNvenc) {
+        const presetMap = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', faster: 'p4', fast: 'p5', medium: 'p4', slow: 'p6', slower: 'p7', veryslow: 'p7' };
+        transcodeOpts.video.preset = presetMap[preset] || preset;
+        transcodeOpts.video.cq = crf;
+      } else {
+        transcodeOpts.video.preset = preset;
+        transcodeOpts.video.crf = crf;
+      }
       if (targetWidth) transcodeOpts.video.width = targetWidth;
       if (targetHeight) transcodeOpts.video.height = targetHeight;
       if (fps) transcodeOpts.video.fps = fps;
@@ -321,8 +327,8 @@ class VideoProcessor extends Processor {
 
       await new Promise((resolve, reject) => {
         transcodeOpts.onProgress = (p) => {
-          const mappedPercent = 20 + Math.round(p.percent * 0.7);
-          onProgress?.(mappedPercent, `Transcoding: ${Math.round(p.percent)}%`);
+          const mappedPercent = Math.min(95, 20 + Math.round(Math.min(100, p.percent) * 0.7));
+          onProgress?.(mappedPercent, `Transcoding: ${Math.round(Math.min(100, p.percent))}%`);
         };
         transcodeOpts.onComplete = (result) => resolve(result);
         transcodeOpts.onError = (error) => reject(new Error(error.message || 'nVideo transcode failed'));
@@ -400,15 +406,22 @@ class VideoProcessor extends Processor {
 
     onProgress?.(15, `Transcoding: ${video_codec} → ${output_format}`);
 
-    const isNvenc = video_codec === 'h264_nvenc' || video_codec === 'hevc_nvenc';
+    const isNvenc = video_codec && video_codec.includes('nvenc');
     const transcodeOpts = {
       cache: false,
       video: {
         codec: video_codec,
-        preset,
       },
     };
-    if (!isNvenc) transcodeOpts.video.crf = crf;
+    if (isNvenc) {
+      // NVENC uses p1-p7 presets and cq (not crf)
+      const presetMap = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', faster: 'p4', fast: 'p5', medium: 'p4', slow: 'p6', slower: 'p7', veryslow: 'p7' };
+      transcodeOpts.video.preset = presetMap[preset] || preset;
+      transcodeOpts.video.cq = crf;
+    } else {
+      transcodeOpts.video.preset = preset;
+      transcodeOpts.video.crf = crf;
+    }
     if (targetWidth) transcodeOpts.video.width = targetWidth;
     if (targetHeight) transcodeOpts.video.height = targetHeight;
     if (fps) transcodeOpts.video.fps = fps;
@@ -420,11 +433,11 @@ class VideoProcessor extends Processor {
       };
     }
 
-    await new Promise((resolve, reject) => {
-      transcodeOpts.onProgress = (p) => {
-        const mappedPercent = 15 + Math.round(p.percent * 0.75);
-        onProgress?.(mappedPercent, `Transcoding: ${Math.round(p.percent)}% (${p.speed?.toFixed(1) || '?'}x)`);
-      };
+      await new Promise((resolve, reject) => {
+        transcodeOpts.onProgress = (p) => {
+          const mappedPercent = Math.min(95, 15 + Math.round(Math.min(100, p.percent) * 0.75));
+          onProgress?.(mappedPercent, `Transcoding: ${Math.round(Math.min(100, p.percent))}% (${p.speed?.toFixed(1) || '?'}x)`);
+        };
       transcodeOpts.onComplete = (result) => resolve(result);
       transcodeOpts.onError = (error) => reject(new Error(error.message || 'nVideo transcode failed'));
       nVideo.transcode(inputPath, outputPath, transcodeOpts);
@@ -482,8 +495,8 @@ class VideoProcessor extends Processor {
           bitrate: 128000,
           cache: false,
           onProgress: (p) => {
-            const mappedPercent = 15 + Math.round(p.percent * 0.75);
-            onProgress?.(mappedPercent, `Extracting: ${Math.round(p.percent)}%`);
+            const mappedPercent = Math.min(95, 15 + Math.round(Math.min(100, p.percent) * 0.75));
+            onProgress?.(mappedPercent, `Extracting: ${Math.round(Math.min(100, p.percent))}%`);
           },
           onComplete: (result) => {
             resolve(result);
@@ -667,8 +680,8 @@ class VideoProcessor extends Processor {
       const transcodeOpts = {
         cache: false,
         onProgress: (p) => {
-          const mappedPercent = 20 + Math.round(p.percent * 0.7);
-          onProgress?.(mappedPercent, `Transcoding: ${Math.round(p.percent)}% (${p.speed?.toFixed(1) || '?'}x)`);
+          const mappedPercent = Math.min(95, 20 + Math.round(Math.min(100, p.percent) * 0.7));
+          onProgress?.(mappedPercent, `Transcoding: ${Math.round(Math.min(100, p.percent))}% (${p.speed?.toFixed(1) || '?'}x)`);
         },
         onComplete: (result) => {
           onProgress?.(95, 'Finalizing');
@@ -679,12 +692,18 @@ class VideoProcessor extends Processor {
       };
 
       // Build video options
-      const isNvenc = video_codec === 'h264_nvenc' || video_codec === 'hevc_nvenc';
+      const isNvenc = video_codec && video_codec.includes('nvenc');
       const videoOpts = {
         codec: video_codec,
-        preset,
       };
-      if (!isNvenc) videoOpts.crf = crf;
+      if (isNvenc) {
+        const presetMap = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', faster: 'p4', fast: 'p5', medium: 'p4', slow: 'p6', slower: 'p7', veryslow: 'p7' };
+        videoOpts.preset = presetMap[preset] || preset;
+        videoOpts.cq = crf;
+      } else {
+        videoOpts.preset = preset;
+        videoOpts.crf = crf;
+      }
       if (targetWidth) videoOpts.width = targetWidth;
       if (targetHeight) videoOpts.height = targetHeight;
       if (fps) videoOpts.fps = fps;

@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import config from '../../config/config.js';
@@ -19,7 +20,11 @@ export async function handleImage(ctx) {
 
     // Handle file upload or base64 input
     if (ctx.file) {
-      inputBuffer = ctx.file.buffer;
+      if (ctx.file.tempPath) {
+        inputBuffer = fs.readFileSync(ctx.file.tempPath);
+      } else {
+        inputBuffer = ctx.file.buffer;
+      }
       originalSize = ctx.file.size;
     } else if (ctx.body?.base64) {
       // Handle base64 input (strip data URL prefix if present)

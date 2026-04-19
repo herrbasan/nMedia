@@ -23,7 +23,11 @@ export async function handleAudioProbe(ctx) {
 
     // Handle file upload, base64 input, or input_path
     if (ctx.file) {
-      inputBuffer = ctx.file.buffer;
+      if (ctx.file.tempPath) {
+        inputBuffer = fs.readFileSync(ctx.file.tempPath);
+      } else {
+        inputBuffer = ctx.file.buffer;
+      }
     } else if (ctx.body?.base64) {
       const base64Data = ctx.body.base64.replace(/^data:[^;]+;base64,/, '');
       inputBuffer = Buffer.from(base64Data, 'base64');
@@ -62,7 +66,11 @@ export async function handleAudio(ctx) {
     
     // Handle file upload or base64 input
     if (ctx.file) {
-      inputBuffer = ctx.file.buffer;
+      if (ctx.file.tempPath) {
+        inputBuffer = fs.readFileSync(ctx.file.tempPath);
+      } else {
+        inputBuffer = ctx.file.buffer;
+      }
       originalSize = ctx.file.size;
     } else if (ctx.body?.base64) {
       const base64Data = ctx.body.base64.replace(/^data:[^;]+;base64,/, '');

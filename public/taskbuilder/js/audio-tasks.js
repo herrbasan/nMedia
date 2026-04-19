@@ -14,6 +14,7 @@ export function initAudioTasksPage(element, nui) {
     let lastAssetId = null;
     let lastBlob = null;
     let sourceMetadata = null;
+    let discoveredFormats = [];
 
     // Elements
     const fileInfo = element.querySelector('#audio-file-info');
@@ -22,8 +23,7 @@ export function initAudioTasksPage(element, nui) {
     const probeResult = element.querySelector('#audio-probe-result');
     const sampleRateSelect = element.querySelector('#audio-sample-rate select');
     const channelsSelect = element.querySelector('#audio-channels select');
-    const formatSelect = element.querySelector('#audio-format-select');
-    const codecSelect = element.querySelector('#audio-codec-select');
+    const formatSelect = element.querySelector('#audio-format');
     const customOptions = element.querySelector('#audio-custom-options textarea');
     const transportModeSelect = element.querySelector('#audio-transport-mode select');
     const presetSelect = element.querySelector('#audio-preset-select select');
@@ -44,7 +44,10 @@ export function initAudioTasksPage(element, nui) {
 
     // Init
     fetchCapabilities().then(caps => {
-        populateAudioCodecs(caps);
+        console.log('[audio-tasks] fetchCapabilities resolved');
+        populateAudioFormats(caps);
+    }).catch(err => {
+        console.error('[audio-tasks] fetchCapabilities failed:', err);
     });
     refreshPresets();
 
@@ -126,7 +129,6 @@ export function initAudioTasksPage(element, nui) {
         if (preset.sample_rate) sampleRateSelect.value = preset.sample_rate;
         if (preset.channels) channelsSelect.value = preset.channels;
         if (preset.format) formatSelect.value = preset.format;
-        if (preset.audio_codec) codecSelect.value = preset.audio_codec;
         nui.components.banner.show({ content: `Loaded preset: ${name}`, priority: 'info', placement: 'bottom', autoClose: 2000 });
     });
 
@@ -225,7 +227,7 @@ export function initAudioTasksPage(element, nui) {
         batchResultsSection.style.display = '';
         batchResults.innerHTML = '<p>Running batch tests...</p>';
 
-        const formats = ['mp3', 'wav', 'ogg', 'm4a'];
+        const formats = discoveredFormats.length > 0 ? discoveredFormats : ['mp3', 'wav', 'ogg', 'm4a'];
         const sampleRates = [16000, 44100];
         const results = [];
 
@@ -292,10 +294,14 @@ export function initAudioTasksPage(element, nui) {
 
     function getOptions() {
         const options = {};
-        if (sampleRateSelect.value) options.sample_rate = parseInt(sampleRateSelect.value);
-        if (channelsSelect.value) options.channels = parseInt(channelsSelect.value);
-        if (formatSelect.value) options.format = formatSelect.value;
-        if (codecSelect.value) options.audio_codec = codecSelect.value;
+        if (sampleRateSelect.value) {
+            options.sample_rate = sampleRateSelect.value === 'source' ? 'source' : parseInt(sampleRateSelect.value);
+        }
+        if (channelsSelect.value) {
+            options.channels = channelsSelect.value === 'source' ? 'source' : parseInt(channelsSelect.value);
+        }
+        const fmt = formatSelect.getValue?.() || formatSelect.value;
+        if (fmt) options.format = fmt;
 
         // Custom JSON override
         if (customOptions.value.trim()) {
@@ -308,15 +314,29 @@ export function initAudioTasksPage(element, nui) {
         return options;
     }
 
-    function populateAudioCodecs(caps) {
+    function populateAudioFormats(caps) {
+        console.log('[populateAudioFormats] caps keys:', Object.keys(caps));
         const nVideoCaps = caps?.nVideo || caps;
-        const encoders = nVideoCaps?.commonCodecs?.encoders?.audio || [];
-        codecSelect.innerHTML = '<option value="">Auto</option>';
-        encoders.forEach(codec => {
-            const opt = document.createElement('option');
-            opt.value = codec.name;
-            opt.textContent = codec.longName || codec.name;
-            codecSelect.appendChild(opt);
+        const allFormats = nVideoCaps?.formats?.all || [];
+        console.log('[populateAudioFormats] allFormats count:', allFormats.length);
+        const audioExts = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'opus', 'wma', 'ac3', 'eac3', 'dts', 'pcm', 'aiff', 'au', 'wv']);
+        const muxable = allFormats.filter(f => f.canMux && f.extensions?.some(e => audioExts.has(e.toLowerCase())));
+        const seen = new Set();
+        const formats = [];
+        muxable.forEach(f => {
+            f.extensions.forEach(e => {
+                const ext = e.toLowerCase();
+                if (audioExts.has(ext) && !seen.has(ext)) {
+                    seen.add(ext);
+                    formats.push(ext);
+                }
+            });
         });
+        // Fallback if capabilities empty
+        if (formats.length === 0) formats.push('mp3', 'wav', 'ogg', 'm4a');
+        console.log('[populateAudioFormats] discovered formats:', formats);
+        discoveredFormats = formats;
+        formatSelect.setItems(formats.map(fmt => ({ value: fmt, label: fmt.toUpperCase() })));
+        formatSelect.setValue('mp3');
     }
 }

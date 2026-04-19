@@ -13,7 +13,7 @@ import AudioProcessor from './processors/audio/AudioProcessor.js';
 import VideoProcessor from './processors/video/VideoProcessor.js';
 import { handleImage, handleImageCrop, handleHealth } from './api/routes/image.js';
 import { handleAudio, handleAudioProbe } from './api/routes/audio.js';
-import { handleVideo } from './api/routes/video.js';
+import { handleVideo, handleVideoProbe } from './api/routes/video.js';
 import {
   handleCreateTask,
   handleListTasks,
@@ -62,6 +62,7 @@ router.addRoute('POST', '/v1/process/image/crop', handleImageCrop);
 router.addRoute('POST', '/v1/process/audio', handleAudio);
 router.addRoute('POST', '/v1/audio/probe', handleAudioProbe);
 router.addRoute('POST', '/v1/process/video', handleVideo);
+router.addRoute('POST', '/v1/video/probe', handleVideoProbe);
 
 // New unified process endpoint
 router.addRoute('POST', '/v1/process', handleProcess);

@@ -15,11 +15,11 @@ const nVideoPath = path.join(__dirname, '../../../modules/nVideo/lib/index.js');
 const require = createRequire(import.meta.url);
 const nVideo = require(nVideoPath);
 
-const FORMAT_EXTENSIONS = { mp3: 'mp3', wav: 'wav', ogg: 'ogg', m4a: 'm4a' };
-const MIME_TYPES = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4' };
+const FORMAT_EXTENSIONS = { mp3: 'mp3', wav: 'wav', ogg: 'ogg', m4a: 'm4a', flac: 'flac', aac: 'aac', opus: 'opus' };
+const MIME_TYPES = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', flac: 'audio/flac', aac: 'audio/aac', opus: 'audio/opus' };
 
 // Audio codec mapping
-const AUDIO_CODECS = { mp3: 'libmp3lame', wav: 'pcm_s16le', ogg: 'libvorbis', m4a: 'aac' };
+const AUDIO_CODECS = { mp3: 'libmp3lame', wav: 'pcm_s16le', ogg: 'libvorbis', m4a: 'aac', flac: 'flac', aac: 'aac', opus: 'libopus' };
 
 class AudioProcessor extends Processor {
   constructor() {
@@ -35,8 +35,8 @@ class AudioProcessor extends Processor {
     if (channels !== undefined && channels !== 'source' && ![1, 2].includes(channels)) {
       throw new Error('channels must be 1 (mono), 2 (stereo), or "source"');
     }
-    if (format !== undefined && !['mp3', 'wav', 'ogg', 'm4a'].includes(format)) {
-      throw new Error('format must be mp3, wav, ogg, or m4a');
+    if (format !== undefined && !['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'opus'].includes(format)) {
+      throw new Error('format must be mp3, wav, ogg, m4a, flac, aac, or opus');
     }
   }
 

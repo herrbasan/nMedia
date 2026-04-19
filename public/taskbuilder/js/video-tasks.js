@@ -21,18 +21,17 @@ export function initVideoTasksPage(element, nui) {
     const modeTabs = element.querySelector('#video-mode-tabs');
 
     // Extract audio
-    const audioFormatSelect = element.querySelector('#video-audio-format-select');
-    const audioCodecSelect = element.querySelector('#video-audio-codec-select');
+    const audioFormatSelect = element.querySelector('#video-audio-format');
+    const audioCodecSelect = element.querySelector('#video-audio-codec');
     const audioSampleRateSelect = element.querySelector('#video-audio-samplerate select');
     const kfFpsSlider = element.querySelector('#video-kf-fps');
     const kfFpsValue = element.querySelector('#video-kf-fps-value');
     const kfMaxDimSlider = element.querySelector('#video-kf-maxdim');
     const kfMaxDimValue = element.querySelector('#video-kf-maxdim-value');
     const kfFormatSelect = element.querySelector('#video-kf-format select');
-    const containerSelect = element.querySelector('#video-transcode-container-select');
-    const vcodecSelect = element.querySelector('#video-transcode-vcodec-select');
-    const acodecSelect = element.querySelector('#video-transcode-acodec-select');
-    const hwaccelSelect = element.querySelector('#video-transcode-hwaccel-select');
+    const containerSelect = element.querySelector('#video-transcode-container');
+    const vcodecSelect = element.querySelector('#video-transcode-vcodec');
+    const acodecSelect = element.querySelector('#video-transcode-acodec');
     const crfSlider = element.querySelector('#video-transcode-crf');
     const crfValue = element.querySelector('#video-transcode-crf-value');
     const presetSelect = element.querySelector('#video-transcode-preset select');
@@ -63,7 +62,10 @@ export function initVideoTasksPage(element, nui) {
 
     // Init
     fetchCapabilities().then(caps => {
+        console.log('[video-tasks] fetchCapabilities resolved');
         populateVideoOptions(caps);
+    }).catch(err => {
+        console.error('[video-tasks] fetchCapabilities failed:', err);
     });
     refreshPresets();
 
@@ -91,7 +93,51 @@ export function initVideoTasksPage(element, nui) {
 
     // Probe
     probeBtn?.addEventListener('nui-click', async () => {
-        nui.components.banner.show({ content: 'Video probe: Use file path input or check capabilities for codec info', priority: 'info', placement: 'bottom', autoClose: 4000 });
+        const path = inputPath?.value;
+        if (!selectedFile && !path) {
+            nui.components.banner.show({ content: 'Select a file or enter a path first', priority: 'alert', placement: 'bottom', autoClose: 3000 });
+            return;
+        }
+
+        probeBtn.setLoading(true);
+        try {
+            let formData;
+            if (selectedFile) {
+                formData = new FormData();
+                formData.append('file', selectedFile);
+            } else {
+                formData = new FormData();
+                formData.append('input_path', path);
+            }
+
+            const response = await fetch('http://localhost:3501/v1/video/probe', {
+                method: 'POST',
+                body: formData,
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+
+            const meta = data.metadata || data;
+            probeResult.style.display = '';
+            probeResult.innerHTML = `
+                <div><strong>Format:</strong> ${meta.format || 'N/A'}</div>
+                <div><strong>Duration:</strong> ${formatDuration(meta.duration)}</div>
+                <div><strong>Bitrate:</strong> ${meta.bitrate ? formatFileSize(meta.bitrate / 8) + '/s' : 'N/A'}</div>
+                ${meta.video ? `
+                <div style="margin-top: 0.5rem; border-top: 1px solid var(--nui-border); padding-top: 0.5rem;">
+                    <strong>Video:</strong> ${meta.video.codec} ${meta.video.width}x${meta.video.height} @ ${meta.video.fps?.toFixed(2) || '?'} fps
+                </div>` : ''}
+                ${meta.audio ? `
+                <div style="margin-top: 0.5rem; border-top: 1px solid var(--nui-border); padding-top: 0.5rem;">
+                    <strong>Audio:</strong> ${meta.audio.codec} ${meta.audio.sampleRate || '?'} Hz, ${meta.audio.channels || '?'} ch
+                </div>` : ''}
+            `;
+        } catch (e) {
+            probeResult.style.display = '';
+            probeResult.innerHTML = `<span style="color: var(--nui-danger);">Probe failed: ${e.message}</span>`;
+        } finally {
+            probeBtn.setLoading(false);
+        }
     });
 
     // Presets
@@ -272,18 +318,24 @@ export function initVideoTasksPage(element, nui) {
         const options = { mode };
 
         if (mode === 'extract_audio') {
-            if (audioFormatSelect.value) options.format = audioFormatSelect.value;
-            if (audioCodecSelect.value) options.audio_codec = audioCodecSelect.value;
-            if (audioSampleRateSelect.value) options.sample_rate = parseInt(audioSampleRateSelect.value);
+            const fmt = audioFormatSelect.getValue?.() || audioFormatSelect.value;
+            if (fmt) options.format = fmt;
+            const ac = audioCodecSelect.getValue?.() || audioCodecSelect.value;
+            if (ac) options.audio_codec = ac;
+            if (audioSampleRateSelect.value) {
+                options.sample_rate = audioSampleRateSelect.value === 'source' ? 'source' : parseInt(audioSampleRateSelect.value);
+            }
         } else if (mode === 'extract_keyframes') {
             options.fps = parseInt(kfFpsSlider.value);
             options.max_dimension = parseInt(kfMaxDimSlider.value);
             if (kfFormatSelect.value) options.frame_format = kfFormatSelect.value;
         } else if (mode === 'transcode') {
-            if (containerSelect.value) options.output_format = containerSelect.value;
-            if (vcodecSelect.value) options.video_codec = vcodecSelect.value;
-            if (acodecSelect.value) options.audio_codec = acodecSelect.value;
-            if (hwaccelSelect.value) options.hwaccel = hwaccelSelect.value;
+            const cont = containerSelect.getValue?.() || containerSelect.value;
+            if (cont) options.output_format = cont;
+            const vc = vcodecSelect.getValue?.() || vcodecSelect.value;
+            if (vc) options.video_codec = vc;
+            const ac = acodecSelect.getValue?.() || acodecSelect.value;
+            if (ac) options.audio_codec = ac;
             options.crf = parseInt(crfSlider.value);
             if (presetSelect.value) options.preset = presetSelect.value;
             if (widthInput.value) options.width = parseInt(widthInput.value);
@@ -295,49 +347,90 @@ export function initVideoTasksPage(element, nui) {
     }
 
     function populateVideoOptions(caps) {
+        console.log('[populateVideoOptions] caps keys:', Object.keys(caps));
         const nVideoCaps = caps?.nVideo || caps;
+        console.log('[populateVideoOptions] nVideoCaps keys:', Object.keys(nVideoCaps));
         const common = nVideoCaps?.commonCodecs || {};
+        const allFormats = nVideoCaps?.formats?.all || [];
+        console.log('[populateVideoOptions] common keys:', Object.keys(common));
+        console.log('[populateVideoOptions] allFormats count:', allFormats.length);
+        console.log('[populateVideoOptions] video encoders keys:', Object.keys(common.encoders?.video || {}));
 
-        // Audio codecs
+        // Audio extract formats from muxable audio formats
+        const audioExts = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'opus', 'wma', 'ac3', 'eac3', 'dts', 'pcm', 'aiff', 'au', 'wv']);
+        const audioMuxable = allFormats.filter(f => f.canMux && f.extensions?.some(e => audioExts.has(e.toLowerCase())));
+        const seenAudio = new Set();
+        const audioFormats = [];
+        audioMuxable.forEach(f => {
+            f.extensions.forEach(e => {
+                const ext = e.toLowerCase();
+                if (audioExts.has(ext) && !seenAudio.has(ext)) {
+                    seenAudio.add(ext);
+                    audioFormats.push(ext);
+                }
+            });
+        });
+        if (audioFormats.length === 0) audioFormats.push('mp3', 'wav', 'ogg', 'm4a');
+        console.log('[populateVideoOptions] audio formats:', audioFormats);
+        audioFormatSelect.setItems(audioFormats.map(fmt => ({ value: fmt, label: fmt.toUpperCase() })));
+        audioFormatSelect.setValue('mp3');
+
+        // Video transcode containers from muxable video formats
+        const videoExts = new Set(['mp4', 'webm', 'mkv', 'mov', 'avi', 'ts', 'flv', '3gp', 'ogv', 'wmv']);
+        const videoMuxable = allFormats.filter(f => f.canMux && f.extensions?.some(e => videoExts.has(e.toLowerCase())));
+        const seenVideo = new Set();
+        const videoContainers = [];
+        videoMuxable.forEach(f => {
+            f.extensions.forEach(e => {
+                const ext = e.toLowerCase();
+                if (videoExts.has(ext) && !seenVideo.has(ext)) {
+                    seenVideo.add(ext);
+                    videoContainers.push(ext);
+                }
+            });
+        });
+        if (videoContainers.length === 0) videoContainers.push('mp4', 'webm', 'mkv', 'mov');
+        console.log('[populateVideoOptions] video containers:', videoContainers);
+        containerSelect.setItems(videoContainers.map(fmt => ({ value: fmt, label: fmt.toUpperCase() })));
+        containerSelect.setValue('mp4');
+
+        // Audio codecs (extract audio tab)
         const audioEncoders = common.encoders?.audio || [];
-        audioCodecSelect.innerHTML = '<option value="">Auto</option>';
-        audioEncoders.forEach(codec => {
-            const opt = document.createElement('option');
-            opt.value = codec.name;
-            opt.textContent = codec.longName || codec.name;
-            audioCodecSelect.appendChild(opt);
-        });
+        console.log('[populateVideoOptions] audio encoders count:', audioEncoders.length);
+        audioCodecSelect.setItems([
+            { value: '', label: 'Auto' },
+            ...audioEncoders.map(codec => ({ value: codec.name, label: codec.longName || codec.name }))
+        ]);
+        audioCodecSelect.setValue('');
 
-        // Video codecs (CPU)
-        const cpuEncoders = common.encoders?.video?.cpu || [];
-        vcodecSelect.innerHTML = '';
-        cpuEncoders.forEach(codec => {
-            const opt = document.createElement('option');
-            opt.value = codec.name;
-            opt.textContent = codec.longName || codec.name;
-            vcodecSelect.appendChild(opt);
+        // Video codecs (flattened with platform)
+        const videoEncoders = common.encoders?.video || {};
+        const platformLabels = {
+            cpu: 'CPU',
+            nvidia: 'NVIDIA',
+            intel: 'Intel Quick Sync',
+            amd: 'AMD',
+            other_hw: 'Other HW',
+            professional: 'Professional'
+        };
+        const vcodecItems = [];
+        Object.entries(videoEncoders).forEach(([group, encoders]) => {
+            encoders.forEach(codec => {
+                const platform = platformLabels[group] || group;
+                vcodecItems.push({ value: codec.name, label: `[${platform}] ${codec.longName || codec.name}` });
+            });
         });
+        console.log('[populateVideoOptions] video codec items count:', vcodecItems.length);
+        console.log('[populateVideoOptions] video codec items:', vcodecItems.map(i => i.value));
+        vcodecSelect.setItems(vcodecItems);
+        if (vcodecItems.length > 0) vcodecSelect.setValue(vcodecItems[0].value);
 
         // Audio codecs for transcode
-        acodecSelect.innerHTML = '';
-        audioEncoders.forEach(codec => {
-            const opt = document.createElement('option');
-            opt.value = codec.name;
-            opt.textContent = codec.longName || codec.name;
-            acodecSelect.appendChild(opt);
-        });
-
-        // HWAccel
-        const hwaccels = common.videoEncodersByHwaccel || {};
-        hwaccelSelect.innerHTML = '<option value="">Auto (CPU)</option>';
-        Object.keys(hwaccels).forEach(hw => {
-            if (hw !== 'cpu') {
-                const opt = document.createElement('option');
-                opt.value = hw;
-                opt.textContent = hw.toUpperCase();
-                hwaccelSelect.appendChild(opt);
-            }
-        });
+        acodecSelect.setItems(audioEncoders.map(codec => ({ value: codec.name, label: codec.longName || codec.name })));
+        if (audioEncoders.length > 0) {
+            const aac = audioEncoders.find(c => c.name === 'aac');
+            acodecSelect.setValue(aac ? aac.name : audioEncoders[0].name);
+        }
 
         // Recommended
         if (common.recommended) {

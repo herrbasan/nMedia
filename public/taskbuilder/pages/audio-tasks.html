@@ -54,9 +54,9 @@
             <label>Sample Rate</label>
             <nui-select id="audio-sample-rate">
                 <select>
-                    <option value="">Same as source</option>
+                    <option value="source" selected>Same as source</option>
                     <option value="8000">8000 Hz (Telephony)</option>
-                    <option value="16000" selected>16000 Hz (STT)</option>
+                    <option value="16000">16000 Hz (STT)</option>
                     <option value="22050">22050 Hz</option>
                     <option value="44100">44100 Hz (CD)</option>
                     <option value="48000">48000 Hz (Video)</option>
@@ -68,8 +68,8 @@
             <label>Channels</label>
             <nui-select id="audio-channels">
                 <select>
-                    <option value="">Same as source</option>
-                    <option value="1" selected>Mono</option>
+                    <option value="source" selected>Same as source</option>
+                    <option value="1">Mono</option>
                     <option value="2">Stereo</option>
                 </select>
             </nui-select>
@@ -78,21 +78,7 @@
         <nui-input-group>
             <label>Output Format</label>
             <nui-select id="audio-format">
-                <select id="audio-format-select">
-                    <option value="mp3" selected>MP3</option>
-                    <option value="wav">WAV</option>
-                    <option value="ogg">OGG</option>
-                    <option value="m4a">M4A</option>
-                </select>
-            </nui-select>
-        </nui-input-group>
-
-        <nui-input-group>
-            <label>Audio Codec</label>
-            <nui-select id="audio-codec">
-                <select id="audio-codec-select">
-                    <option value="">Auto</option>
-                </select>
+                <select id="audio-format-select"></select>
             </nui-select>
         </nui-input-group>
 

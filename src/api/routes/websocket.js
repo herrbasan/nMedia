@@ -186,8 +186,11 @@ function handleUploadComplete(conn, payload) {
 
   state.writeStream.end(() => {
     try {
-      // Magic byte validation
-      const header = fs.readFileSync(state.tempPath, { length: 64 });
+      // Magic byte validation — read only first 64 bytes
+      const header = Buffer.alloc(64);
+      const fd = fs.openSync(state.tempPath, 'r');
+      fs.readSync(fd, header, 0, 64, 0);
+      fs.closeSync(fd);
       const detected = MagicByteDetector.detect(header);
 
       if (!detected) {
