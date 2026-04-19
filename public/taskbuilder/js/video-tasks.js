@@ -465,7 +465,7 @@ export function initVideoTasksPage(element, nui) {
                 case '-video_bitrate':
                     if (hasNext) {
                         const val = next.replace(/k$/i, '000').replace(/m$/i, '000000');
-                        (result.videoOptions ||= {}).bitrate = val;
+                        (result.videoOptions ||= {})['b'] = val;
                         i++;
                     }
                     break;
@@ -474,19 +474,19 @@ export function initVideoTasksPage(element, nui) {
                 case '-audio_bitrate':
                     if (hasNext) {
                         const val = next.replace(/k$/i, '000').replace(/m$/i, '000000');
-                        (result.audioOptions ||= {}).bitrate = val;
+                        (result.audioOptions ||= {})['b'] = val;
                         i++;
                     }
                     break;
                 case '-ar':
                     if (hasNext) {
-                        (result.audioOptions ||= {}).sampleRate = next;
+                        (result.audioOptions ||= {})['sample_rate'] = next;
                         i++;
                     }
                     break;
                 case '-ac':
                     if (hasNext) {
-                        (result.audioOptions ||= {}).channels = next;
+                        (result.audioOptions ||= {})['ch_layout'] = next;
                         i++;
                     }
                     break;
@@ -516,7 +516,7 @@ export function initVideoTasksPage(element, nui) {
                 case '-pix_fmt':
                 case '-pix_fmt:v':
                     if (hasNext) {
-                        (result.videoOptions ||= {}).pixelFormat = next;
+                        (result.videoOptions ||= {})['pix_fmt'] = next;
                         i++;
                     }
                     break;
