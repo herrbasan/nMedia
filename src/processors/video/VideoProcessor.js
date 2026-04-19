@@ -314,6 +314,9 @@ class VideoProcessor extends Processor {
         transcodeOpts.video.preset = preset;
         transcodeOpts.video.crf = crf;
       }
+      if (options.videoOptions) {
+        transcodeOpts.video.options = options.videoOptions;
+      }
       if (targetWidth) transcodeOpts.video.width = targetWidth;
       if (targetHeight) transcodeOpts.video.height = targetHeight;
       if (fps) transcodeOpts.video.fps = fps;
@@ -323,6 +326,9 @@ class VideoProcessor extends Processor {
           codec: audio_codec,
           bitrate: audio_bitrate,
         };
+        if (options.audioOptions) {
+          transcodeOpts.audio.options = options.audioOptions;
+        }
       }
 
       await new Promise((resolve, reject) => {
@@ -422,6 +428,9 @@ class VideoProcessor extends Processor {
       transcodeOpts.video.preset = preset;
       transcodeOpts.video.crf = crf;
     }
+    if (options.videoOptions) {
+      transcodeOpts.video.options = options.videoOptions;
+    }
     if (targetWidth) transcodeOpts.video.width = targetWidth;
     if (targetHeight) transcodeOpts.video.height = targetHeight;
     if (fps) transcodeOpts.video.fps = fps;
@@ -431,6 +440,9 @@ class VideoProcessor extends Processor {
         codec: audio_codec,
         bitrate: audio_bitrate,
       };
+      if (options.audioOptions) {
+        transcodeOpts.audio.options = options.audioOptions;
+      }
     }
 
       await new Promise((resolve, reject) => {
@@ -704,6 +716,9 @@ class VideoProcessor extends Processor {
         videoOpts.preset = preset;
         videoOpts.crf = crf;
       }
+      if (options.videoOptions) {
+        videoOpts.options = options.videoOptions;
+      }
       if (targetWidth) videoOpts.width = targetWidth;
       if (targetHeight) videoOpts.height = targetHeight;
       if (fps) videoOpts.fps = fps;
@@ -715,6 +730,9 @@ class VideoProcessor extends Processor {
           codec: audio_codec,
           bitrate: audio_bitrate,
         };
+        if (options.audioOptions) {
+          transcodeOpts.audio.options = options.audioOptions;
+        }
       }
 
       await new Promise((resolve, reject) => {

@@ -196,11 +196,17 @@ async function processVideo(inputSource, options, cacheDir) {
         transcodeOpts.video.preset = preset;
         transcodeOpts.video.crf = crf;
       }
+      if (options.videoOptions) {
+        transcodeOpts.video.options = options.videoOptions;
+      }
       if (targetWidth) transcodeOpts.video.width = targetWidth;
       if (targetHeight) transcodeOpts.video.height = targetHeight;
       if (output_fps) transcodeOpts.video.fps = output_fps;
       if (audioStream) {
         transcodeOpts.audio = { codec: audio_codec, bitrate: audio_bitrate };
+        if (options.audioOptions) {
+          transcodeOpts.audio.options = options.audioOptions;
+        }
       }
 
       await new Promise((resolve, reject) => {
