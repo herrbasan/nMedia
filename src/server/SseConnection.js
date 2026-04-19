@@ -48,7 +48,6 @@ export class SseConnection extends Sender {
    * @param {Object} data - Event data
    */
   sendEvent(eventType, data) {
-    this.write(`event: ${eventType}\n`);
-    this.write(`data: ${JSON.stringify(data)}\n\n`);
+    this.write(`data: ${JSON.stringify({ type: eventType, ...data })}\n\n`);
   }
 }

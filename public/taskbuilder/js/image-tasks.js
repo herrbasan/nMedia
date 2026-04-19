@@ -333,7 +333,7 @@ export function initImageTasksPage(element, nui) {
     // Download
     downloadBtn?.addEventListener('nui-click', () => {
         if (lastBlob) {
-            triggerDownload(lastBlob, `image-output.${options?.format || 'jpg'}`);
+            triggerDownload(lastBlob, `image-output.${formatSelect.value || 'jpg'}`);
         }
     });
 
@@ -397,5 +397,7 @@ export function initImageTasksPage(element, nui) {
             opt.textContent = fmt.toUpperCase();
             formatSelect.appendChild(opt);
         });
+        const nuiSelect = formatSelect.closest('nui-select');
+        if (nuiSelect) nuiSelect.syncOptions();
     }
 }

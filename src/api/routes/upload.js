@@ -114,8 +114,13 @@ export async function handleUpload(ctx) {
 
       // Magic byte validation
       const header = fs.readFileSync(tempPath, { length: 64 });
-      const detected = MagicByteDetector.detect(header);
+      let detected = MagicByteDetector.detect(header);
       logger.info('Upload magic bytes detected', { tempId, detectedType: detected?.type, detectedMimeType: detected?.mimeType });
+
+      if (!detected) {
+        detected = MagicByteDetector.detectFromExtension(originalFilename);
+        logger.info('Upload extension fallback', { tempId, originalFilename, detectedType: detected?.type, detectedMimeType: detected?.mimeType });
+      }
 
       if (!detected) {
         fs.unlinkSync(tempPath);

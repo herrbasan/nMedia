@@ -89,14 +89,17 @@ export async function runTask(file, inputPath, type, options, transportMode, onP
         const uploadRes = await fetch(`${API_BASE}/v1/upload`, {
             method: 'POST',
             body: file,
-            headers: { 'Content-Type': 'application/octet-stream' },
+            headers: {
+                'Content-Type': 'application/octet-stream',
+                'X-Original-Filename': file.name || 'unknown',
+            },
         });
         if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.status}`);
         const uploadData = await uploadRes.json();
         fileId = uploadData.fileId;
     }
 
-    const processBody = { type, options: { ...options } };
+    const processBody = { processor: type, options: { ...options } };
     if (fileId) processBody.fileId = fileId;
     else if (inputPath) processBody.input_path = inputPath;
 

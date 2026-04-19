@@ -109,8 +109,7 @@ class ProgressReporter {
     if (typeof sender.sendEvent === 'function') {
       sender.sendEvent(event, { jobId, ...data });
     } else {
-      const payload = JSON.stringify({ event, jobId, ...data });
-      sender.write(`event: ${event}\n`);
+      const payload = JSON.stringify({ type: event, jobId, ...data });
       sender.write(`data: ${payload}\n\n`);
     }
   }
@@ -138,7 +137,7 @@ class ProgressReporter {
    */
   complete(jobId, result) {
     if (!jobId) return;
-    this.send(jobId, 'complete', { result });
+    this.send(jobId, 'complete', result);
     this.close(jobId);
   }
 

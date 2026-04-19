@@ -25,6 +25,10 @@ export class MagicByteDetector {
     if (hex.startsWith('000000') && hex.includes('6674797068656963')) return { type: 'image', mimeType: 'image/heic' };
     if (hex.startsWith('000000') && hex.includes('667479706D696631')) return { type: 'image', mimeType: 'image/heif' };
 
+    // TIFF-based RAW formats (CR2, ORF, NEF, DNG, ARW, etc.)
+    if (hex.startsWith('49492A00') || hex.startsWith('4D4D002A')) return { type: 'image', mimeType: 'image/tiff' };
+    if (hex.startsWith('4949524F')) return { type: 'image', mimeType: 'image/orf' };
+
     // Audio
     if (hex.startsWith('494433') || hex.startsWith('FF')) return { type: 'audio', mimeType: 'audio/mpeg' };
     if (hex.startsWith('52494646') && hex.slice(16, 24) === '57415645') return { type: 'audio', mimeType: 'audio/wav' };
@@ -65,6 +69,52 @@ export class MagicByteDetector {
     }
 
     return null;
+  }
+
+  static detectFromExtension(filename) {
+    if (!filename) return null;
+    const ext = filename.split('.').pop().toLowerCase();
+    const map = {
+      jpg: { type: 'image', mimeType: 'image/jpeg' },
+      jpeg: { type: 'image', mimeType: 'image/jpeg' },
+      png: { type: 'image', mimeType: 'image/png' },
+      gif: { type: 'image', mimeType: 'image/gif' },
+      webp: { type: 'image', mimeType: 'image/webp' },
+      avif: { type: 'image', mimeType: 'image/avif' },
+      tiff: { type: 'image', mimeType: 'image/tiff' },
+      tif: { type: 'image', mimeType: 'image/tiff' },
+      bmp: { type: 'image', mimeType: 'image/bmp' },
+      heic: { type: 'image', mimeType: 'image/heic' },
+      heif: { type: 'image', mimeType: 'image/heif' },
+      cr2: { type: 'image', mimeType: 'image/x-canon-cr2' },
+      cr3: { type: 'image', mimeType: 'image/x-canon-cr3' },
+      nef: { type: 'image', mimeType: 'image/x-nikon-nef' },
+      arw: { type: 'image', mimeType: 'image/x-sony-arw' },
+      dng: { type: 'image', mimeType: 'image/x-adobe-dng' },
+      orf: { type: 'image', mimeType: 'image/x-olympus-orf' },
+      raf: { type: 'image', mimeType: 'image/x-fuji-raf' },
+      rw2: { type: 'image', mimeType: 'image/x-panasonic-rw2' },
+      peF: { type: 'image', mimeType: 'image/x-pentax-pef' },
+      sr2: { type: 'image', mimeType: 'image/x-sony-sr2' },
+      mp3: { type: 'audio', mimeType: 'audio/mpeg' },
+      wav: { type: 'audio', mimeType: 'audio/wav' },
+      ogg: { type: 'audio', mimeType: 'audio/ogg' },
+      flac: { type: 'audio', mimeType: 'audio/flac' },
+      m4a: { type: 'audio', mimeType: 'audio/mp4' },
+      aac: { type: 'audio', mimeType: 'audio/aac' },
+      wma: { type: 'audio', mimeType: 'audio/x-ms-wma' },
+      mp4: { type: 'video', mimeType: 'video/mp4' },
+      mov: { type: 'video', mimeType: 'video/quicktime' },
+      avi: { type: 'video', mimeType: 'video/avi' },
+      mkv: { type: 'video', mimeType: 'video/x-matroska' },
+      webm: { type: 'video', mimeType: 'video/webm' },
+      wmv: { type: 'video', mimeType: 'video/x-ms-wmv' },
+      m4v: { type: 'video', mimeType: 'video/mp4' },
+      ts: { type: 'video', mimeType: 'video/mp2t' },
+      mts: { type: 'video', mimeType: 'video/mp2t' },
+      '3gp': { type: 'video', mimeType: 'video/3gpp' },
+    };
+    return map[ext] || null;
   }
 
   /**

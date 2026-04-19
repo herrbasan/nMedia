@@ -160,6 +160,7 @@ class ImageProcessor extends Processor {
    */
   async encodeBuffer(buffer, format, quality) {
     const pipeline = nImage(buffer);
+    const avifQuality = Math.round(quality * 0.55);
     switch (format) {
       case 'jpeg':
         pipeline.jpeg({ quality });
@@ -171,7 +172,7 @@ class ImageProcessor extends Processor {
         pipeline.webp({ quality });
         break;
       case 'avif':
-        pipeline.avif({ quality });
+        pipeline.avif({ quality: avifQuality });
         break;
       case 'gif':
         // nImage doesn't support GIF output directly, use PNG
@@ -279,6 +280,7 @@ class ImageProcessor extends Processor {
     }
 
     onProgress?.(70, `Converting to ${format}`);
+    const avifQuality = Math.round(quality * 0.55);
     switch (format) {
       case 'jpeg':
         pipeline.jpeg({ quality });
@@ -290,7 +292,7 @@ class ImageProcessor extends Processor {
         pipeline.webp({ quality });
         break;
       case 'avif':
-        pipeline.avif({ quality });
+        pipeline.avif({ quality: avifQuality });
         break;
       case 'gif':
         pipeline.png({ quality });
