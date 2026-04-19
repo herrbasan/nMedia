@@ -186,6 +186,11 @@ async function processVideo(inputSource, options, cacheDir) {
       const transcodeOpts = {
         cache: false,
       };
+      if (options.hwaccel) {
+        transcodeOpts.hwaccel = options.hwaccel;
+      } else if (video_codec && video_codec.includes('nvenc')) {
+        transcodeOpts.hwaccel = 'cuda';
+      }
       if (!options.no_video) {
         transcodeOpts.video = { codec: video_codec };
         if (isNvenc) {

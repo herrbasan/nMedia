@@ -402,6 +402,11 @@ export function initVideoTasksPage(element, nui) {
                 if (parsed.audioOptions) options.audioOptions = parsed.audioOptions;
                 if (parsed.noAudio) options.no_audio = true;
                 if (parsed.noVideo) options.no_video = true;
+                if (parsed.hwaccel) options.hwaccel = parsed.hwaccel;
+                // Auto-infer CUDA hwaccel for nvenc codecs if not explicitly set
+                if (!options.hwaccel && parsed.videoCodec && parsed.videoCodec.includes('nvenc')) {
+                    options.hwaccel = 'cuda';
+                }
             }
         }
 
@@ -410,10 +415,11 @@ export function initVideoTasksPage(element, nui) {
 
     function parseCliToNVideo(cli) {
         const result = {
-            videoCodec: null, audioCodec: null, preset: null, crf: null,
-            width: null, height: null, fps: null, filters: null,
-            videoOptions: null, audioOptions: null, noAudio: false, noVideo: false,
-        };
+                videoCodec: null, audioCodec: null, preset: null, crf: null,
+                width: null, height: null, fps: null, filters: null,
+                videoOptions: null, audioOptions: null, noAudio: false, noVideo: false,
+                hwaccel: null,
+            };
         if (!cli) return result;
 
         // Normalize: split by spaces but handle quoted strings
@@ -526,6 +532,13 @@ export function initVideoTasksPage(element, nui) {
                         i++;
                     }
                     break;
+                case '-hwaccel':
+                    if (hasNext) {
+                        const map = { nvdec: 'cuda', cuda: 'cuda', qsv: 'qsv', vaapi: 'vaapi', d3d11va: 'd3d11va' };
+                        result.hwaccel = map[next] || next;
+                        i++;
+                    }
+                    break;
                 case '-an':
                     result.noAudio = true;
                     break;
@@ -574,6 +587,11 @@ export function initVideoTasksPage(element, nui) {
         if (parsed.audioOptions) (nvideo.audio ||= {}).options = parsed.audioOptions;
         if (parsed.noAudio) nvideo.audio = null;
         if (parsed.noVideo) nvideo.video = null;
+        if (parsed.hwaccel) nvideo.hwaccel = parsed.hwaccel;
+        // Show auto-inferred hwaccel
+        if (!parsed.hwaccel && parsed.videoCodec && parsed.videoCodec.includes('nvenc')) {
+            nvideo.hwaccel = 'cuda (auto-inferred)';
+        }
         cliPreview.textContent = JSON.stringify(nvideo, null, 2);
     }
 

@@ -302,6 +302,11 @@ class VideoProcessor extends Processor {
       const transcodeOpts = {
         cache: false,
       };
+      if (options.hwaccel) {
+        transcodeOpts.hwaccel = options.hwaccel;
+      } else if (video_codec && video_codec.includes('nvenc')) {
+        transcodeOpts.hwaccel = 'cuda';
+      }
       if (!options.no_video) {
         const isNvenc = video_codec && video_codec.includes('nvenc');
         transcodeOpts.video = {
@@ -421,6 +426,11 @@ class VideoProcessor extends Processor {
     const transcodeOpts = {
       cache: false,
     };
+    if (options.hwaccel) {
+      transcodeOpts.hwaccel = options.hwaccel;
+    } else if (video_codec && video_codec.includes('nvenc')) {
+      transcodeOpts.hwaccel = 'cuda';
+    }
     if (!options.no_video) {
       const isNvenc = video_codec && video_codec.includes('nvenc');
       transcodeOpts.video = {
@@ -714,6 +724,11 @@ class VideoProcessor extends Processor {
           reject?.(new Error(error.message || 'nVideo transcode failed'));
         },
       };
+      if (options.hwaccel) {
+        transcodeOpts.hwaccel = options.hwaccel;
+      } else if (video_codec && video_codec.includes('nvenc')) {
+        transcodeOpts.hwaccel = 'cuda';
+      }
 
       // Build video options
       if (!options.no_video) {
