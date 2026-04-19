@@ -38,8 +38,8 @@ class VideoProcessor extends Processor {
   validateOptions(options) {
     const { mode, fps } = options;
 
-    if (mode !== undefined && !['extract_audio', 'extract_keyframes', 'transcode'].includes(mode)) {
-      throw new Error('mode must be extract_audio, extract_keyframes, or transcode');
+    if (mode !== undefined && !['extract_audio', 'extract_keyframes', 'transcode', 'cli'].includes(mode)) {
+      throw new Error('mode must be extract_audio, extract_keyframes, transcode, or cli');
     }
     if (fps !== undefined && (fps < 1 || fps > 30)) {
       throw new Error('fps must be between 1 and 30');
@@ -105,7 +105,7 @@ class VideoProcessor extends Processor {
 
     if (mode === 'extract_audio') {
       return this._extractAudioFromFile(inputPath, outputPath, options, onProgress, inputStat.size);
-    } else if (mode === 'transcode') {
+    } else if (mode === 'transcode' || mode === 'cli') {
       return this._transcodeFileToFile(inputPath, outputPath, options, onProgress, inputStat.size);
     } else {
       throw new Error(`File-to-file mode '${mode}' not supported. Use 'extract_audio' or 'transcode'.`);
@@ -299,37 +299,43 @@ class VideoProcessor extends Processor {
     try {
       onProgress?.(20, `Transcoding: ${video_codec} → ${output_format}`);
 
-      const isNvenc = video_codec && video_codec.includes('nvenc');
       const transcodeOpts = {
         cache: false,
-        video: {
-          codec: video_codec,
-        },
       };
-      if (isNvenc) {
-        const presetMap = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', faster: 'p4', fast: 'p5', medium: 'p4', slow: 'p6', slower: 'p7', veryslow: 'p7' };
-        transcodeOpts.video.preset = presetMap[preset] || preset;
-        transcodeOpts.video.cq = crf;
-      } else {
-        transcodeOpts.video.preset = preset;
-        transcodeOpts.video.crf = crf;
-      }
-      if (options.videoOptions) {
-        transcodeOpts.video.options = options.videoOptions;
-      }
-      if (targetWidth) transcodeOpts.video.width = targetWidth;
-      if (targetHeight) transcodeOpts.video.height = targetHeight;
-      if (fps) transcodeOpts.video.fps = fps;
-
-      if (audioStream) {
-        transcodeOpts.audio = {
-          codec: audio_codec,
-          bitrate: audio_bitrate,
+      if (!options.no_video) {
+        const isNvenc = video_codec && video_codec.includes('nvenc');
+        transcodeOpts.video = {
+          codec: video_codec,
         };
-        if (options.audioOptions) {
-          transcodeOpts.audio.options = options.audioOptions;
+        if (isNvenc) {
+          const presetMap = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', faster: 'p4', fast: 'p5', medium: 'p4', slow: 'p6', slower: 'p7', veryslow: 'p7' };
+          transcodeOpts.video.preset = presetMap[preset] || preset;
+          transcodeOpts.video.cq = crf;
+        } else {
+          transcodeOpts.video.preset = preset;
+          transcodeOpts.video.crf = crf;
         }
+        if (options.videoOptions) {
+          transcodeOpts.video.options = options.videoOptions;
+        }
+        if (targetWidth) transcodeOpts.video.width = targetWidth;
+        if (targetHeight) transcodeOpts.video.height = targetHeight;
+        if (fps) transcodeOpts.video.fps = fps;
+      } else {
+        transcodeOpts.video = null;
       }
+
+    if (audioStream && !options.no_audio) {
+      transcodeOpts.audio = {
+        codec: audio_codec,
+        bitrate: audio_bitrate,
+      };
+      if (options.audioOptions) {
+        transcodeOpts.audio.options = options.audioOptions;
+      }
+    } else if (options.no_audio) {
+      transcodeOpts.audio = null;
+    }
 
       await new Promise((resolve, reject) => {
         transcodeOpts.onProgress = (p) => {
@@ -412,30 +418,34 @@ class VideoProcessor extends Processor {
 
     onProgress?.(15, `Transcoding: ${video_codec} → ${output_format}`);
 
-    const isNvenc = video_codec && video_codec.includes('nvenc');
     const transcodeOpts = {
       cache: false,
-      video: {
-        codec: video_codec,
-      },
     };
-    if (isNvenc) {
-      // NVENC uses p1-p7 presets and cq (not crf)
-      const presetMap = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', faster: 'p4', fast: 'p5', medium: 'p4', slow: 'p6', slower: 'p7', veryslow: 'p7' };
-      transcodeOpts.video.preset = presetMap[preset] || preset;
-      transcodeOpts.video.cq = crf;
+    if (!options.no_video) {
+      const isNvenc = video_codec && video_codec.includes('nvenc');
+      transcodeOpts.video = {
+        codec: video_codec,
+      };
+      if (isNvenc) {
+        // NVENC uses p1-p7 presets and cq (not crf)
+        const presetMap = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', faster: 'p4', fast: 'p5', medium: 'p4', slow: 'p6', slower: 'p7', veryslow: 'p7' };
+        transcodeOpts.video.preset = presetMap[preset] || preset;
+        transcodeOpts.video.cq = crf;
+      } else {
+        transcodeOpts.video.preset = preset;
+        transcodeOpts.video.crf = crf;
+      }
+      if (options.videoOptions) {
+        transcodeOpts.video.options = options.videoOptions;
+      }
+      if (targetWidth) transcodeOpts.video.width = targetWidth;
+      if (targetHeight) transcodeOpts.video.height = targetHeight;
+      if (fps) transcodeOpts.video.fps = fps;
     } else {
-      transcodeOpts.video.preset = preset;
-      transcodeOpts.video.crf = crf;
+      transcodeOpts.video = null;
     }
-    if (options.videoOptions) {
-      transcodeOpts.video.options = options.videoOptions;
-    }
-    if (targetWidth) transcodeOpts.video.width = targetWidth;
-    if (targetHeight) transcodeOpts.video.height = targetHeight;
-    if (fps) transcodeOpts.video.fps = fps;
 
-    if (audioStream) {
+    if (audioStream && !options.no_audio) {
       transcodeOpts.audio = {
         codec: audio_codec,
         bitrate: audio_bitrate,
@@ -443,13 +453,15 @@ class VideoProcessor extends Processor {
       if (options.audioOptions) {
         transcodeOpts.audio.options = options.audioOptions;
       }
+    } else if (options.no_audio) {
+      transcodeOpts.audio = null;
     }
 
-      await new Promise((resolve, reject) => {
-        transcodeOpts.onProgress = (p) => {
-          const mappedPercent = Math.min(95, 15 + Math.round(Math.min(100, p.percent) * 0.75));
-          onProgress?.(mappedPercent, `Transcoding: ${Math.round(Math.min(100, p.percent))}% (${p.speed?.toFixed(1) || '?'}x)`);
-        };
+    await new Promise((resolve, reject) => {
+      transcodeOpts.onProgress = (p) => {
+        const mappedPercent = Math.min(95, 15 + Math.round(Math.min(100, p.percent) * 0.75));
+        onProgress?.(mappedPercent, `Transcoding: ${Math.round(Math.min(100, p.percent))}% (${p.speed?.toFixed(1) || '?'}x)`);
+      };
       transcodeOpts.onComplete = (result) => resolve(result);
       transcodeOpts.onError = (error) => reject(new Error(error.message || 'nVideo transcode failed'));
       nVideo.transcode(inputPath, outputPath, transcodeOpts);
@@ -704,28 +716,32 @@ class VideoProcessor extends Processor {
       };
 
       // Build video options
-      const isNvenc = video_codec && video_codec.includes('nvenc');
-      const videoOpts = {
-        codec: video_codec,
-      };
-      if (isNvenc) {
-        const presetMap = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', faster: 'p4', fast: 'p5', medium: 'p4', slow: 'p6', slower: 'p7', veryslow: 'p7' };
-        videoOpts.preset = presetMap[preset] || preset;
-        videoOpts.cq = crf;
+      if (!options.no_video) {
+        const isNvenc = video_codec && video_codec.includes('nvenc');
+        const videoOpts = {
+          codec: video_codec,
+        };
+        if (isNvenc) {
+          const presetMap = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', faster: 'p4', fast: 'p5', medium: 'p4', slow: 'p6', slower: 'p7', veryslow: 'p7' };
+          videoOpts.preset = presetMap[preset] || preset;
+          videoOpts.cq = crf;
+        } else {
+          videoOpts.preset = preset;
+          videoOpts.crf = crf;
+        }
+        if (options.videoOptions) {
+          videoOpts.options = options.videoOptions;
+        }
+        if (targetWidth) videoOpts.width = targetWidth;
+        if (targetHeight) videoOpts.height = targetHeight;
+        if (fps) videoOpts.fps = fps;
+        transcodeOpts.video = videoOpts;
       } else {
-        videoOpts.preset = preset;
-        videoOpts.crf = crf;
+        transcodeOpts.video = null;
       }
-      if (options.videoOptions) {
-        videoOpts.options = options.videoOptions;
-      }
-      if (targetWidth) videoOpts.width = targetWidth;
-      if (targetHeight) videoOpts.height = targetHeight;
-      if (fps) videoOpts.fps = fps;
-      transcodeOpts.video = videoOpts;
 
       // Build audio options
-      if (audioStream) {
+      if (audioStream && !options.no_audio) {
         transcodeOpts.audio = {
           codec: audio_codec,
           bitrate: audio_bitrate,
@@ -733,6 +749,8 @@ class VideoProcessor extends Processor {
         if (options.audioOptions) {
           transcodeOpts.audio.options = options.audioOptions;
         }
+      } else if (options.no_audio) {
+        transcodeOpts.audio = null;
       }
 
       await new Promise((resolve, reject) => {

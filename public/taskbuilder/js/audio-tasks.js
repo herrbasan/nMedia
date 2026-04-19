@@ -13,8 +13,26 @@ export function initAudioTasksPage(element, nui) {
     let selectedFile = null;
     let lastAssetId = null;
     let lastBlob = null;
+    const blobUrls = [];
     let sourceMetadata = null;
     let discoveredFormats = [];
+
+    function revokeBlobUrls() {
+        blobUrls.forEach(url => URL.revokeObjectURL(url));
+        blobUrls.length = 0;
+    }
+
+    function createTypedBlobUrl(blob, ext) {
+        const typeMap = {
+            mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac',
+            flac: 'audio/flac', opus: 'audio/opus', pcm: 'audio/wav',
+        };
+        const type = typeMap[ext] || blob.type || 'application/octet-stream';
+        const typedBlob = new Blob([blob], { type });
+        const url = URL.createObjectURL(typedBlob);
+        blobUrls.push(url);
+        return url;
+    }
 
     // Elements
     const fileInfo = element.querySelector('#audio-file-info');
@@ -196,6 +214,7 @@ export function initAudioTasksPage(element, nui) {
             const metadata = await getAssetMetadata(lastAssetId);
             const blob = await downloadAsset(lastAssetId, `audio-${options.format || 'output'}.${options.format || 'mp3'}`);
             lastBlob = blob;
+            revokeBlobUrls();
 
             showResult(resultSection, resultContent, `
                 <div style="margin-bottom: 1rem;">
@@ -205,7 +224,7 @@ export function initAudioTasksPage(element, nui) {
                     <strong>Options:</strong> ${JSON.stringify(options)}
                 </div>
                 ${metadata ? `<details><summary>Metadata</summary><pre style="font-size: 0.8rem; overflow-x: auto;">${JSON.stringify(metadata, null, 2)}</pre></details>` : ''}
-                <audio controls src="${URL.createObjectURL(blob)}" style="width: 100%; margin-top: 1rem;"></audio>
+                <audio controls preload="metadata" src="${createTypedBlobUrl(blob, options.format || 'mp3')}" style="width: 100%; margin-top: 1rem;"></audio>
             `);
             downloadBtn.style.display = '';
         } catch (e) {
@@ -286,7 +305,7 @@ export function initAudioTasksPage(element, nui) {
     downloadBtn?.addEventListener('nui-click', () => {
         if (lastBlob) {
             const a = document.createElement('a');
-            a.href = URL.createObjectURL(lastBlob);
+            a.href = createTypedBlobUrl(lastBlob, opts.format || 'mp3');
             a.download = `audio-output.mp3`;
             a.click();
         }

@@ -12,6 +12,24 @@ export function initImageTasksPage(element, nui) {
     let selectedFile = null;
     let lastAssetId = null;
     let lastBlob = null;
+    const blobUrls = [];
+
+    function revokeBlobUrls() {
+        blobUrls.forEach(url => URL.revokeObjectURL(url));
+        blobUrls.length = 0;
+    }
+
+    function createTypedBlobUrl(blob, ext) {
+        const typeMap = {
+            jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+            webp: 'image/webp', avif: 'image/avif',
+        };
+        const type = typeMap[ext] || blob.type || 'application/octet-stream';
+        const typedBlob = new Blob([blob], { type });
+        const url = URL.createObjectURL(typedBlob);
+        blobUrls.push(url);
+        return url;
+    }
 
     // Elements
     const fileInfo = element.querySelector('#image-file-info');
@@ -157,6 +175,7 @@ export function initImageTasksPage(element, nui) {
             const hasCrop = options.crop && options.crop.type;
             const cropAssetIds = metadata?.metadata?.cropAssetIds || (hasCrop ? [lastAssetId] : null);
 
+            revokeBlobUrls();
             let resultHtml;
             if (cropAssetIds && cropAssetIds.length > 0) {
                 const blobs = await Promise.all(cropAssetIds.map(id => downloadAsset(id, `crop-${id}.${options.format || 'jpg'}`)));
@@ -173,19 +192,18 @@ export function initImageTasksPage(element, nui) {
                     </div>
                     <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.5rem;">
                         ${blobs.map((blob, i) => {
-                            const url = URL.createObjectURL(blob);
+                            const url = createTypedBlobUrl(blob, options.format || 'jpg');
                             return `<div style="text-align: center;">
                                 <img src="${url}" style="max-width: 100%; max-height: 300px; border-radius: 4px; border: 1px solid var(--nui-border);" />
                                 <div style="font-size: 0.75rem; color: var(--nui-text-muted); margin-top: 0.25rem;">${hasCrop && options.crop.type === 'grid' ? `Cell ${i}` : `Crop ${i + 1}`} — ${formatFileSize(blob.size)}</div>
                             </div>`;
                         }).join('')}
                     </div>
-                    ${metadata ? `<details style="margin-top: 1rem;"><summary>Metadata</summary><pre style="font-size: 0.8rem; overflow-x: auto;">${JSON.stringify(metadata, null, 2)}</pre></details>` : ''}
                 `;
             } else {
                 const blob = await downloadAsset(lastAssetId, `image-${options.format || 'output'}.${options.format || 'jpg'}`);
                 lastBlob = blob;
-                const url = URL.createObjectURL(blob);
+                const url = createTypedBlobUrl(blob, options.format || 'jpg');
                 resultHtml = `
                     <div style="margin-bottom: 1rem;">
                         <strong>Asset ID:</strong> ${lastAssetId}<br>

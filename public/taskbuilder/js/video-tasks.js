@@ -12,6 +12,29 @@ export function initVideoTasksPage(element, nui) {
     let selectedFile = null;
     let lastAssetId = null;
     let lastBlob = null;
+    const blobUrls = [];
+
+    function revokeBlobUrls() {
+        blobUrls.forEach(url => URL.revokeObjectURL(url));
+        blobUrls.length = 0;
+    }
+
+    function createTypedBlobUrl(blob, ext) {
+        const typeMap = {
+            mp4: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime',
+            avi: 'video/x-msvideo', ts: 'video/mp2t', flv: 'video/x-flv', '3gp': 'video/3gpp',
+            ogv: 'video/ogg', wmv: 'video/x-ms-wmv',
+            mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac',
+            flac: 'audio/flac', opus: 'audio/opus',
+            jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+            webp: 'image/webp', avif: 'image/avif',
+        };
+        const type = typeMap[ext] || blob.type || 'application/octet-stream';
+        const typedBlob = new Blob([blob], { type });
+        const url = URL.createObjectURL(typedBlob);
+        blobUrls.push(url);
+        return url;
+    }
 
     // Elements
     const fileInfo = element.querySelector('#video-file-info');
@@ -39,6 +62,13 @@ export function initVideoTasksPage(element, nui) {
     const heightInput = element.querySelector('#video-transcode-height');
     const filtersTextarea = element.querySelector('#video-transcode-filters textarea');
     const recommendedDiv = element.querySelector('#video-transcode-recommended');
+
+    // CLI
+    const cliCommandTextarea = element.querySelector('#video-cli-command textarea');
+    const cliFormatSelect = element.querySelector('#video-cli-format');
+    const cliPreview = element.querySelector('#video-cli-preview');
+    const cliPresetSelect = element.querySelector('#video-cli-preset-select');
+    const cliLoadPresetBtn = element.querySelector('#video-cli-load-preset-btn');
 
     let activeModeTab = 0;
 
@@ -73,6 +103,16 @@ export function initVideoTasksPage(element, nui) {
     kfFpsSlider?.addEventListener('input', () => { kfFpsValue.textContent = kfFpsSlider.value; });
     kfMaxDimSlider?.addEventListener('input', () => { kfMaxDimValue.textContent = kfMaxDimSlider.value; });
     crfSlider?.addEventListener('input', () => { crfValue.textContent = crfSlider.value; });
+
+    // CLI events
+    cliCommandTextarea?.addEventListener('input', updateCliPreview);
+    cliLoadPresetBtn?.addEventListener('nui-click', () => {
+        const preset = cliPresetSelect.getValue?.() || cliPresetSelect.value;
+        if (preset) {
+            cliCommandTextarea.value = preset;
+            updateCliPreview();
+        }
+    });
 
     // Mode tab tracking
     modeTabs?.addEventListener('nui-tab-change', (e) => {
@@ -207,9 +247,10 @@ export function initVideoTasksPage(element, nui) {
             const metadata = await getAssetMetadata(lastAssetId);
             const ext = options.mode === 'extract_audio' ? (options.format || 'mp3') :
                         options.mode === 'extract_keyframes' ? 'jpg' :
-                        (containerSelect?.value || 'mp4');
+                        options.output_format || 'mp4';
             const blob = await downloadAsset(lastAssetId, `video-${options.mode || 'output'}.${ext}`);
             lastBlob = blob;
+            revokeBlobUrls();
 
             let resultHtml = `
                 <div style="margin-bottom: 1rem;">
@@ -222,9 +263,9 @@ export function initVideoTasksPage(element, nui) {
             `;
 
             if (options.mode === 'extract_audio') {
-                resultHtml += `<audio controls src="${URL.createObjectURL(blob)}" style="width: 100%; margin-top: 1rem;"></audio>`;
-            } else if (options.mode === 'transcode' && ext === 'mp4') {
-                resultHtml += `<video controls src="${URL.createObjectURL(blob)}" style="width: 100%; max-height: 400px; margin-top: 1rem;"></video>`;
+                resultHtml += `<audio controls preload="metadata" src="${createTypedBlobUrl(blob, ext)}" style="width: 100%; margin-top: 1rem;"></audio>`;
+            } else if ((options.mode === 'transcode' || options.mode === 'cli') && (ext === 'mp4' || ext === 'webm' || ext === 'mov')) {
+                resultHtml += `<video controls preload="metadata" src="${createTypedBlobUrl(blob, ext)}" style="width: 100%; max-height: 400px; margin-top: 1rem;"></video>`;
             }
 
             if (metadata) {
@@ -304,15 +345,17 @@ export function initVideoTasksPage(element, nui) {
     // Download
     downloadBtn?.addEventListener('nui-click', () => {
         if (lastBlob) {
+            const opts = getOptions();
+            const ext = opts.output_format || opts.format || 'mp4';
             const a = document.createElement('a');
-            a.href = URL.createObjectURL(lastBlob);
-            a.download = `video-output.mp4`;
+            a.href = createTypedBlobUrl(lastBlob, ext);
+            a.download = `video-output.${ext}`;
             a.click();
         }
     });
 
     function getOptions() {
-        const modes = ['extract_audio', 'extract_keyframes', 'transcode'];
+        const modes = ['extract_audio', 'extract_keyframes', 'transcode', 'cli'];
         const mode = modes[activeModeTab] || 'extract_audio';
 
         const options = { mode };
@@ -341,9 +384,197 @@ export function initVideoTasksPage(element, nui) {
             if (widthInput.value) options.width = parseInt(widthInput.value);
             if (heightInput.value) options.height = parseInt(heightInput.value);
             if (filtersTextarea.value) options.filters = filtersTextarea.value;
+        } else if (mode === 'cli') {
+            const cont = cliFormatSelect.getValue?.() || cliFormatSelect.value;
+            if (cont) options.output_format = cont;
+            const cli = cliCommandTextarea.value.trim();
+            if (cli) {
+                const parsed = parseCliToNVideo(cli);
+                options.video_codec = parsed.videoCodec;
+                options.audio_codec = parsed.audioCodec;
+                options.preset = parsed.preset;
+                options.crf = parsed.crf;
+                options.width = parsed.width;
+                options.height = parsed.height;
+                options.fps = parsed.fps;
+                options.filters = parsed.filters;
+                if (parsed.videoOptions) options.videoOptions = parsed.videoOptions;
+                if (parsed.audioOptions) options.audioOptions = parsed.audioOptions;
+                if (parsed.noAudio) options.no_audio = true;
+                if (parsed.noVideo) options.no_video = true;
+            }
         }
 
         return options;
+    }
+
+    function parseCliToNVideo(cli) {
+        const result = {
+            videoCodec: null, audioCodec: null, preset: null, crf: null,
+            width: null, height: null, fps: null, filters: null,
+            videoOptions: null, audioOptions: null, noAudio: false, noVideo: false,
+        };
+        if (!cli) return result;
+
+        // Normalize: split by spaces but handle quoted strings
+        const tokens = cli.match(/(?:"[^"]*"|'[^']*'|\S+)/g) || [];
+        const args = tokens.map(t => t.replace(/^["']|["']$/g, ''));
+
+        for (let i = 0; i < args.length; i++) {
+            const flag = args[i];
+            const next = args[i + 1];
+            const hasNext = next !== undefined && !next.startsWith('-');
+
+            switch (flag) {
+                case '-c:v':
+                case '-vcodec':
+                case '-codec:v':
+                    if (hasNext) { result.videoCodec = next; i++; }
+                    break;
+                case '-c:a':
+                case '-acodec':
+                case '-codec:a':
+                    if (hasNext) { result.audioCodec = next; i++; }
+                    break;
+                case '-preset':
+                case '-preset:v':
+                    if (hasNext) { result.preset = next; i++; }
+                    break;
+                case '-crf':
+                case '-crf:v':
+                    if (hasNext) { result.crf = parseInt(next); i++; }
+                    break;
+                case '-qp':
+                case '-qp:v':
+                case '-cq':
+                case '-cq:v':
+                    if (hasNext) {
+                        if (!result.crf) result.crf = parseInt(next);
+                        (result.videoOptions ||= {})[flag.replace(/^-|:v$/g, '')] = next;
+                        i++;
+                    }
+                    break;
+                case '-b:v':
+                case '-vb':
+                case '-video_bitrate':
+                    if (hasNext) {
+                        const val = next.replace(/k$/i, '000').replace(/m$/i, '000000');
+                        (result.videoOptions ||= {}).bitrate = val;
+                        i++;
+                    }
+                    break;
+                case '-b:a':
+                case '-ab':
+                case '-audio_bitrate':
+                    if (hasNext) {
+                        const val = next.replace(/k$/i, '000').replace(/m$/i, '000000');
+                        (result.audioOptions ||= {}).bitrate = val;
+                        i++;
+                    }
+                    break;
+                case '-ar':
+                    if (hasNext) {
+                        (result.audioOptions ||= {}).sampleRate = next;
+                        i++;
+                    }
+                    break;
+                case '-ac':
+                    if (hasNext) {
+                        (result.audioOptions ||= {}).channels = next;
+                        i++;
+                    }
+                    break;
+                case '-r':
+                case '-fps':
+                    if (hasNext) { result.fps = parseFloat(next); i++; }
+                    break;
+                case '-s':
+                case '-video_size':
+                    if (hasNext) {
+                        const [w, h] = next.split(/[x:]/);
+                        if (w && h) { result.width = parseInt(w); result.height = parseInt(h); }
+                        i++;
+                    }
+                    break;
+                case '-vf':
+                case '-filter:v':
+                    if (hasNext) { result.filters = next; i++; }
+                    break;
+                case '-af':
+                case '-filter:a':
+                    if (hasNext) {
+                        (result.audioOptions ||= {}).filters = next;
+                        i++;
+                    }
+                    break;
+                case '-pix_fmt':
+                case '-pix_fmt:v':
+                    if (hasNext) {
+                        (result.videoOptions ||= {}).pixelFormat = next;
+                        i++;
+                    }
+                    break;
+                case '-g':
+                    if (hasNext) {
+                        (result.videoOptions ||= {}).g = next;
+                        i++;
+                    }
+                    break;
+                case '-threads':
+                    if (hasNext) {
+                        (result.videoOptions ||= {}).threads = next;
+                        i++;
+                    }
+                    break;
+                case '-an':
+                    result.noAudio = true;
+                    break;
+                case '-vn':
+                    result.noVideo = true;
+                    break;
+                case '-itsoffset':
+                    if (hasNext) { i++; } // skip for now
+                    break;
+                default:
+                    // Handle arbitrary codec-specific options like -rc, -tune, -cpu-used, -row-mt, -tiles
+                    if (flag.startsWith('-') && hasNext) {
+                        const optName = flag.replace(/^-+/, '').replace(/:v$/, '');
+                        const isVideo = flag.endsWith(':v');
+                        const isAudio = flag.endsWith(':a');
+                        if (isVideo || (!isAudio && !result.audioCodec)) {
+                            (result.videoOptions ||= {})[optName] = next;
+                        } else if (isAudio) {
+                            (result.audioOptions ||= {})[optName] = next;
+                        } else {
+                            // Default to video options for unknown flags
+                            (result.videoOptions ||= {})[optName] = next;
+                        }
+                        i++;
+                    }
+                    break;
+            }
+        }
+
+        return result;
+    }
+
+    function updateCliPreview() {
+        const cli = cliCommandTextarea.value.trim();
+        const parsed = parseCliToNVideo(cli);
+        const nvideo = {};
+        if (parsed.videoCodec) nvideo.video = { codec: parsed.videoCodec };
+        if (parsed.audioCodec) nvideo.audio = { codec: parsed.audioCodec };
+        if (parsed.preset) (nvideo.video ||= {}).preset = parsed.preset;
+        if (parsed.crf !== null) (nvideo.video ||= {}).crf = parsed.crf;
+        if (parsed.width) (nvideo.video ||= {}).width = parsed.width;
+        if (parsed.height) (nvideo.video ||= {}).height = parsed.height;
+        if (parsed.fps) (nvideo.video ||= {}).fps = parsed.fps;
+        if (parsed.filters) (nvideo.video ||= {}).filters = parsed.filters;
+        if (parsed.videoOptions) (nvideo.video ||= {}).options = parsed.videoOptions;
+        if (parsed.audioOptions) (nvideo.audio ||= {}).options = parsed.audioOptions;
+        if (parsed.noAudio) nvideo.audio = null;
+        if (parsed.noVideo) nvideo.video = null;
+        cliPreview.textContent = JSON.stringify(nvideo, null, 2);
     }
 
     function populateVideoOptions(caps) {
