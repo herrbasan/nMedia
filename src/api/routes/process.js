@@ -7,7 +7,7 @@ import logger from '../../utils/logger.js';
 import config from '../../config/config.js';
 
 const VALID_PROCESSORS = ['image', 'audio', 'video'];
-const VALID_VIDEO_MODES = ['extract_audio', 'extract_keyframes', 'transcode'];
+const VALID_VIDEO_MODES = ['extract_audio', 'extract_keyframes', 'transcode', 'cli'];
 
 /**
  * POST /v1/process

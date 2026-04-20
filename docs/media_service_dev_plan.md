@@ -19,6 +19,7 @@ The **Media Processing Service (MPS)** is a standalone microservice built on **N
 ### Core Platform
 - **Node.js 18+**: HTTP server, orchestration, task queue, messaging
 - **Native HTTP**: Built-in `http` module with custom Router (no Express)
+- **Child Processes**: Built-in `child_process.fork` for worker isolation (process mode)
 - **Worker Threads**: Built-in `worker_threads` for parallel processing (thread mode)
 - **Custom Multipart Parser**: Minimal implementation retained for legacy endpoints only
 
@@ -72,7 +73,14 @@ The following endpoints are retained for backward compatibility but are **deprec
 
 Processing runs in configurable modes via `workers.mode`:
 
-**Thread Mode** (`"thread"` - default and recommended):
+**Process Mode** (`"process"` - default and recommended):
+- Each task spawns a Node.js `child_process.fork`
+- nVideo runs in child process, main event loop stays free
+- Maximum isolation — native module panics kill only the child process
+- Other workers continue processing unaffected
+- Worker bootstrap: `src/tasks/TaskWorker.js`
+
+**Thread Mode** (`"thread"`):
 - Each task spawns a Node.js `worker_thread`
 - nVideo runs in worker, main event loop stays free
 - True parallelism bounded by `maxConcurrentTasks`

@@ -140,44 +140,38 @@ export function initVideoTasksPage(element, nui) {
         }
 
         probeBtn.setLoading(true);
-        try {
-            let formData;
-            if (selectedFile) {
-                formData = new FormData();
-                formData.append('file', selectedFile);
-            } else {
-                formData = new FormData();
-                formData.append('input_path', path);
-            }
-
-            const response = await fetch('http://localhost:3501/v1/video/probe', {
-                method: 'POST',
-                body: formData,
-            });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const data = await response.json();
-
-            const meta = data.metadata || data;
-            probeResult.style.display = '';
-            probeResult.innerHTML = `
-                <div><strong>Format:</strong> ${meta.format || 'N/A'}</div>
-                <div><strong>Duration:</strong> ${formatDuration(meta.duration)}</div>
-                <div><strong>Bitrate:</strong> ${meta.bitrate ? formatFileSize(meta.bitrate / 8) + '/s' : 'N/A'}</div>
-                ${meta.video ? `
-                <div style="margin-top: 0.5rem; border-top: 1px solid var(--nui-border); padding-top: 0.5rem;">
-                    <strong>Video:</strong> ${meta.video.codec} ${meta.video.width}x${meta.video.height} @ ${meta.video.fps?.toFixed(2) || '?'} fps
-                </div>` : ''}
-                ${meta.audio ? `
-                <div style="margin-top: 0.5rem; border-top: 1px solid var(--nui-border); padding-top: 0.5rem;">
-                    <strong>Audio:</strong> ${meta.audio.codec} ${meta.audio.sampleRate || '?'} Hz, ${meta.audio.channels || '?'} ch
-                </div>` : ''}
-            `;
-        } catch (e) {
-            probeResult.style.display = '';
-            probeResult.innerHTML = `<span style="color: var(--nui-danger);">Probe failed: ${e.message}</span>`;
-        } finally {
-            probeBtn.setLoading(false);
+        let formData;
+        if (selectedFile) {
+            formData = new FormData();
+            formData.append('file', selectedFile);
+        } else {
+            formData = new FormData();
+            formData.append('input_path', path);
         }
+
+        const response = await fetch('http://localhost:3501/v1/video/probe', {
+            method: 'POST',
+            body: formData,
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+
+        const meta = data.metadata || data;
+        probeResult.style.display = '';
+        probeResult.innerHTML = `
+            <div><strong>Format:</strong> ${meta.format || 'N/A'}</div>
+            <div><strong>Duration:</strong> ${formatDuration(meta.duration)}</div>
+            <div><strong>Bitrate:</strong> ${meta.bitrate ? formatFileSize(meta.bitrate / 8) + '/s' : 'N/A'}</div>
+            ${meta.video ? `
+            <div style="margin-top: 0.5rem; border-top: 1px solid var(--nui-border); padding-top: 0.5rem;">
+                <strong>Video:</strong> ${meta.video.codec} ${meta.video.width}x${meta.video.height} @ ${meta.video.fps?.toFixed(2) || '?'} fps
+            </div>` : ''}
+            ${meta.audio ? `
+            <div style="margin-top: 0.5rem; border-top: 1px solid var(--nui-border); padding-top: 0.5rem;">
+                <strong>Audio:</strong> ${meta.audio.codec} ${meta.audio.sampleRate || '?'} Hz, ${meta.audio.channels || '?'} ch
+            </div>` : ''}
+        `;
+        probeBtn.setLoading(false);
     });
 
     // Presets
@@ -233,53 +227,47 @@ export function initVideoTasksPage(element, nui) {
         hideResult(resultSection);
         showProgress(progressSection, progressBar, progressStatus, progressLog, 0, 'Starting...');
 
-        try {
-            const result = await runTask(
-                selectedFile, inputPath?.value, 'video', options, transportMode,
-                (data) => showProgress(progressSection, progressBar, progressStatus, progressLog, data.percent || 0, data.message || 'Processing...'),
-                (data) => { lastAssetId = data.assetId; },
-                (data) => { throw new Error(data.error || 'Processing failed'); }
-            );
+        const result = await runTask(
+            selectedFile, inputPath?.value, 'video', options, transportMode,
+            (data) => showProgress(progressSection, progressBar, progressStatus, progressLog, data.percent || 0, data.message || 'Processing...'),
+            (data) => { lastAssetId = data.assetId; },
+            (data) => { throw new Error(data.error || 'Processing failed'); }
+        );
 
-            hideProgress(progressSection);
-            const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+        hideProgress(progressSection);
+        const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
 
-            const metadata = await getAssetMetadata(lastAssetId);
-            const ext = options.mode === 'extract_audio' ? (options.format || 'mp3') :
-                        options.mode === 'extract_keyframes' ? 'jpg' :
-                        options.output_format || 'mp4';
-            const blob = await downloadAsset(lastAssetId, `video-${options.mode || 'output'}.${ext}`);
-            lastBlob = blob;
-            revokeBlobUrls();
+        const metadata = await getAssetMetadata(lastAssetId);
+        const ext = options.mode === 'extract_audio' ? (options.format || 'mp3') :
+                    options.mode === 'extract_keyframes' ? 'jpg' :
+                    options.output_format || 'mp4';
+        const blob = await downloadAsset(lastAssetId, `video-${options.mode || 'output'}.${ext}`);
+        lastBlob = blob;
+        revokeBlobUrls();
 
-            let resultHtml = `
-                <div style="margin-bottom: 1rem;">
-                    <strong>Asset ID:</strong> ${lastAssetId}<br>
-                    <strong>Mode:</strong> ${options.mode}<br>
-                    <strong>Processing Time:</strong> ${elapsed}s<br>
-                    <strong>Output Size:</strong> ${formatFileSize(blob.size)}<br>
-                    <strong>Options:</strong> ${JSON.stringify(options)}
-                </div>
-            `;
+        let resultHtml = `
+            <div style="margin-bottom: 1rem;">
+                <strong>Asset ID:</strong> ${lastAssetId}<br>
+                <strong>Mode:</strong> ${options.mode}<br>
+                <strong>Processing Time:</strong> ${elapsed}s<br>
+                <strong>Output Size:</strong> ${formatFileSize(blob.size)}<br>
+                <strong>Options:</strong> ${JSON.stringify(options)}
+            </div>
+        `;
 
-            if (options.mode === 'extract_audio') {
-                resultHtml += `<audio controls preload="metadata" src="${createTypedBlobUrl(blob, ext)}" style="width: 100%; margin-top: 1rem;"></audio>`;
-            } else if ((options.mode === 'transcode' || options.mode === 'cli') && (ext === 'mp4' || ext === 'webm' || ext === 'mov')) {
-                resultHtml += `<video controls preload="metadata" src="${createTypedBlobUrl(blob, ext)}" style="width: 100%; max-height: 400px; margin-top: 1rem;"></video>`;
-            }
-
-            if (metadata) {
-                resultHtml += `<details style="margin-top: 1rem;"><summary>Metadata</summary><pre style="font-size: 0.8rem; overflow-x: auto;">${JSON.stringify(metadata, null, 2)}</pre></details>`;
-            }
-
-            showResult(resultSection, resultContent, resultHtml);
-            downloadBtn.style.display = '';
-        } catch (e) {
-            hideProgress(progressSection);
-            showResult(resultSection, resultContent, `<p style="color: var(--nui-danger);">Error: ${e.message}</p>`);
-        } finally {
-            runTaskBtn.setLoading(false);
+        if (options.mode === 'extract_audio') {
+            resultHtml += `<audio controls preload="metadata" src="${createTypedBlobUrl(blob, ext)}" style="width: 100%; margin-top: 1rem;"></audio>`;
+        } else if ((options.mode === 'transcode' || options.mode === 'cli') && (ext === 'mp4' || ext === 'webm' || ext === 'mov')) {
+            resultHtml += `<video controls preload="metadata" src="${createTypedBlobUrl(blob, ext)}" style="width: 100%; max-height: 400px; margin-top: 1rem;"></video>`;
         }
+
+        if (metadata) {
+            resultHtml += `<details style="margin-top: 1rem;"><summary>Metadata</summary><pre style="font-size: 0.8rem; overflow-x: auto;">${JSON.stringify(metadata, null, 2)}</pre></details>`;
+        }
+
+        showResult(resultSection, resultContent, resultHtml);
+        downloadBtn.style.display = '';
+        runTaskBtn.setLoading(false);
     });
 
     // Run all modes batch
@@ -444,11 +432,19 @@ export function initVideoTasksPage(element, nui) {
                     break;
                 case '-preset':
                 case '-preset:v':
-                    if (hasNext) { result.preset = next; i++; }
+                    if (hasNext) {
+                        result.preset = next;
+                        (result.videoOptions ||= {})['preset'] = next;
+                        i++;
+                    }
                     break;
                 case '-crf':
                 case '-crf:v':
-                    if (hasNext) { result.crf = parseInt(next); i++; }
+                    if (hasNext) {
+                        result.crf = parseInt(next);
+                        (result.videoOptions ||= {})['crf'] = next;
+                        i++;
+                    }
                     break;
                 case '-qp':
                 case '-qp:v':

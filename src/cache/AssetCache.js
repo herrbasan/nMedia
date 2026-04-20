@@ -199,16 +199,26 @@ export class AssetCache {
     const storagePath = this._getStoragePath(id, extension);
     const now = Date.now();
 
-    fs.copyFileSync(sourcePath, storagePath);
-    const stat = fs.statSync(storagePath);
-
-    const asset = {
-      id,
-      type,
-      mimeType,
-      size: stat.size,
-      storagePath,
-      createdAt: now,
+      // Use rename for true zero-copy flow locally. Fallback to copy if cross-device.
+      try {
+        fs.renameSync(sourcePath, storagePath);
+      } catch (err) {
+        if (err.code === 'EXDEV') {
+          fs.copyFileSync(sourcePath, storagePath);
+          fs.unlinkSync(sourcePath);
+        } else {
+          throw err;
+        }
+      }
+      const stat = fs.statSync(storagePath);
+      
+      const asset = {
+        id,
+        type,
+        mimeType,
+        size: stat.size,
+        storagePath,
+        createdAt: now,
       expiresAt: now + this.ttl,
       retrievedAt: null,
       lastAccessed: now,

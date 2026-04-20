@@ -29,7 +29,7 @@
   },
   "workers": {
     "maxConcurrentTasks": 4,
-    "mode": "thread"
+    "mode": "process"
   },
   "messaging": {
     "transport": "sse"

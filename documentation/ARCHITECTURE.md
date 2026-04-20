@@ -108,10 +108,10 @@ Uses nVideo for all video operations.
 
 | Platform | Video Decode | Video Encode |
 |----------|--------------|--------------|
-| `nvenc` | h264_cuvid, hevc_cuvid | h264_nvenc, hevc_nvenc |
+| `nvenc` | h264_cuvid, hevc_cuvid | h264_nvenc, hevc_nvenc, av1_nvenc |
 | `vaapi` | h264_vaapi, hevc_vaapi | h264_vaapi, hevc_vaapi |
-| `qsv` | h264_qsv, hevc_qsv | h264_qsv, hevc_qsv |
-| `cpu` | software | libx264, libx265 |
+| `qsv` | h264_qsv, hevc_qsv | h264_qsv, hevc_qsv, av1_qsv |
+| `cpu` | software | libx264, libx265, libsvtav1 |
 
 ### ProgressReporter
 
@@ -174,10 +174,11 @@ Configured via `workers.mode` in `config.json`:
 
 | Mode | Behavior | Use Case |
 |------|----------|----------|
-| `thread` (default) | Each task spawns a `worker_thread` | True parallelism, protects main process from native panics |
-| `queue` | Tasks run on main thread, serialized | Memory-constrained, simpler |
+| `process` (default) | Each task spawns a `child_process.fork` | Maximum isolation — native crashes don't affect main process or other workers |
+| `thread` | Each task spawns a `worker_thread` | True parallelism, lighter than process mode |
+| `queue` | Tasks run on main thread, serialized by queue | Memory-constrained, simpler debugging |
 
-**Thread mode is strongly recommended** for audio/video. A native module panic in nVideo will kill only the worker thread, not the main process.
+**Process mode is strongly recommended** for audio/video. A native module panic in nVideo will kill only the child process, not the main process or other workers.
 
 ## Data Flow
 

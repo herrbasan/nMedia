@@ -10,7 +10,7 @@ Media Service is a stateless microservice designed to preprocess multimedia file
 - **Image Processing**: Native NAPI bindings (nImage with libraw/libheif/ImageMagick)
 - **Audio/Video Processing**: Native NAPI bindings (nVideo with direct FFmpeg library integration)
 - **Transport**: HTTP for control, SSE/WebSocket for progress, raw binary for uploads
-- **Worker Isolation**: Thread mode (`worker_threads`) is the default for native module safety
+- **Worker Isolation**: Process mode (`child_process.fork`) is the default for maximum native module safety
 
 ### Processing Modes
 
@@ -35,6 +35,14 @@ Media Service is a stateless microservice designed to preprocess multimedia file
 │  │ HTTP Server │  │ Task Queue  │  │   Messaging Layer       │  │
 │  │  (native)   │  │ (In-Memory) │  │ (SSE + WebSocket)       │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────────┐  │
+│  │              Worker Pool (Process/Thread/Queue)             │  │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │  │
+│  │  │ Worker 1    │  │ Worker 2    │  │ Worker N            │  │  │
+│  │  │ (isolated)  │  │ (isolated)  │  │ (isolated)          │  │  │
+│  │  └─────────────┘  └─────────────┘  └─────────────────────┘  │  │
+│  └─────────────────────────────────────────────────────────────┘  │
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────────────────────────────────────────────────────┐  │
 │  │                    Native Processors                        │  │
@@ -65,6 +73,17 @@ Media Service is a stateless microservice designed to preprocess multimedia file
 - Automatic GPU codec selection based on `config.media.gpu.platform`
 - Audio filter graphs (`abuffer → aformat → asetnsamples → abuffersink`)
 - Native progress callbacks (percent, speed, bitrate, ETA, frame counts)
+
+### 2.3 STRICT: Native Boundary & Memory Contract
+
+The entire justification for building an N-API native module (`nVideo`/`nImage`) is highly tuned performance, zero-copy architecture, and an extremely low memory footprint. If the Node.js wrappers or task system perform heavy memory copies, V8 GC pressure, or inefficient buffer transfers, **the native module is defeated** and we would be better off spawning the `ffmpeg` CLI binary. 
+
+To that end, the architecture strictly enforces the following boundaries:
+
+1. **Total JS Buffer Avoidance:** Video or Audio payloads—whether fully transcoded output, raw frames, or binary file strings—must **never** touch the JavaScript heap (`Buffer`, Base64 strings, etc.).
+2. **IPC is strictly for Orchestration:** The `process.send()` channel between the main process and worker threads is solely for lightweight JSON orchestration (metadata, job states, config flags, and file paths). Passing any form of media binary payload across threads/IPC is strictly forbidden (to prevent `Exit 134` OOM crashes).
+3. **C++ Disk Exclusivity:** The native layer interfaces with the disk. JavaScript provides the `inputFilePath` and the `outputFilePath`. All heavy lifting—reading, decoding, filtering, encoding, and writing the final file—is exclusively the responsibility of C++.
+4. **Hardware Acceleration Context:** The Javascript layer is allowed to request hardware encoders (e.g. `av1_nvenc`), but it is explicitly forbidden from forcing low-level C++ contexts (`hwaccel: cuda`) unless explicitly modeled in the payload schema. 
 
 ---
 
@@ -358,10 +377,11 @@ Configured via `workers.mode` in `config.json`:
 
 | Mode | Behavior | Use Case |
 |------|----------|----------|
-| `thread` (default) | Each task spawns a `worker_thread` | True parallelism, protects main process from native panics |
-| `queue` | Tasks run on main thread, serialized | Simpler, lower memory footprint |
+| `process` (default) | Each task spawns a `child_process.fork` | Maximum isolation — native crashes don't affect main process or other workers |
+| `thread` | Each task spawns a `worker_thread` | True parallelism, lighter than process mode |
+| `queue` | Tasks run on main thread, serialized by queue | Memory-constrained, simpler debugging |
 
-**Thread mode is the default and strongly recommended** for audio/video processing. A native module panic in nVideo will kill only the worker thread, not the main process.
+**Process mode is strongly recommended** for audio/video. A native module panic in nVideo will kill only the child process, not the main process or other workers.
 
 ### Job Store & Persistence
 

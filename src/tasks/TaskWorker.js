@@ -5,10 +5,22 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { createRequire } from 'module';
 
-// Guard: only run when executed as a worker_thread
-if (!parentPort) {
-  throw new Error('TaskWorker.js must be run as a worker_thread');
+const isThreadWorker = !!parentPort;
+const isProcessWorker = !!process.send;
+
+// Guard: only run when executed as a worker
+if (!isThreadWorker && !isProcessWorker) {
+  throw new Error('TaskWorker.js must be run as a worker_thread or child_process');
 }
+
+const sendMessage = (msg) => {
+  if (isThreadWorker) parentPort.postMessage(msg);
+  else if (isProcessWorker) process.send(msg);
+};
+
+const messageEmitter = isThreadWorker ? parentPort : process;
+
+const taskId = isThreadWorker ? workerData?.taskId : process.env.TASK_ID;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -87,28 +99,28 @@ async function processAudio(inputSource, options, cacheDir) {
         },
         cache: false,
         onProgress: (p) => {
-          parentPort.postMessage({ type: 'progress', percent: p.percent, message: `Processing: ${Math.round(p.percent)}%` });
+          sendMessage({ type: 'progress', percent: p.percent, message: `Processing: ${Math.round(p.percent)}%` });
         },
         onComplete: (result) => resolve(result),
         onError: (error) => reject(new Error(error.message || 'nVideo transcode failed')),
       });
     });
 
-    const outputBuffer = fs.readFileSync(outputPath);
-    return { buffer: outputBuffer, metadata: { outputSize: outputBuffer.length, sampleRate, channels: channelCount, format, mimeType: MIME_TYPES[format] } };
-  } finally {
-    if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
-    try { fs.unlinkSync(outputPath); } catch {}
+      const stat = fs.statSync(outputPath);
+      return { 
+        filePath: outputPath,
+        metadata: { outputSize: stat.size, sampleRate, channels: channelCount, format, mimeType: MIME_TYPES[format] } 
+      };
+    } finally {
+      if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }    }
   }
-}
-
 async function processVideo(inputSource, options, cacheDir) {
   const { mode = 'extract_audio', fps = 1, max_dimension = 1024, format = 'mp3' } = options;
   const inputPath = resolveInputPath(inputSource, cacheDir);
   const shouldCleanupInput = inputSource.type === 'buffer';
 
   if (mode === 'extract_audio') {
-    parentPort.postMessage({ type: 'progress', percent: 5, message: 'Mode: extract_audio' });
+    sendMessage({ type: 'progress', percent: 5, message: 'Mode: extract_audio' });
     const outputId = crypto.randomUUID();
     const outputPath = path.join(cacheDir, `output-${outputId}.${format}`);
 
@@ -119,23 +131,22 @@ async function processVideo(inputSource, options, cacheDir) {
           bitrate: 128000,
           cache: false,
           onProgress: (p) => {
-            parentPort.postMessage({ type: 'progress', percent: p.percent, message: `Extracting audio: ${Math.round(p.percent)}%` });
+            sendMessage({ type: 'progress', percent: p.percent, message: `Extracting audio: ${Math.round(p.percent)}%` });
           },
           onComplete: (result) => resolve(result),
           onError: (error) => reject(new Error(error.message || 'nVideo extractAudio failed')),
         });
       });
 
-      const outputBuffer = fs.readFileSync(outputPath);
-      return { buffer: outputBuffer, metadata: { outputSize: outputBuffer.length, mode, format, mimeType: MIME_TYPES[format] } };
-    } finally {
-      if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
-      try { fs.unlinkSync(outputPath); } catch {}
+        const stat = fs.statSync(outputPath);
+        return { filePath: outputPath, metadata: { outputSize: stat.size, mode, format, mimeType: MIME_TYPES[format] } };
+      } finally {
+        if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
+      }
     }
-  }
 
-  if (mode === 'transcode' || mode === 'cli') {
-    parentPort.postMessage({ type: 'progress', percent: 5, message: 'Mode: transcode' });
+    if (mode === 'transcode' || mode === 'cli') {
+    sendMessage({ type: 'progress', percent: 5, message: 'Mode: transcode' });
     const output_format = options.output_format || 'mp4';
     const video_codec = options.video_codec || 'libx264';
     const audio_codec = options.audio_codec || 'aac';
@@ -147,10 +158,10 @@ async function processVideo(inputSource, options, cacheDir) {
     const output_fps = options.fps ? parseInt(options.fps) : undefined;
     const isNvenc = video_codec && video_codec.includes('nvenc');
 
-    parentPort.postMessage({ type: 'progress', percent: 10, message: 'Probing source video' });
+    sendMessage({ type: 'progress', percent: 10, message: 'Probing source video' });
     const probeResult = nVideo.probe(inputPath);
     const videoStream = probeResult.streams.find(s => s.type === 'video');
-    parentPort.postMessage({ type: 'progress', percent: 15, message: `Source: ${videoStream?.width}x${videoStream?.height}, ${probeResult.format.duration?.toFixed(1) || '?'}s` });
+    sendMessage({ type: 'progress', percent: 15, message: `Source: ${videoStream?.width}x${videoStream?.height}, ${probeResult.format.duration?.toFixed(1) || '?'}s` });
     const audioStream = probeResult.streams.find(s => s.type === 'audio');
     const sourceWidth = videoStream?.width;
     const sourceHeight = videoStream?.height;
@@ -188,8 +199,6 @@ async function processVideo(inputSource, options, cacheDir) {
       };
       if (options.hwaccel) {
         transcodeOpts.hwaccel = options.hwaccel;
-      } else if (video_codec && video_codec.includes('nvenc')) {
-        transcodeOpts.hwaccel = 'cuda';
       }
       if (!options.no_video) {
         transcodeOpts.video = { codec: video_codec };
@@ -223,35 +232,34 @@ async function processVideo(inputSource, options, cacheDir) {
       await new Promise((resolve, reject) => {
         transcodeOpts.onProgress = (p) => {
           const msg = p.speed ? `Transcoding: ${Math.round(p.percent)}% (${p.speed.toFixed(1)}x)` : `Transcoding: ${Math.round(p.percent)}%`;
-          parentPort.postMessage({ type: 'progress', percent: p.percent, message: msg });
+          sendMessage({ type: 'progress', percent: p.percent, message: msg });
         };
         transcodeOpts.onComplete = (result) => resolve(result);
         transcodeOpts.onError = (error) => reject(new Error(error.message || 'nVideo transcode failed'));
         nVideo.transcode(inputPath, outputPath, transcodeOpts);
       });
 
-      const outputBuffer = fs.readFileSync(outputPath);
-      return {
-        buffer: outputBuffer,
-        metadata: {
-          outputSize: outputBuffer.length,
-          mode: 'transcode',
-          output_format,
-          video_codec,
-          audio_codec,
-          dimensions: targetWidth && targetHeight ? `${targetWidth}x${targetHeight}` : `${sourceWidth}x${sourceHeight}`,
-          duration: sourceDuration,
-          mimeType: { mp4: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime', avi: 'video/x-msvideo', ts: 'video/mp2t', flv: 'video/x-flv', '3gp': 'video/3gpp', ogv: 'video/ogg', wmv: 'video/x-ms-wmv' }[output_format] || 'video/mp4',
-        },
-      };
-    } finally {
-      if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
-      try { fs.unlinkSync(outputPath); } catch {}
+        const stat = fs.statSync(outputPath);
+        return {
+          filePath: outputPath,
+          metadata: {
+            outputSize: stat.size,
+            mode: 'transcode',
+            output_format,
+            video_codec,
+            audio_codec,
+            dimensions: targetWidth && targetHeight ? `${targetWidth}x${targetHeight}` : `${sourceWidth}x${sourceHeight}`,
+            duration: sourceDuration,
+            mimeType: { mp4: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime', avi: 'video/x-msvideo', ts: 'video/mp2t', flv: 'video/x-flv', '3gp': 'video/3gpp', ogv: 'video/ogg', wmv: 'video/x-ms-wmv' }[output_format] || 'video/mp4',
+          },
+        };
+      } finally {
+        if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
+      }
     }
-  }
 
   // extract_keyframes
-  parentPort.postMessage({ type: 'progress', percent: 5, message: 'Mode: extract_keyframes' });
+  sendMessage({ type: 'progress', percent: 5, message: 'Mode: extract_keyframes' });
   try {
     const probeResult = nVideo.probe(inputPath);
     const videoStream = probeResult.streams.find(s => s.type === 'video');
@@ -267,7 +275,7 @@ async function processVideo(inputSource, options, cacheDir) {
 
     for (let i = 0; i < frameCount; i++) {
       const timestamp = i * frameInterval;
-      parentPort.postMessage({ type: 'progress', percent: (i / frameCount) * 100, message: `Extracted ${i + 1}/${frameCount} frames` });
+      sendMessage({ type: 'progress', percent: (i / frameCount) * 100, message: `Extracted ${i + 1}/${frameCount} frames` });
 
       const thumb = nVideo.thumbnail(inputPath, { timestamp, width: frameWidth });
       const jpegBuffer = await img({ data: thumb.data, width: thumb.width, height: thumb.height, channels: 3 }).jpeg({ quality: 85 }).toBuffer();
@@ -309,7 +317,7 @@ async function processImage(inputSource, options) {
   const img = await initNImage();
 
   const meta = await img(inputBuffer).metadata();
-  parentPort.postMessage({ type: 'progress', percent: 15, message: `Detected: ${meta.format || 'unknown'}, ${meta.width}x${meta.height}` });
+  sendMessage({ type: 'progress', percent: 15, message: `Detected: ${meta.format || 'unknown'}, ${meta.width}x${meta.height}` });
 
   if (crop) {
     return processImageCrop(img, inputBuffer, meta, crop, format, quality);
@@ -318,17 +326,17 @@ async function processImage(inputSource, options) {
   let pipeline = img(inputBuffer);
 
   if (rotate) {
-    parentPort.postMessage({ type: 'progress', percent: 20, message: `Rotating ${rotate}\u00B0` });
+    sendMessage({ type: 'progress', percent: 20, message: `Rotating ${rotate}\u00B0` });
     pipeline = pipeline.rotate(rotate);
   }
 
   if (flip) {
-    parentPort.postMessage({ type: 'progress', percent: 22, message: 'Flipping vertically' });
+    sendMessage({ type: 'progress', percent: 22, message: 'Flipping vertically' });
     pipeline = pipeline.flip();
   }
 
   if (flop) {
-    parentPort.postMessage({ type: 'progress', percent: 24, message: 'Flopping horizontally' });
+    sendMessage({ type: 'progress', percent: 24, message: 'Flopping horizontally' });
     pipeline = pipeline.flop();
   }
 
@@ -343,26 +351,26 @@ async function processImage(inputSource, options) {
       width = Math.round((width / height) * max_dimension);
       height = max_dimension;
     }
-    parentPort.postMessage({ type: 'progress', percent: 30, message: `Resizing to ${width}x${height}` });
+    sendMessage({ type: 'progress', percent: 30, message: `Resizing to ${width}x${height}` });
     pipeline = pipeline.resize(width, height, { fit: 'inside' });
   }
 
   if (grayscale) {
-    parentPort.postMessage({ type: 'progress', percent: 40, message: 'Converting to grayscale' });
+    sendMessage({ type: 'progress', percent: 40, message: 'Converting to grayscale' });
     pipeline = pipeline.grayscale();
   }
 
   if (normalize) {
-    parentPort.postMessage({ type: 'progress', percent: 45, message: 'Normalizing contrast' });
+    sendMessage({ type: 'progress', percent: 45, message: 'Normalizing contrast' });
     pipeline = pipeline.normalize();
   }
 
   if (blur > 0) {
-    parentPort.postMessage({ type: 'progress', percent: 48, message: `Applying blur (sigma: ${blur})` });
+    sendMessage({ type: 'progress', percent: 48, message: `Applying blur (sigma: ${blur})` });
     pipeline = pipeline.blur(blur);
   }
 
-  parentPort.postMessage({ type: 'progress', percent: 70, message: `Converting to ${format}` });
+  sendMessage({ type: 'progress', percent: 70, message: `Converting to ${format}` });
 
   if (format === 'jpeg') pipeline = pipeline.jpeg({ quality });
   else if (format === 'png') pipeline = pipeline.png({ quality });
@@ -370,7 +378,7 @@ async function processImage(inputSource, options) {
   else if (format === 'avif') pipeline = pipeline.avif({ quality });
   else if (format === 'gif') pipeline = pipeline.png({ quality });
 
-  parentPort.postMessage({ type: 'progress', percent: 85, message: 'Encoding output' });
+  sendMessage({ type: 'progress', percent: 85, message: 'Encoding output' });
   const outputBuffer = await pipeline.toBuffer();
   const outputMeta = await img(outputBuffer).metadata();
 
@@ -392,7 +400,7 @@ async function processImageCrop(img, inputBuffer, meta, cropOptions, format, qua
     const cropWidth = rightPx - leftPx;
     const cropHeight = bottomPx - topPx;
 
-    parentPort.postMessage({ type: 'progress', percent: 30, message: `Cropping region ${leftPx}x${topPx} to ${cropWidth}x${cropHeight}` });
+    sendMessage({ type: 'progress', percent: 30, message: `Cropping region ${leftPx}x${topPx} to ${cropWidth}x${cropHeight}` });
     const cropped = await img(inputBuffer).extract({ left: leftPx, top: topPx, width: cropWidth, height: cropHeight }).toBuffer();
     results.push({ buffer: cropped, width: cropWidth, height: cropHeight });
   } else if (type === 'center') {
@@ -403,7 +411,7 @@ async function processImageCrop(img, inputBuffer, meta, cropOptions, format, qua
     const leftPx = Math.round((meta.width - cropWidth) / 2);
     const topPx = Math.round((meta.height - cropHeight) / 2);
 
-    parentPort.postMessage({ type: 'progress', percent: 30, message: `Center cropping to ${cropWidth}x${cropHeight}` });
+    sendMessage({ type: 'progress', percent: 30, message: `Center cropping to ${cropWidth}x${cropHeight}` });
     const cropped = await img(inputBuffer).extract({ left: leftPx, top: topPx, width: cropWidth, height: cropHeight }).toBuffer();
     results.push({ buffer: cropped, width: cropWidth, height: cropHeight });
   } else if (type === 'grid') {
@@ -413,7 +421,7 @@ async function processImageCrop(img, inputBuffer, meta, cropOptions, format, qua
     const cellHeight = Math.floor(meta.height / rows);
     const allCells = cells.length > 0 ? cells : Array.from({ length: cols * rows }, (_, i) => i);
 
-    parentPort.postMessage({ type: 'progress', percent: 20, message: `Grid ${cols}x${rows}, extracting ${allCells.length} cells` });
+    sendMessage({ type: 'progress', percent: 20, message: `Grid ${cols}x${rows}, extracting ${allCells.length} cells` });
 
     for (let i = 0; i < allCells.length; i++) {
       const cellIndex = allCells[i];
@@ -422,14 +430,14 @@ async function processImageCrop(img, inputBuffer, meta, cropOptions, format, qua
       const leftPx = col * cellWidth;
       const topPx = row * cellHeight;
 
-      parentPort.postMessage({ type: 'progress', percent: 20 + Math.round((i / allCells.length) * 60), message: `Extracting cell ${cellIndex}` });
+      sendMessage({ type: 'progress', percent: 20 + Math.round((i / allCells.length) * 60), message: `Extracting cell ${cellIndex}` });
 
       const cropped = await img(inputBuffer).extract({ left: leftPx, top: topPx, width: cellWidth, height: cellHeight }).toBuffer();
       results.push({ buffer: cropped, width: cellWidth, height: cellHeight, cellIndex });
     }
   }
 
-  parentPort.postMessage({ type: 'progress', percent: 85, message: 'Encoding output' });
+  sendMessage({ type: 'progress', percent: 85, message: 'Encoding output' });
 
   const encoded = await Promise.all(results.map(async (r) => {
     let pipeline = img(r.buffer);
@@ -442,7 +450,7 @@ async function processImageCrop(img, inputBuffer, meta, cropOptions, format, qua
     return { buffer: encodedBuffer, width: r.width, height: r.height, cellIndex: r.cellIndex };
   }));
 
-  parentPort.postMessage({ type: 'progress', percent: 100, message: 'Complete' });
+  sendMessage({ type: 'progress', percent: 100, message: 'Complete' });
 
   const allBuffers = encoded.map(e => e.buffer);
   const firstBuffer = allBuffers[0] || Buffer.alloc(0);
@@ -469,17 +477,17 @@ async function processImageCrop(img, inputBuffer, meta, cropOptions, format, qua
 }
 
 // Message handler
-parentPort.on('message', async (message) => {
+messageEmitter.on('message', async (message) => {
   const { type, mediaType, inputSource, options, cacheDir } = message;
 
   if (type !== 'process') {
-    parentPort.postMessage({ type: 'error', message: `Unknown message type: ${type}` });
+    sendMessage({ type: 'error', message: `Unknown message type: ${type}` });
     return;
   }
 
   const mode = options?.mode || 'extract_audio';
   const inputDesc = inputSource?.type === 'path' ? inputSource.value : '<buffer>';
-  parentPort.postMessage({ type: 'progress', percent: 0, message: `TaskWorker started: ${mediaType} / ${mode}` });
+  sendMessage({ type: 'progress', percent: 0, message: `TaskWorker started: ${mediaType} / ${mode}` });
 
   try {
     let result;
@@ -493,9 +501,9 @@ parentPort.on('message', async (message) => {
       throw new Error(`Unknown media type: ${mediaType}`);
     }
 
-    parentPort.postMessage({ type: 'progress', percent: 99, message: 'Finalizing result' });
-    parentPort.postMessage({ type: 'complete', result });
+    sendMessage({ type: 'progress', percent: 99, message: 'Finalizing result' });
+    sendMessage({ type: 'complete', result });
   } catch (error) {
-    parentPort.postMessage({ type: 'error', message: error.message });
+    sendMessage({ type: 'error', message: error.message });
   }
 });

@@ -617,10 +617,11 @@ All configuration is managed via `config.json` in the project root.
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `media.maxFileSizeMb` | 500 | Maximum upload size (MB) |
+| `media.maxFileSizeMb` | 9007199254740991 (essentially unlimited) | Maximum upload size (MB) |
 | `media.allowedInputPaths` | [] | Allowed paths for input_path processing |
-| `workers.mode` | thread | Worker execution mode: thread or queue |
-| `workers.concurrency` | 2 | Max concurrent workers |
+| `media.allowedOutputPaths` | [] | Allowed paths for output file writing |
+| `workers.mode` | process | Worker execution mode: process, thread, or queue |
+| `workers.maxConcurrentTasks` | 4 | Max concurrent workers |
 | `cache.ttl` | 3600 | Asset cache TTL (seconds) |
 | `cache.maxSizeMb` | 10240 | Max cache size (MB) |
 

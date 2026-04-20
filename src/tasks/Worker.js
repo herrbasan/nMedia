@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Worker } from 'worker_threads';
+import { fork } from 'child_process';
 import PipelineExecutor from '../pipeline/PipelineExecutor.js';
 import { assetCache } from '../cache/AssetCache.js';
 import { jobStore, JobStatus } from '../jobs/JobStore.js';
@@ -13,16 +14,17 @@ const __dirname = path.dirname(__filename);
 
 /**
  * Worker that processes tasks from the queue.
- * Supports two modes:
+ * Supports three modes:
  * - queue: Runs on main thread via PipelineExecutor
- * - thread: Spawns a worker_thread for true parallelism
+ * - thread: Spawns a worker_thread for parallelism
+ * - process: Spawns a child_process.fork for max isolation against native crashes
  */
 export class TaskWorker {
   /**
    * @param {string} id - Worker ID
    * @param {import('./TaskQueue.js').TaskQueue} queue - Task queue
    * @param {import('./TaskStore.js').TaskStore} store - Task store
-   * @param {string} mode - 'queue' or 'thread'
+   * @param {string} mode - 'queue', 'thread', or 'process'
    */
   constructor(id, queue, store, mode = 'queue') {
     this.id = id;
@@ -56,17 +58,25 @@ export class TaskWorker {
       if (this.mode === 'thread') {
         logger.info('Worker spawning thread', { taskId: task.id });
         result = await this._processInThread(task, inputSource);
-      } else {
-        logger.info('Worker running queue mode', { taskId: task.id });
-        result = await this._processInQueue(task, inputSource);
+        } else if (this.mode === 'process') {
+          logger.info('Worker spawning child process', { taskId: task.id });
+          result = await this._processInChildProcess(task, inputSource);
       }
 
       // Store result in asset cache
-      if (result?.buffer) {
-        const mimeType = result.metadata?.mimeType || this._getMimeType(task.type);
-        logger.info('Worker caching result', { taskId: task.id, bufferSize: result.buffer.length, mimeType });
-        const asset = assetCache.store(task.type, result.buffer, mimeType, result.metadata);
-        task.setAssetId(asset.id);
+        if (result?.buffer || result?.filePath) {
+          const mimeType = result.metadata?.mimeType || this._getMimeType(task.type);
+          let asset;
+          
+          if (result.filePath) {
+            logger.info('Worker caching result from file', { taskId: task.id, filePath: result.filePath, mimeType });
+            asset = assetCache.storeFile(task.type, result.filePath, mimeType, result.metadata);
+            try { fs.unlinkSync(result.filePath); } catch {} // Cleanup temp file after renaming/copying
+          } else {
+            logger.info('Worker caching result', { taskId: task.id, bufferSize: result.buffer.length, mimeType });
+            asset = assetCache.store(task.type, result.buffer, mimeType, result.metadata);
+          }
+
         logger.info('Worker result cached', { taskId: task.id, assetId: asset.id });
 
         // Cache extra buffers (multi-crop results)
@@ -231,6 +241,49 @@ export class TaskWorker {
 
       // Send task to worker
       this.nativeWorker.postMessage({
+        type: 'process',
+        mediaType: task.type,
+        inputSource: inputSource,
+        options: task.options,
+        cacheDir: config.cacheDir,
+      });
+    });
+  }
+
+  /**
+   * Process task in child_process.fork (process mode) for maximum isolation
+   */
+  async _processInChildProcess(task, inputSource) {
+    return new Promise((resolve, reject) => {
+      const taskWorkerPath = path.join(__dirname, 'TaskWorker.js');
+
+      this.nativeWorker = fork(taskWorkerPath, [], {
+        env: { ...process.env, WORKER_MODE: 'process', TASK_ID: task.id },
+        serialization: 'advanced' // allow Buffer optimization
+      });
+
+      this.nativeWorker.on('message', (message) => {
+        if (message.type === 'progress') {
+          task.updateProgress(message.percent, message.message || String(message.metadata || ''));
+        } else if (message.type === 'complete') {
+          resolve(message.result);
+        } else if (message.type === 'error') {
+          reject(new Error(message.message));
+        }
+      });
+
+      this.nativeWorker.on('error', (err) => {
+        reject(err);
+      });
+
+      this.nativeWorker.on('exit', (code, signal) => {
+        if (code !== 0) {
+          const detail = signal ? `signal ${signal}` : `exit code ${code}`;
+          reject(new Error(`Native execution crashed or stopped with ${detail}`));
+        }
+      });
+
+      this.nativeWorker.send({
         type: 'process',
         mediaType: task.type,
         inputSource: inputSource,

@@ -266,7 +266,7 @@ All other flags are passed through as-is to the encoder via `av_opt_set()`.
 | `nvenc` | h264_cuvid, hevc_cuvid | h264_nvenc, hevc_nvenc, av1_nvenc | NVIDIA GTX 600+ |
 | `qsv` | h264_qsv, hevc_qsv | h264_qsv, hevc_qsv, av1_qsv | Intel 4th Gen+ |
 | `vaapi` | h264_vaapi, hevc_vaapi | h264_vaapi, hevc_vaapi | Linux + Intel/AMD GPU |
-| `cpu` | software | libx264, libx265 | None |
+| `cpu` | software | libx264, libx265, libsvtav1 | None |
 
 ### Video Codecs
 
@@ -293,13 +293,30 @@ All other flags are passed through as-is to the encoder via `av_opt_set()`.
 
 ## Worker Execution
 
-### Thread Mode (Default)
+### Process Mode (Default)
+
+Each processing task spawns a `child_process.fork`. This provides:
+
+- **Maximum isolation** - A crash in nVideo kills only the child process, not the main process or other workers
+- **True parallelism** - Multiple files processed simultaneously
+- **Memory isolation** - Each process has its own memory space
+
+**Worker lifecycle:**
+1. Main process queues task
+2. Child process spawned via `child_process.fork`
+3. Native module loaded via `createRequire(import.meta.url)`
+4. Processing executes (nVideo.transcode, nImage pipeline, etc.)
+5. Result returned to main process via IPC
+6. Child process exits
+
+### Thread Mode
 
 Each processing task spawns a `worker_thread`. This provides:
 
 - **True parallelism** - Multiple files processed simultaneously
 - **Native panic isolation** - A crash in nVideo kills only the worker thread, not the main process
 - **Memory isolation** - Each worker has its own memory space
+- **Lighter weight** than process mode
 
 **Worker lifecycle:**
 1. Main process queues task
@@ -313,7 +330,7 @@ Each processing task spawns a `worker_thread`. This provides:
 
 Tasks run on the main thread, serialized by the queue.
 
-- **Lower memory footprint** - No thread overhead
+- **Lower memory footprint** - No thread/process overhead
 - **Simpler debugging** - Single thread
 - **Not recommended for audio/video** - Native panics crash the entire process
 

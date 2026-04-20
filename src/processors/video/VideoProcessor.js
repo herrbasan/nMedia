@@ -30,6 +30,113 @@ const AUDIO_CODECS = { mp3: 'libmp3lame', wav: 'pcm_s16le', ogg: 'libvorbis', m4
 const VIDEO_CODECS = { libx264: 'libx264', libx265: 'libx265', h264_nvenc: 'h264_nvenc', hevc_nvenc: 'hevc_nvenc', h264_vaapi: 'h264_vaapi', hevc_vaapi: 'hevc_vaapi', h264_qsv: 'h264_qsv', hevc_qsv: 'hevc_qsv' };
 const CONTAINER_MAP = { mp4: 'mp4', webm: 'webm', mkv: 'mkv', mov: 'mov' };
 
+// NVENC preset mapping: x264-style presets to NVENC p1-p7
+const NVENC_PRESET_MAP = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', faster: 'p4', fast: 'p5', medium: 'p4', slow: 'p6', slower: 'p7', veryslow: 'p7' };
+
+  // Strict allowlist for arbitrary CLI options (FFmpeg Recipe Converter)
+  // Options not in these lists are dropped to prevent native access violations
+  const CODEC_ALLOWLIST = {
+    // Base NVENC options supported across all NVENC codecs (h264, hevc, av1)
+    nvenc_base: ['cq', 'rc', 'preset', 'tune', 'pix_fmt', 'profile', 'maxrate', 'bufsize', 'g', 'b', 'bitrate'],
+    // Options specific to h264_nvenc & hevc_nvenc (NOT supported on av1_nvenc)
+    nvenc_advanced: ['spatial_aq', 'temporal_aq', 'multipass'],
+    // Intel QuickSync
+    qsv_base: ['crf', 'preset', 'profile', 'maxrate', 'bufsize', 'g', 'b', 'bitrate'],
+    // AMD/Intel VAAPI
+    vaapi_base: ['qp', 'rc_mode', 'profile', 'maxrate', 'bufsize', 'g', 'b', 'bitrate'],
+    // Software Encoders
+    cpu_base: ['crf', 'preset', 'tune', 'profile', 'level', 'maxrate', 'bufsize', 'g', 'b', 'bitrate', 'pix_fmt']
+  };
+
+/**
+ *
+ * @param {string} videoCodec - The video codec name (e.g., 'h264_nvenc', 'libx264')
+ * @param {Object} options - Raw options from the request
+ * @returns {Object} The videoOptions map to pass to nVideo
+ */
+function buildVideoOptions(videoCodec, options) {
+  const isNvenc = videoCodec && videoCodec.includes('nvenc');
+  const isQsv = videoCodec && videoCodec.includes('qsv');
+  const isVaapi = videoCodec && videoCodec.includes('vaapi');
+
+  // Start with any existing videoOptions from CLI, or empty
+  const videoOptions = { ...(options.videoOptions || {}) };
+
+  // Map well-known options into the options map with codec-specific naming
+  if (options.crf !== undefined && options.crf !== null) {
+    if (isNvenc) {
+      // NVENC uses 'cq' instead of 'crf'
+      if (videoOptions.crf !== undefined) delete videoOptions.crf; // Remove any stale 'crf'
+      videoOptions.cq = String(options.crf);
+    } else {
+      videoOptions.crf = String(options.crf);
+    }
+  }
+
+  if (options.preset) {
+    if (isNvenc) {
+      // NVENC uses p1-p7 presets
+      videoOptions.preset = NVENC_PRESET_MAP[options.preset] || options.preset;
+    } else if (isQsv) {
+      // QSV uses same preset names as x264
+      videoOptions.preset = options.preset;
+    } else if (isVaapi) {
+      // VAAPI uses preset names directly
+      videoOptions.preset = options.preset;
+    } else {
+      // CPU encoders (libx264, libx265, etc.) use preset directly
+      videoOptions.preset = options.preset;
+    }
+  }
+
+  // Copy other encoder-specific options if present
+  if (options.rc) videoOptions.rc = options.rc;
+  if (options.tune) videoOptions.tune = options.tune;
+
+    // Apply strict recipe constraints (filter out arbitrary unsupported CLI flags)
+    const filteredOptions = {};
+    let allowedKeys = [];
+
+    if (isNvenc) {
+      allowedKeys = [...CODEC_ALLOWLIST.nvenc_base];
+      // av1_nvenc crashes hard on these options
+      if (videoCodec !== 'av1_nvenc') {
+        allowedKeys = [...allowedKeys, ...CODEC_ALLOWLIST.nvenc_advanced];
+      }
+    } else if (isQsv) {
+      allowedKeys = [...CODEC_ALLOWLIST.qsv_base];
+    } else if (isVaapi) {
+      allowedKeys = [...CODEC_ALLOWLIST.vaapi_base];
+    } else {
+      allowedKeys = [...CODEC_ALLOWLIST.cpu_base];
+    }
+
+    for (const key in videoOptions) {
+      if (allowedKeys.includes(key)) {
+        filteredOptions[key] = String(videoOptions[key]);
+      } else {
+        console.warn(`[VideoProcessor] Dropping incompatible encoder option: ${key}=${videoOptions[key]} for codec ${videoCodec}`);
+      }
+    }
+
+    return filteredOptions;
+  }
+
+/**
+ * Build audio encoder options map.
+ * @returns {Object} The audioOptions map to pass to nVideo
+ */
+function buildAudioOptions(options) {
+  const audioOptions = { ...(options.audioOptions || {}) };
+
+  // Copy well-known audio options if present
+  if (options.audio_bitrate !== undefined) {
+    audioOptions.b = String(options.audio_bitrate);
+  }
+
+  return audioOptions;
+}
+
 class VideoProcessor extends Processor {
   constructor() {
     super('video');
@@ -308,39 +415,26 @@ class VideoProcessor extends Processor {
         transcodeOpts.hwaccel = 'cuda';
       }
       if (!options.no_video) {
-        const isNvenc = video_codec && video_codec.includes('nvenc');
         transcodeOpts.video = {
           codec: video_codec,
+          width: targetWidth || undefined,
+          height: targetHeight || undefined,
+          fps: fps || undefined,
+          options: buildVideoOptions(video_codec, options),
         };
-        if (isNvenc) {
-          const presetMap = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', faster: 'p4', fast: 'p5', medium: 'p4', slow: 'p6', slower: 'p7', veryslow: 'p7' };
-          transcodeOpts.video.preset = presetMap[preset] || preset;
-          transcodeOpts.video.cq = crf;
-        } else {
-          transcodeOpts.video.preset = preset;
-          transcodeOpts.video.crf = crf;
-        }
-        if (options.videoOptions) {
-          transcodeOpts.video.options = options.videoOptions;
-        }
-        if (targetWidth) transcodeOpts.video.width = targetWidth;
-        if (targetHeight) transcodeOpts.video.height = targetHeight;
-        if (fps) transcodeOpts.video.fps = fps;
       } else {
         transcodeOpts.video = null;
       }
 
-    if (audioStream && !options.no_audio) {
-      transcodeOpts.audio = {
-        codec: audio_codec,
-        bitrate: audio_bitrate,
-      };
-      if (options.audioOptions) {
-        transcodeOpts.audio.options = options.audioOptions;
+      if (audioStream && !options.no_audio) {
+        transcodeOpts.audio = {
+          codec: audio_codec,
+          bitrate: audio_bitrate,
+          options: buildAudioOptions(options),
+        };
+      } else if (options.no_audio) {
+        transcodeOpts.audio = null;
       }
-    } else if (options.no_audio) {
-      transcodeOpts.audio = null;
-    }
 
       await new Promise((resolve, reject) => {
         transcodeOpts.onProgress = (p) => {
@@ -431,38 +525,24 @@ class VideoProcessor extends Processor {
     } else if (video_codec && video_codec.includes('nvenc')) {
       transcodeOpts.hwaccel = 'cuda';
     }
-    if (!options.no_video) {
-      const isNvenc = video_codec && video_codec.includes('nvenc');
-      transcodeOpts.video = {
-        codec: video_codec,
-      };
-      if (isNvenc) {
-        // NVENC uses p1-p7 presets and cq (not crf)
-        const presetMap = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', faster: 'p4', fast: 'p5', medium: 'p4', slow: 'p6', slower: 'p7', veryslow: 'p7' };
-        transcodeOpts.video.preset = presetMap[preset] || preset;
-        transcodeOpts.video.cq = crf;
+      if (!options.no_video) {
+        transcodeOpts.video = {
+          codec: video_codec,
+          options: buildVideoOptions(video_codec, options),
+        };
+        if (targetWidth) transcodeOpts.video.width = targetWidth;
+        if (targetHeight) transcodeOpts.video.height = targetHeight;
+        if (fps) transcodeOpts.video.fps = fps;
       } else {
-        transcodeOpts.video.preset = preset;
-        transcodeOpts.video.crf = crf;
+        transcodeOpts.video = null;
       }
-      if (options.videoOptions) {
-        transcodeOpts.video.options = options.videoOptions;
-      }
-      if (targetWidth) transcodeOpts.video.width = targetWidth;
-      if (targetHeight) transcodeOpts.video.height = targetHeight;
-      if (fps) transcodeOpts.video.fps = fps;
-    } else {
-      transcodeOpts.video = null;
-    }
 
     if (audioStream && !options.no_audio) {
       transcodeOpts.audio = {
         codec: audio_codec,
         bitrate: audio_bitrate,
+        options: buildAudioOptions(options),
       };
-      if (options.audioOptions) {
-        transcodeOpts.audio.options = options.audioOptions;
-      }
     } else if (options.no_audio) {
       transcodeOpts.audio = null;
     }
@@ -732,25 +812,13 @@ class VideoProcessor extends Processor {
 
       // Build video options
       if (!options.no_video) {
-        const isNvenc = video_codec && video_codec.includes('nvenc');
-        const videoOpts = {
+        transcodeOpts.video = {
           codec: video_codec,
+          options: buildVideoOptions(video_codec, options),
         };
-        if (isNvenc) {
-          const presetMap = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', faster: 'p4', fast: 'p5', medium: 'p4', slow: 'p6', slower: 'p7', veryslow: 'p7' };
-          videoOpts.preset = presetMap[preset] || preset;
-          videoOpts.cq = crf;
-        } else {
-          videoOpts.preset = preset;
-          videoOpts.crf = crf;
-        }
-        if (options.videoOptions) {
-          videoOpts.options = options.videoOptions;
-        }
-        if (targetWidth) videoOpts.width = targetWidth;
-        if (targetHeight) videoOpts.height = targetHeight;
-        if (fps) videoOpts.fps = fps;
-        transcodeOpts.video = videoOpts;
+        if (targetWidth) transcodeOpts.video.width = targetWidth;
+        if (targetHeight) transcodeOpts.video.height = targetHeight;
+        if (fps) transcodeOpts.video.fps = fps;
       } else {
         transcodeOpts.video = null;
       }
@@ -760,10 +828,8 @@ class VideoProcessor extends Processor {
         transcodeOpts.audio = {
           codec: audio_codec,
           bitrate: audio_bitrate,
+          options: buildAudioOptions(options),
         };
-        if (options.audioOptions) {
-          transcodeOpts.audio.options = options.audioOptions;
-        }
       } else if (options.no_audio) {
         transcodeOpts.audio = null;
       }
