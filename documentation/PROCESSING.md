@@ -261,6 +261,14 @@ All other flags are passed through as-is to the encoder via `av_opt_set()`.
 
 ### Hardware Acceleration
 
+Hardware acceleration is **only applied when explicitly requested** via `options.hwaccel`. Auto-injection of `hwaccel: 'cuda'` for NVENC codecs was removed to prevent CUDA access violation segfaults. Users must explicitly specify `-hwaccel cuda` in CLI mode or set `hwaccel` in options.
+
+#### Zero-Copy GPU Acceleration Pipeline
+The data-flow logic in `src/tasks/TaskWorker.js` guarantees that `cli_command` and `hwaccel` overrides propagate to the underlying FFmpeg runner. This allows the construction of true 100% GPU-accelerated *zero-copy* pipelines where video frames remain strictly in VRAM for decoding, transforming (e.g., `-vf scale_cuda=format=p010le`), and encoding (e.g., `av1_nvenc`), bypassing the system CPU entirely.
+
+#### Disk-to-Disk Processing Exceptions
+When jobs utilize hardware acceleration and pipeline their outputs directly to disk without loading into software memory Buffers, `Worker.js` accurately forks the `assetCache` flow to ingest directly from `result.filePath` / `result.outputPath` instead. This prevents `length` null reference exceptions from bubbling up whenever in-memory `result.buffer`s are bypassed.
+
 | Platform | Video Decode | Video Encode | GPU Requirement |
 |----------|--------------|--------------|-----------------|
 | `nvenc` | h264_cuvid, hevc_cuvid | h264_nvenc, hevc_nvenc, av1_nvenc | NVIDIA GTX 600+ |
