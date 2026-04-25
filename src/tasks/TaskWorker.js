@@ -200,6 +200,13 @@ async function processVideo(inputSource, options, cacheDir) {
       if (options.hwaccel) {
         transcodeOpts.hwaccel = options.hwaccel;
       }
+      if (options.useNative !== undefined) {
+        transcodeOpts.useNative = options.useNative;
+      }
+      if (options.cli_command) {
+        transcodeOpts.cli_command = options.cli_command;
+      }
+
       if (!options.no_video) {
         transcodeOpts.video = { codec: video_codec };
         if (isNvenc) {

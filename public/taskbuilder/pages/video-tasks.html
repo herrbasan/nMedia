@@ -149,8 +149,17 @@
                     <nui-select id="video-transcode-acodec">
                         <select id="video-transcode-acodec-select"></select>
                     </nui-select>
-                </nui-input-group>
-                <div id="video-transcode-recommended" style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--nui-text-muted);"></div>
+                </nui-input-group>                  <nui-input-group>
+                      <label>Hardware Acceleration</label>
+                      <nui-select id="video-transcode-hwaccel">
+                          <select id="video-transcode-hwaccel-select">
+                              <option value="" selected>Auto / None</option>
+                              <option value="cuda">CUDA (NVIDIA)</option>
+                              <option value="vaapi">VAAPI (Intel/AMD)</option>
+                              <option value="qsv">Intel QuickSync (QSV)</option>
+                          </select>
+                      </nui-select>
+                  </nui-input-group>                <div id="video-transcode-recommended" style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--nui-text-muted);"></div>
                 <nui-input-group>
                     <label>Quality (CRF)</label>
                     <nui-slider>
@@ -181,8 +190,13 @@
                 <nui-input-group>
                     <label>Height (px, optional)</label>
                     <nui-input><input type="number" id="video-transcode-height" value="" min="64" max="4096" step="2" placeholder="Source height"></nui-input>
-                </nui-input-group>
-                <details style="margin-top: 0.5rem;">
+                </nui-input-group>                  <nui-input-group>
+                      <label>Engine</label>
+                      <label style="display: flex; gap: 0.5rem; align-items: center; cursor: pointer; color: var(--nui-text-primary);">
+                          <input type="checkbox" id="video-transcode-usenative">
+                          Use Native (C++) Pipeline (Bypass Node subprocess)
+                      </label>
+                  </nui-input-group>                <details style="margin-top: 0.5rem;">
                     <summary style="cursor: pointer; color: var(--nui-text-secondary);">Custom FFmpeg Filters</summary>
                     <nui-textarea id="video-transcode-filters" label="Video filter graph" fullwidth style="margin-top: 0.5rem;">
                         <textarea rows="2" placeholder="scale=1280:720,fps=30"></textarea>
@@ -229,7 +243,7 @@
                                 <option value="-c:v h264_nvenc -preset llhq -rc constqp -qp 21 -c:a aac -b:a 128k">NVENC H264</option>
                                 <option value="-c:v hevc_nvenc -preset hq">NVENC H265</option>
                                 <option value="-c:v av1_nvenc -tune:v hq -preset:v p7 -rc:v vbr -cq:v 23 -c:a aac">NVENC AV1</option>
-                                <option value="-hwaccel nvdec -c:v av1_nvenc -preset p7 -tune hq -rc vbr -cq 23 -pix_fmt p010le -multipass 2 -spatial_aq 1 -temporal_aq 1 -c:a aac">NVENC AV1 (Quality)</option>
+                                  <option value="-hwaccel cuda -c:v av1_nvenc -preset p7 -tune hq -rc vbr -cq 23 -vf scale_cuda=format=p010le -multipass 2 -spatial_aq 1 -temporal_aq 1 -c:a aac">NVENC AV1 (GPU Only 10-bit)</option>
                                 <option value="-c:v libvpx-vp9 -pix_fmt yuva420p -crf 30 -b:v 0 -c:a libopus -threads 12 -row-mt 1 -speed 4">WebM Fast (VP9)</option>
                                 <option value="-g 1 -c:v libvpx-vp9 -pix_fmt yuva420p -crf 30 -b:v 0 -an -threads 6">WebM All iFrame</option>
                                 <option value="-c:v libsvtav1 -crf 30">AV1 SVT</option>

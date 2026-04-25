@@ -64,15 +64,15 @@ export class TaskWorker {
       }
 
       // Store result in asset cache
-        if (result?.buffer || result?.filePath) {
+        if (result?.buffer || result?.filePath || result?.outputPath) {
           const mimeType = result.metadata?.mimeType || this._getMimeType(task.type);
           let asset;
           
-          if (result.filePath) {
-            logger.info('Worker caching result from file', { taskId: task.id, filePath: result.filePath, mimeType });
-            asset = assetCache.storeFile(task.type, result.filePath, mimeType, result.metadata);
-            try { fs.unlinkSync(result.filePath); } catch {} // Cleanup temp file after renaming/copying
-          } else {
+          const fileP = result.filePath || result.outputPath;
+          if (fileP) {
+            logger.info('Worker caching result from file', { taskId: task.id, filePath: fileP, mimeType });
+            asset = assetCache.storeFile(task.type, fileP, mimeType, result.metadata);
+          } else if (result.buffer) {
             logger.info('Worker caching result', { taskId: task.id, bufferSize: result.buffer.length, mimeType });
             asset = assetCache.store(task.type, result.buffer, mimeType, result.metadata);
           }
@@ -117,7 +117,15 @@ export class TaskWorker {
             }
           }
           fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-          fs.writeFileSync(outputPath, result.buffer);
+          if (result.filePath || result.outputPath) {
+            // assetCache moved/renamed the temp file into its storage.
+            // Retrieve asset path from cache directory
+            const ext = assetCache._getExtension(mimeType);
+            const assetPath = assetCache._getStoragePath(asset.id, ext);
+            fs.copyFileSync(assetPath, outputPath);
+          } else {
+            fs.writeFileSync(outputPath, result.buffer);
+          }
           logger.info('Task result written to output path', { taskId: task.id, outputPath });
         }
 

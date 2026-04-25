@@ -62,6 +62,8 @@ export function initVideoTasksPage(element, nui) {
     const heightInput = element.querySelector('#video-transcode-height');
     const filtersTextarea = element.querySelector('#video-transcode-filters textarea');
     const recommendedDiv = element.querySelector('#video-transcode-recommended');
+    const hwaccelSelect = element.querySelector('#video-transcode-hwaccel select');
+    const useNativeCheckbox = element.querySelector('#video-transcode-usenative');
 
     // CLI
     const cliCommandTextarea = element.querySelector('#video-cli-command textarea');
@@ -106,6 +108,9 @@ export function initVideoTasksPage(element, nui) {
 
     // CLI events
     cliCommandTextarea?.addEventListener('input', updateCliPreview);
+    hwaccelSelect?.addEventListener('change', updateCliPreview);
+    useNativeCheckbox?.addEventListener('change', updateCliPreview);
+    cliFormatSelect?.addEventListener('change', updateCliPreview);
     cliLoadPresetBtn?.addEventListener('nui-click', () => {
         const preset = cliPresetSelect.getValue?.() || cliPresetSelect.value;
         if (preset) {
@@ -370,225 +375,45 @@ export function initVideoTasksPage(element, nui) {
             options.crf = parseInt(crfSlider.value);
             if (presetSelect.value) options.preset = presetSelect.value;
             if (widthInput.value) options.width = parseInt(widthInput.value);
-            if (heightInput.value) options.height = parseInt(heightInput.value);
-            if (filtersTextarea.value) options.filters = filtersTextarea.value;
+            if (heightInput.value) options.height = parseInt(heightInput.value);              if (hwaccelSelect.value) options.hwaccel = hwaccelSelect.value;
+              if (useNativeCheckbox?.checked) options.useNative = true;            if (filtersTextarea.value) options.filters = filtersTextarea.value;
         } else if (mode === 'cli') {
             const cont = cliFormatSelect.getValue?.() || cliFormatSelect.value;
             if (cont) options.output_format = cont;
-            const cli = cliCommandTextarea.value.trim();
+            let cli = cliCommandTextarea.value.trim();
             if (cli) {
-                const parsed = parseCliToNVideo(cli);
-                options.video_codec = parsed.videoCodec;
-                options.audio_codec = parsed.audioCodec;
-                options.preset = parsed.preset;
-                options.crf = parsed.crf;
-                options.width = parsed.width;
-                options.height = parsed.height;
-                options.fps = parsed.fps;
-                options.filters = parsed.filters;
-                if (parsed.videoOptions) options.videoOptions = parsed.videoOptions;
-                if (parsed.audioOptions) options.audioOptions = parsed.audioOptions;
-                if (parsed.noAudio) options.no_audio = true;
-                if (parsed.noVideo) options.no_video = true;
-                if (parsed.hwaccel) options.hwaccel = parsed.hwaccel;
-                // Auto-infer CUDA hwaccel for nvenc codecs if not explicitly set
-                if (!options.hwaccel && parsed.videoCodec && parsed.videoCodec.includes('nvenc')) {
-                    options.hwaccel = 'cuda';
+                const hwMatch = cli.match(/-hwaccel\s+(\w+)/);
+                if (hwMatch) {
+                    options.hwaccel = hwMatch[1];
+                    cli = cli.replace(hwMatch[0], '').trim();
+                } else if (hwaccelSelect.value && !cli.includes('libx264') && !cli.includes('libx265') && !cli.includes('libsvtav1')) {
+                    options.hwaccel = hwaccelSelect.value;
                 }
+                if (useNativeCheckbox?.checked) options.useNative = true;
+                options.cli_command = cli;
             }
         }
 
         return options;
     }
 
-    function parseCliToNVideo(cli) {
-        const result = {
-                videoCodec: null, audioCodec: null, preset: null, crf: null,
-                width: null, height: null, fps: null, filters: null,
-                videoOptions: null, audioOptions: null, noAudio: false, noVideo: false,
-                hwaccel: null,
-            };
-        if (!cli) return result;
-
-        // Normalize: split by spaces but handle quoted strings
-        const tokens = cli.match(/(?:"[^"]*"|'[^']*'|\S+)/g) || [];
-        const args = tokens.map(t => t.replace(/^["']|["']$/g, ''));
-
-        for (let i = 0; i < args.length; i++) {
-            const flag = args[i];
-            const next = args[i + 1];
-            const hasNext = next !== undefined && !next.startsWith('-');
-
-            switch (flag) {
-                case '-c:v':
-                case '-vcodec':
-                case '-codec:v':
-                    if (hasNext) { result.videoCodec = next; i++; }
-                    break;
-                case '-c:a':
-                case '-acodec':
-                case '-codec:a':
-                    if (hasNext) { result.audioCodec = next; i++; }
-                    break;
-                case '-preset':
-                case '-preset:v':
-                    if (hasNext) {
-                        result.preset = next;
-                        (result.videoOptions ||= {})['preset'] = next;
-                        i++;
-                    }
-                    break;
-                case '-crf':
-                case '-crf:v':
-                    if (hasNext) {
-                        result.crf = parseInt(next);
-                        (result.videoOptions ||= {})['crf'] = next;
-                        i++;
-                    }
-                    break;
-                case '-qp':
-                case '-qp:v':
-                case '-cq':
-                case '-cq:v':
-                    if (hasNext) {
-                        if (!result.crf) result.crf = parseInt(next);
-                        (result.videoOptions ||= {})[flag.replace(/^-|:v$/g, '')] = next;
-                        i++;
-                    }
-                    break;
-                case '-b:v':
-                case '-vb':
-                case '-video_bitrate':
-                    if (hasNext) {
-                        const val = next.replace(/k$/i, '000').replace(/m$/i, '000000');
-                        (result.videoOptions ||= {})['b'] = val;
-                        i++;
-                    }
-                    break;
-                case '-b:a':
-                case '-ab':
-                case '-audio_bitrate':
-                    if (hasNext) {
-                        const val = next.replace(/k$/i, '000').replace(/m$/i, '000000');
-                        (result.audioOptions ||= {})['b'] = val;
-                        i++;
-                    }
-                    break;
-                case '-ar':
-                    if (hasNext) {
-                        (result.audioOptions ||= {})['sample_rate'] = next;
-                        i++;
-                    }
-                    break;
-                case '-ac':
-                    if (hasNext) {
-                        (result.audioOptions ||= {})['ch_layout'] = next;
-                        i++;
-                    }
-                    break;
-                case '-r':
-                case '-fps':
-                    if (hasNext) { result.fps = parseFloat(next); i++; }
-                    break;
-                case '-s':
-                case '-video_size':
-                    if (hasNext) {
-                        const [w, h] = next.split(/[x:]/);
-                        if (w && h) { result.width = parseInt(w); result.height = parseInt(h); }
-                        i++;
-                    }
-                    break;
-                case '-vf':
-                case '-filter:v':
-                    if (hasNext) { result.filters = next; i++; }
-                    break;
-                case '-af':
-                case '-filter:a':
-                    if (hasNext) {
-                        (result.audioOptions ||= {}).filters = next;
-                        i++;
-                    }
-                    break;
-                case '-pix_fmt':
-                case '-pix_fmt:v':
-                    if (hasNext) {
-                        (result.videoOptions ||= {})['pix_fmt'] = next;
-                        i++;
-                    }
-                    break;
-                case '-g':
-                    if (hasNext) {
-                        (result.videoOptions ||= {}).g = next;
-                        i++;
-                    }
-                    break;
-                case '-threads':
-                    if (hasNext) {
-                        (result.videoOptions ||= {}).threads = next;
-                        i++;
-                    }
-                    break;
-                case '-hwaccel':
-                    if (hasNext) {
-                        const map = { nvdec: 'cuda', cuda: 'cuda', qsv: 'qsv', vaapi: 'vaapi', d3d11va: 'd3d11va' };
-                        result.hwaccel = map[next] || next;
-                        i++;
-                    }
-                    break;
-                case '-an':
-                    result.noAudio = true;
-                    break;
-                case '-vn':
-                    result.noVideo = true;
-                    break;
-                case '-itsoffset':
-                    if (hasNext) { i++; } // skip for now
-                    break;
-                default:
-                    // Handle arbitrary codec-specific options like -rc, -tune, -cpu-used, -row-mt, -tiles
-                    if (flag.startsWith('-') && hasNext) {
-                        const optName = flag.replace(/^-+/, '').replace(/:v$/, '');
-                        const isVideo = flag.endsWith(':v');
-                        const isAudio = flag.endsWith(':a');
-                        if (isVideo || (!isAudio && !result.audioCodec)) {
-                            (result.videoOptions ||= {})[optName] = next;
-                        } else if (isAudio) {
-                            (result.audioOptions ||= {})[optName] = next;
-                        } else {
-                            // Default to video options for unknown flags
-                            (result.videoOptions ||= {})[optName] = next;
-                        }
-                        i++;
-                    }
-                    break;
-            }
-        }
-
-        return result;
-    }
-
     function updateCliPreview() {
-        const cli = cliCommandTextarea.value.trim();
-        const parsed = parseCliToNVideo(cli);
-        const nvideo = {};
-        if (parsed.videoCodec) nvideo.video = { codec: parsed.videoCodec };
-        if (parsed.audioCodec) nvideo.audio = { codec: parsed.audioCodec };
-        if (parsed.preset) (nvideo.video ||= {}).preset = parsed.preset;
-        if (parsed.crf !== null) (nvideo.video ||= {}).crf = parsed.crf;
-        if (parsed.width) (nvideo.video ||= {}).width = parsed.width;
-        if (parsed.height) (nvideo.video ||= {}).height = parsed.height;
-        if (parsed.fps) (nvideo.video ||= {}).fps = parsed.fps;
-        if (parsed.filters) (nvideo.video ||= {}).filters = parsed.filters;
-        if (parsed.videoOptions) (nvideo.video ||= {}).options = parsed.videoOptions;
-        if (parsed.audioOptions) (nvideo.audio ||= {}).options = parsed.audioOptions;
-        if (parsed.noAudio) nvideo.audio = null;
-        if (parsed.noVideo) nvideo.video = null;
-        if (parsed.hwaccel) nvideo.hwaccel = parsed.hwaccel;
-        // Show auto-inferred hwaccel
-        if (!parsed.hwaccel && parsed.videoCodec && parsed.videoCodec.includes('nvenc')) {
-            nvideo.hwaccel = 'cuda (auto-inferred)';
+        let cli = cliCommandTextarea.value.trim();
+        const payload = cli ? { mode: 'cli' } : {};
+        if (cli) {
+            const hwMatch = cli.match(/-hwaccel\s+(\w+)/);
+            if (hwMatch) {
+                payload.hwaccel = hwMatch[1];
+                cli = cli.replace(hwMatch[0], '').trim();
+            } else if (hwaccelSelect.value && !cli.includes('libx264') && !cli.includes('libx265') && !cli.includes('libsvtav1')) {
+                payload.hwaccel = hwaccelSelect.value;
+            }
+            if (useNativeCheckbox?.checked) payload.useNative = true;
+            payload.cli_command = cli;
         }
-        cliPreview.textContent = JSON.stringify(nvideo, null, 2);
+        const selectedFormat = cliFormatSelect.getValue?.() || cliFormatSelect.value;
+        if (selectedFormat && cli) payload.output_format = selectedFormat;
+        cliPreview.textContent = JSON.stringify(payload, null, 2);
     }
 
     function populateVideoOptions(caps) {
@@ -684,3 +509,6 @@ export function initVideoTasksPage(element, nui) {
         }
     }
 }
+
+
+

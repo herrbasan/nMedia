@@ -70,6 +70,7 @@ Test assets are located in `/tests/assets/`:
 - **Vanilla JS:** No TypeScript anywhere. Code must stay as close to the bare platform as possible for easy optimization and debugging. `.d.ts` files are generated strictly for LLM/editor context, not used at runtime.
 - **Zero Dependencies:** If we can build it ourselves using raw standard libraries, we build it. Avoid external third-party packages. Evaluate per-case if a dependency is truly necessary.
 - **Fail Fast, Always:** No defensive coding. No mock data. No fallback defaults. No silencing `try/catch`. No optional chaining (`?.`) for required values. Configuration must be explicit - missing required config must throw immediately at startup. When something breaks, let it crash and fix the root cause.
+- **Collaborative Development:** The human user is a partner, not just a reviewer. When facing architectural decisions, trade-offs, or uncertain paths, pause and ask for input. Explain the options clearly. The user's domain knowledge and preferences are valuable — include them in the loop. Avoid long silent stretches of trial-and-error; converse, don't just execute.
 
 ## Service Management
 - **Do Not Start/Restart Service:** Never start, restart, or stop the Media Service on your own. If the service needs to be started or restarted, ask the user to do it.
@@ -118,10 +119,10 @@ This project uses git submodules located in `/modules`. These are all **our own 
 **GPU Platforms:**
 | Platform | Video Decode | Video Encode |
 |----------|--------------|--------------|
-| `nvenc` | h264_cuvid, hevc_cuvid | h264_nvenc, hevc_nvenc |
+| `nvenc` | h264_cuvid, hevc_cuvid | h264_nvenc, hevc_nvenc, av1_nvenc |
 | `vaapi` | h264_vaapi, hevc_vaapi | h264_vaapi, hevc_vaapi |
-| `qsv` | h264_qsv, hevc_qsv | h264_qsv, hevc_qsv |
-| `cpu` | software | libx264, libx265 |
+| `qsv` | h264_qsv, hevc_qsv | h264_qsv, hevc_qsv, av1_qsv |
+| `cpu` | software | libx264, libx265, libsvtav1 |
 
 #### ProgressReporter (`src/pipeline/ProgressReporter.js`)
 - Manages progress connections for real-time updates
@@ -184,10 +185,11 @@ Configured via `workers.mode` in `config.json`:
 
 | Mode | Behavior | Use Case |
 |------|----------|----------|
-| `thread` (default) | Each task spawns a `worker_thread` | True parallelism, protects main process from native panics |
-| `queue` | Tasks run on main thread, serialized by queue | Memory-constrained, simpler |
+| `process` (default) | Each task spawns a `child_process.fork` | Maximum isolation — native crashes don't affect main process or other workers |
+| `thread` | Each task spawns a `worker_thread` | True parallelism, lighter than process mode |
+| `queue` | Tasks run on main thread, serialized by queue | Memory-constrained, simpler debugging |
 
-**Thread mode is strongly recommended** for audio/video. A native module panic in nVideo will kill only the worker thread, not the main process.
+**Process mode is strongly recommended** for audio/video. A native module panic in nVideo will kill only the child process, not the main process or other workers.
 
 ### Audio/Video Processing Flow
 
@@ -234,6 +236,18 @@ Fixed in `src/api/routes/upload.js`: the `rawRequest` `close` event was destroyi
 
 ### ESM Worker Loading
 Native modules are loaded in worker threads via `createRequire(import.meta.url)` because ESM `worker_threads` does not support direct `require()`.
+
+### Worker Process Mode
+Added `process` mode (child_process.fork) as the default worker execution mode for maximum isolation. Native crashes in nVideo only kill the child process, not the main process or other workers. `Worker.js` supports three modes: `process`, `thread`, and `queue`.
+
+### hwaccel Handling
+Hardware acceleration is **only applied when explicitly requested** via `options.hwaccel`. The previous auto-injection of `hwaccel: 'cuda'` for NVENC codecs has been removed across all paths (VideoProcessor, TaskWorker, and frontend CLI parser) to prevent the CUDA access violation segfault. Users must explicitly specify `-hwaccel cuda` in CLI mode or set `hwaccel` in transcode options.
+
+### Zero-Copy GPU Acceleration Pipeline
+The data-flow logic in `src/tasks/TaskWorker.js` has been patched to unconditionally propagate `cli_command` and `hwaccel` overrides to the underlying FFmpeg runner. This allows the construction of true 100% GPU-accelerated *zero-copy* pipelines where frames remain in VRAM for decoding, transforming (e.g., `-vf scale_cuda=format=p010le`), and encoding (e.g., `av1_nvenc`), utilizing virtually zero CPU.
+
+### Disk-to-Disk Processing Exceptions
+Fixed a crash in `src/tasks/Worker.js` that occurred when jobs utilized hardware acceleration and outputted results directly to disk without passing through software memory. The worker was erroneously querying `result.buffer.length` on disk-only resolutions, throwing a `Cannot read properties of undefined (reading 'length')` error that bubbled up to the UI. The caching flow now properly forks between memory buffers (`result.buffer`) and disk outputs (`result.filePath` / `result.outputPath`).
 
 ## LLM Integration Notes
 
