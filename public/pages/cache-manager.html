@@ -1,0 +1,123 @@
+<div class="page-cache-manager">
+	<header style="margin-bottom: var(--nui-space-double)">
+		<h1>Cache Manager</h1>
+		<p class="lead">Browse and manage cached assets.</p>
+	</header>
+
+	<section style="margin-bottom: var(--nui-space)">
+		<nui-card>
+			<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--nui-space)">
+				<div>
+					<strong>Total Assets:</strong> <span id="total-assets">—</span> <br/>
+					<strong>Total Size:</strong> <span id="total-size">—</span>
+				</div>
+				<nui-button variant="danger"><button type="button" id="clear-all-btn">Clear All</button></nui-button>
+			</div>
+		</nui-card>
+	</section>
+
+	<section id="assets-grid" class="cache-grid">
+		<!-- Assets loaded dynamically -->
+	</section>
+</div>
+
+<script type="nui/page">
+function init(element, params, nui) {
+	const totalAssetsEl = element.el('#total-assets');
+	const totalSizeEl = element.el('#total-size');
+	const assetsGrid = element.el('#assets-grid');
+	const clearBtn = element.el('#clear-all-btn');
+
+	async function loadAssets() {
+		try {
+			const assets = await api.getAssets();
+			totalAssetsEl.textContent = assets.length;
+			const totalSize = assets.reduce((s, a) => s + (a.size || 0), 0);
+			totalSizeEl.textContent = api.formatBytes(totalSize);
+
+			assetsGrid.innerHTML = assets.map(a => `
+				<nui-card class="asset-card">
+					<div style="display: flex; justify-content: space-between; align-items: start">
+						<div>
+							<strong>${a.id.slice(0, 8)}...</strong>
+							<nui-badge variant="${a.type === 'image' ? 'primary' : a.type === 'audio' ? 'success' : 'warning'}">${a.type}</nui-badge>
+						</div>
+						<nui-button><button type="button" data-action="delete-asset" data-id="${a.id}">×</button></nui-button>
+					</div>
+					<div class="asset-meta">
+						<p>${a.mimeType}</p>
+						<p>${api.formatBytes(a.size)}</p>
+						<p>Expires: ${new Date(a.expiresAt).toLocaleString()}</p>
+					</div>
+					<nui-button-container>
+						<nui-button><button type="button" data-action="download-asset" data-id="${a.id}">Download</button></nui-button>
+						<nui-button><button type="button" data-action="view-meta" data-id="${a.id}">Meta</button></nui-button>
+					</nui-button-container>
+				</nui-card>
+			`).join('') || '<p>No cached assets.</p>';
+		} catch {
+			assetsGrid.innerHTML = '<p>Failed to load assets.</p>';
+		}
+	}
+
+	assetsGrid.addEventListener('click', async (e) => {
+		const delBtn = e.target.closest('[data-action="delete-asset"]');
+		if (delBtn) {
+			try {
+				await api.deleteAsset(delBtn.dataset.id);
+				nui.components.banner.show({ content: 'Asset deleted', priority: 'info', autoClose: 2000 });
+				loadAssets();
+			} catch (err) {
+				nui.components.banner.show({ content: err.message, priority: 'alert' });
+			}
+			return;
+		}
+
+		const dlBtn = e.target.closest('[data-action="download-asset"]');
+		if (dlBtn) {
+			try {
+				const blob = await api.getAsset(dlBtn.dataset.id);
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = dlBtn.dataset.id;
+				a.click();
+				URL.revokeObjectURL(url);
+			} catch (err) {
+				nui.components.banner.show({ content: err.message, priority: 'alert' });
+			}
+			return;
+		}
+
+		const metaBtn = e.target.closest('[data-action="view-meta"]');
+		if (metaBtn) {
+			try {
+				const res = await fetch(`/v1/assets/${metaBtn.dataset.id}/metadata`);
+				const data = await res.json();
+				await nui.components.dialog.alert('Asset Metadata', `
+					<nui-code><pre><code>${JSON.stringify(data, null, 2)}</code></pre></nui-code>
+				`);
+			} catch (err) {
+				nui.components.banner.show({ content: err.message, priority: 'alert' });
+			}
+		}
+	});
+
+	clearBtn.addEventListener('click', async () => {
+		const confirmed = await nui.components.dialog.confirm(
+			'Clear All Assets?',
+			'This will delete all cached assets. Cannot be undone.'
+		);
+		if (!confirmed) return;
+		try {
+			await api.clearAssets();
+			nui.components.banner.show({ content: 'All assets cleared', priority: 'info', autoClose: 2000 });
+			loadAssets();
+		} catch (err) {
+			nui.components.banner.show({ content: err.message, priority: 'alert' });
+		}
+	});
+
+	loadAssets();
+}
+</script>

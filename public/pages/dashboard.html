@@ -1,0 +1,101 @@
+<div class="page-dashboard">
+	<header style="margin-bottom: var(--nui-space-double)">
+		<h1>Dashboard</h1>
+		<p class="lead">Service overview and quick stats.</p>
+	</header>
+
+	<section class="stats-grid" id="stats-grid">
+		<nui-card>
+			<h3 style="margin-top: 0">Service Status</h3>
+			<p id="health-status">Checking...</p>
+		</nui-card>
+		<nui-card>
+			<h3 style="margin-top: 0">Active Jobs</h3>
+			<p id="active-jobs-count">—</p>
+		</nui-card>
+		<nui-card>
+			<h3 style="margin-top: 0">Cached Assets</h3>
+			<p id="assets-count">—</p>
+		</nui-card>
+		<nui-card>
+			<h3 style="margin-top: 0">Cache Size</h3>
+			<p id="cache-size">—</p>
+		</nui-card>
+	</section>
+
+	<hr style="margin: var(--nui-space-double) 0; border: none; border-top: 1px solid var(--border-shade1)" />
+
+	<section>
+		<h2>Recent Jobs</h2>
+		<nui-table id="recent-jobs-table">
+			<table>
+				<thead>
+					<tr>
+						<th>ID</th>
+						<th>Processor</th>
+						<th>Status</th>
+						<th>Progress</th>
+						<th>Created</th>
+					</tr>
+				</thead>
+				<tbody>
+					<tr><td colspan="5">Loading...</td></tr>
+				</tbody>
+			</table>
+		</nui-table>
+	</section>
+</div>
+
+<script type="nui/page">
+function init(element, params, nui) {
+	const healthEl = element.el('#health-status');
+	const activeJobsEl = element.el('#active-jobs-count');
+	const assetsEl = element.el('#assets-count');
+	const cacheSizeEl = element.el('#cache-size');
+	const jobsBody = element.el('#recent-jobs-table tbody');
+
+	async function loadStats() {
+		try {
+			const health = await api.health();
+			healthEl.innerHTML = `<nui-badge variant="success">Online</nui-badge> Port ${health.port}`;
+		} catch {
+			healthEl.innerHTML = `<nui-badge variant="danger">Offline</nui-badge>`;
+		}
+
+		try {
+			const jobs = await api.getJobs();
+			const active = jobs.filter(j => j.status === 'processing' || j.status === 'queued').length;
+			activeJobsEl.textContent = `${active} active (${jobs.length} total)`;
+
+			// Show recent 10 jobs
+			const recent = jobs.slice(-10).reverse();
+			jobsBody.innerHTML = recent.map(j => `
+				<tr>
+					<td><code>${j.jobId.slice(0, 8)}...</code></td>
+					<td>${j.processor}${j.mode ? ` / ${j.mode}` : ''}</td>
+					<td><nui-badge variant="${j.status === 'completed' ? 'success' : j.status === 'failed' ? 'danger' : j.status === 'processing' ? 'primary' : 'warning'}">${j.status}</nui-badge></td>
+					<td>${j.percent}%</td>
+					<td>${new Date(j.createdAt).toLocaleTimeString()}</td>
+				</tr>
+			`).join('') || '<tr><td colspan="5">No jobs yet.</td></tr>';
+		} catch {
+			activeJobsEl.textContent = '—';
+		}
+
+		try {
+			const assets = await api.getAssets();
+			assetsEl.textContent = assets.length;
+			const totalSize = assets.reduce((s, a) => s + (a.size || 0), 0);
+			cacheSizeEl.textContent = api.formatBytes(totalSize);
+		} catch {
+			assetsEl.textContent = '—';
+			cacheSizeEl.textContent = '—';
+		}
+	}
+
+	loadStats();
+	const interval = setInterval(loadStats, 5000);
+
+	element.hide = () => clearInterval(interval);
+}
+</script>

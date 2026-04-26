@@ -1,0 +1,369 @@
+<div class="page-task-explorer">
+	<section class="input-section">
+		<nui-card>
+			<h3 style="margin-top: 0">Input</h3>
+
+			<div class="dropzone-area" id="dropzone">
+				<nui-icon name="cloud_upload">☁</nui-icon>
+				<p>Drag & drop a file here, or click to browse</p>
+				<input type="file" id="file-input" hidden />
+			</div>
+
+			<nui-input-group style="margin-top: var(--nui-space)">
+				<label for="input-path">Or use server path</label>
+				<nui-input>
+					<input type="text" id="input-path" placeholder="C:\\Media\\input.mp4" />
+				</nui-input>
+			</nui-input-group>
+
+			<nui-input-group style="margin-top: var(--nui-space)">
+				<label for="output-path">Output path (optional)</label>
+				<nui-input>
+					<input type="text" id="output-path" placeholder="C:\\Media\\output.mp4" />
+				</nui-input>
+			</nui-input-group>
+
+			<div id="file-info" style="margin-top: var(--nui-space); font-size: 0.9rem; color: var(--color-text-secondary);"></div>
+		</nui-card>
+
+		<nui-card style="margin-top: var(--nui-space)">
+			<h3 style="margin-top: 0">Processor</h3>
+			<nui-select id="processor-select">
+				<select>
+					<option value="image">Image</option>
+					<option value="audio">Audio</option>
+					<option value="video">Video</option>
+				</select>
+			</nui-select>
+		</nui-card>
+	</section>
+
+	<section class="options-section" id="options-section">
+		<nui-card>
+			<h3 style="margin-top: 0">Options</h3>
+			<div id="dynamic-options"></div>
+		</nui-card>
+	</section>
+
+	<section class="preview-section">
+		<nui-card>
+			<h3 style="margin-top: 0">API Request</h3>
+			<nui-tabs id="command-tabs">
+				<div role="tablist">
+					<button role="tab" aria-selected="true">cURL</button>
+					<button role="tab">Fetch</button>
+					<button role="tab">JSON</button>
+				</div>
+				<div role="tabpanel">
+					<pre class="command-preview" id="curl-preview"></pre>
+				</div>
+				<div role="tabpanel" hidden>
+					<pre class="command-preview" id="fetch-preview"></pre>
+				</div>
+				<div role="tabpanel" hidden>
+					<pre class="command-preview" id="json-preview"></pre>
+				</div>
+			</nui-tabs>
+			<nui-button-container>
+				<nui-button><button type="button" id="copy-cmd">Copy</button></nui-button>
+				<nui-button variant="primary"><button type="button" id="run-btn">Run Test</button></nui-button>
+			</nui-button-container>
+		</nui-card>
+
+		<nui-card id="result-card" hidden>
+			<h3 style="margin-top: 0">Result</h3>
+			<div id="result-area"></div>
+		</nui-card>
+	</section>
+</div>
+
+<script type="nui/page">
+function init(element, params, nui) {
+	// --- State ---
+	let selectedFile = null;
+	let fileId = null;
+	let capabilities = null;
+
+	// --- DOM refs ---
+	const dropzone = element.el('#dropzone');
+	const fileInput = element.el('#file-input');
+	const inputPath = element.el('#input-path');
+	const outputPath = element.el('#output-path');
+	const fileInfo = element.el('#file-info');
+	const processorSelect = element.el('#processor-select select');
+	const dynamicOptions = element.el('#dynamic-options');
+	const curlPreview = element.el('#curl-preview');
+	const fetchPreview = element.el('#fetch-preview');
+	const jsonPreview = element.el('#json-preview');
+	const runBtn = element.el('#run-btn');
+	const copyBtn = element.el('#copy-cmd');
+	const resultCard = element.el('#result-card');
+	const resultArea = element.el('#result-area');
+	const commandTabs = element.el('#command-tabs');
+
+	// --- Dropzone ---
+	dropzone.addEventListener('click', () => fileInput.click());
+	dropzone.addEventListener('dragover', (e) => {
+		e.preventDefault();
+		dropzone.classList.add('drag-over');
+	});
+	dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+	dropzone.addEventListener('drop', (e) => {
+		e.preventDefault();
+		dropzone.classList.remove('drag-over');
+		const file = e.dataTransfer.files[0];
+		if (file) handleFile(file);
+	});
+	fileInput.addEventListener('change', (e) => {
+		if (e.target.files[0]) handleFile(e.target.files[0]);
+	});
+
+	function handleFile(file) {
+		selectedFile = file;
+		fileId = null;
+		fileInfo.textContent = `${file.name} — ${api.formatBytes(file.size)}`;
+		// If file was dropped from filesystem, try to use path for file-to-file mode
+		if (!inputPath.value && file.path) {
+			inputPath.value = file.path;
+		}
+		updatePreview();
+	}
+
+	// --- Options definitions ---
+	const OPTIONS_DEF = {
+		image: [
+			{ name: 'max_dimension', label: 'Max Dimension', type: 'number', min: 1, max: 10000, default: 1024 },
+			{ name: 'quality', label: 'Quality', type: 'range', min: 1, max: 100, default: 85 },
+			{ name: 'format', label: 'Format', type: 'select', options: ['jpeg','png','webp','avif','gif'], default: 'jpeg' },
+			{ name: 'strip_exif', label: 'Strip EXIF', type: 'checkbox', default: true },
+			{ name: 'rotate', label: 'Rotate', type: 'select', options: ['','90','180','270'], default: '' },
+			{ name: 'flip', label: 'Flip Vertical', type: 'checkbox', default: false },
+			{ name: 'flop', label: 'Flip Horizontal', type: 'checkbox', default: false },
+			{ name: 'grayscale', label: 'Grayscale', type: 'checkbox', default: false },
+			{ name: 'normalize', label: 'Normalize', type: 'checkbox', default: false },
+			{ name: 'blur', label: 'Blur Sigma', type: 'range', min: 0, max: 20, default: 0 },
+		],
+		audio: [
+			{ name: 'sample_rate', label: 'Sample Rate', type: 'select', options: ['8000','16000','22050','44100','48000','source'], default: '16000' },
+			{ name: 'channels', label: 'Channels', type: 'select', options: ['1','2','source'], default: '1' },
+			{ name: 'format', label: 'Format', type: 'select', options: ['mp3','wav','ogg','m4a','flac','aac','opus'], default: 'mp3' },
+		],
+		video: [
+			{ name: 'mode', label: 'Mode', type: 'select', options: ['extract_audio','extract_keyframes','transcode','cli'], default: 'extract_audio' },
+			{ name: 'fps', label: 'FPS (keyframes)', type: 'number', min: 1, max: 30, default: 1 },
+			{ name: 'max_dimension', label: 'Max Dimension', type: 'number', min: 1, max: 10000, default: 1024 },
+			{ name: 'format', label: 'Format', type: 'select', options: ['mp4','webm','avi','mkv'], default: 'mp4' },
+			{ name: 'video_codec', label: 'Video Codec', type: 'text', default: '' },
+			{ name: 'audio_codec', label: 'Audio Codec', type: 'text', default: '' },
+			{ name: 'hwaccel', label: 'HW Accel', type: 'select', options: ['','cuda','vaapi','qsv'], default: '' },
+		],
+	};
+
+	function buildOptionsUI() {
+		const processor = processorSelect.value;
+		const defs = OPTIONS_DEF[processor] || [];
+		dynamicOptions.innerHTML = '';
+
+		defs.forEach(def => {
+			const group = document.createElement('nui-input-group');
+			group.style.marginTop = 'var(--nui-space)';
+
+			const label = document.createElement('label');
+			label.textContent = def.label;
+			group.appendChild(label);
+
+			let inputWrapper;
+			if (def.type === 'select') {
+				inputWrapper = document.createElement('nui-select');
+				const select = document.createElement('select');
+				select.dataset.optName = def.name;
+				def.options.forEach(opt => {
+					const option = document.createElement('option');
+					option.value = opt;
+					option.textContent = opt || '(none)';
+					if (opt === def.default) option.selected = true;
+					select.appendChild(option);
+				});
+				inputWrapper.appendChild(select);
+			} else if (def.type === 'checkbox') {
+				inputWrapper = document.createElement('nui-checkbox');
+				const input = document.createElement('input');
+				input.type = 'checkbox';
+				input.dataset.optName = def.name;
+				input.checked = def.default;
+				inputWrapper.appendChild(input);
+				const lbl = document.createElement('label');
+				lbl.textContent = def.label;
+				inputWrapper.appendChild(lbl);
+			} else if (def.type === 'range') {
+				inputWrapper = document.createElement('nui-slider');
+				const input = document.createElement('input');
+				input.type = 'range';
+				input.dataset.optName = def.name;
+				input.min = def.min;
+				input.max = def.max;
+				input.value = def.default;
+				inputWrapper.appendChild(input);
+			} else {
+				inputWrapper = document.createElement('nui-input');
+				const input = document.createElement('input');
+				input.type = def.type;
+				input.dataset.optName = def.name;
+				input.value = def.default;
+				if (def.min !== undefined) input.min = def.min;
+				if (def.max !== undefined) input.max = def.max;
+				inputWrapper.appendChild(input);
+			}
+
+			group.appendChild(inputWrapper);
+			dynamicOptions.appendChild(group);
+		});
+
+		// Attach listeners to all new inputs
+		dynamicOptions.querySelectorAll('input, select').forEach(el => {
+			el.addEventListener('change', updatePreview);
+			el.addEventListener('input', updatePreview);
+		});
+	}
+
+	function collectOptions() {
+		const processor = processorSelect.value;
+		const defs = OPTIONS_DEF[processor] || [];
+		const opts = {};
+		defs.forEach(def => {
+			const el = dynamicOptions.querySelector(`[data-opt-name="${def.name}"]`);
+			if (!el) return;
+			let val;
+			if (def.type === 'checkbox') val = el.checked;
+			else if (def.type === 'number') val = parseInt(el.value) || 0;
+			else if (def.type === 'range') val = parseInt(el.value);
+			else val = el.value;
+			if (val !== '' && val !== false && val !== def.default) {
+				opts[def.name] = val;
+			}
+		});
+		return opts;
+	}
+
+	function buildRequest() {
+		const processor = processorSelect.value;
+		const opts = collectOptions();
+		const outPath = outputPath.value.trim();
+		const req = { processor, options: opts };
+
+		if (fileId) {
+			req.fileId = fileId;
+		} else if (inputPath.value.trim()) {
+			req.input_path = inputPath.value.trim();
+		}
+		if (outPath) req.output_path = outPath;
+
+		return req;
+	}
+
+	function updatePreview() {
+		const req = buildRequest();
+		const endpoint = '/v1/process';
+		const headers = { 'Content-Type': 'application/json' };
+
+		curlPreview.textContent = api.buildCurl(endpoint, 'POST', headers, req);
+		fetchPreview.textContent = api.buildFetch(endpoint, 'POST', headers, req);
+		jsonPreview.textContent = JSON.stringify(req, null, 2);
+	}
+
+	// --- Run ---
+	runBtn.addEventListener('click', async () => {
+		resultCard.hidden = false;
+		resultArea.innerHTML = '<nui-progress type="busy"></nui-progress> <p>Running...</p>';
+
+		try {
+			// Upload file if needed
+			if (selectedFile && !fileId && !inputPath.value.trim()) {
+				resultArea.innerHTML = '<p>Uploading...</p>';
+				const upload = await api.upload(selectedFile, (pct) => {
+					resultArea.innerHTML = `<p>Uploading: ${pct}%</p>`;
+				});
+				fileId = upload.fileId;
+			}
+
+			// Start processing
+			const req = buildRequest();
+			if (!req.fileId && !req.input_path) {
+				resultArea.innerHTML = '<nui-banner type="warning"><span>Please provide a file or input path.</span></nui-banner>';
+				return;
+			}
+
+			resultArea.innerHTML = `<p>Starting job...</p>`;
+			const job = await api.process(req);
+
+			// Subscribe to progress
+			let progressHtml = `<p>Job: <code>${job.jobId}</code> — Status: ${job.status}</p>
+				<nui-progress value="0" id="job-progress"></nui-progress>
+				<p id="job-message"></p>`;
+			resultArea.innerHTML = progressHtml;
+
+			api.subscribeProgress(job.jobId, (data) => {
+				const progressEl = resultArea.el('#job-progress');
+				const msgEl = resultArea.el('#job-message');
+				if (progressEl) progressEl.setAttribute('value', data.percent || 0);
+				if (msgEl) msgEl.textContent = data.message || data.event;
+
+				if (data.event === 'complete') {
+					resultArea.innerHTML += `<hr/><p><nui-badge variant="success">Complete</nui-badge> Asset ID: <code>${data.assetId}</code></p>
+						<nui-button><button type="button" data-action="download-asset" data-asset="${data.assetId}">Download</button></nui-button>`;
+				} else if (data.event === 'error') {
+					resultArea.innerHTML += `<hr/><p><nui-badge variant="danger">Error</nui-badge> ${data.error}</p>`;
+				}
+			});
+		} catch (err) {
+			resultArea.innerHTML = `<nui-banner type="alert"><span>${err.message}</span></nui-banner>`;
+		}
+	});
+
+	// Download handler
+	resultArea.addEventListener('click', async (e) => {
+		const btn = e.target.closest('[data-action="download-asset"]');
+		if (!btn) return;
+		const assetId = btn.dataset.asset;
+		try {
+			const blob = await api.getAsset(assetId);
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = assetId;
+			a.click();
+			URL.revokeObjectURL(url);
+		} catch (err) {
+			nui.components.banner.show({ content: err.message, priority: 'alert' });
+		}
+	});
+
+	// Copy command
+	copyBtn.addEventListener('click', () => {
+		const tabs = element.el('#command-tabs');
+		const activeIndex = tabs.querySelector('[role="tab"][aria-selected="true"]')?.tabIndex || 0;
+		let text;
+		switch (activeIndex) {
+			case 0: text = curlPreview.textContent; break;
+			case 1: text = fetchPreview.textContent; break;
+			default: text = jsonPreview.textContent;
+		}
+		navigator.clipboard.writeText(text).then(() => {
+			nui.components.banner.show({ content: 'Copied to clipboard', priority: 'info', autoClose: 2000 });
+		});
+	});
+
+	// Processor change
+	processorSelect.addEventListener('change', () => {
+		buildOptionsUI();
+		updatePreview();
+	});
+
+	inputPath.addEventListener('input', updatePreview);
+	outputPath.addEventListener('input', updatePreview);
+
+	// Init
+	buildOptionsUI();
+	updatePreview();
+}
+</script>

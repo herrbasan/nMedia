@@ -2,21 +2,25 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-eval';">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="color-scheme" content="light dark">
-    <title>Media Service Admin</title>
-    <link rel="stylesheet" href="../modules/nui_wc2/NUI/css/nui-theme.css">
-    <link rel="stylesheet" href="../modules/nui_wc2/NUI/css/modules/nui-menu.css">
-    <link rel="stylesheet" href="../modules/nui_wc2/NUI/css/modules/nui-app-window.css">
-    <link rel="stylesheet" href="css/admin.css">
+    <title>Media Service</title>
+    <link rel="stylesheet" href="modules/nui_wc2/NUI/css/nui-theme.css">
+    <link rel="stylesheet" href="modules/nui_wc2/NUI/css/modules/nui-menu.css">
+    <link rel="stylesheet" href="modules/nui_wc2/NUI/css/modules/nui-app-window.css">
+    <link rel="stylesheet" href="modules/nui_wc2/NUI/css/modules/nui-syntax-highlight.css">
+    <link rel="stylesheet" href="css/main.css">
     <style>
         body { margin: 0; padding: 0; overflow: hidden; }
         nui-app:not(.nui-ready) { display: none; }
     </style>
-    <script type="module" src="js/admin-app.js"></script>
+    <script type="module" src="js/app.js"></script>
 </head>
 <body>
     <nui-app content-min-width="55rem">
+        <nui-skip-links></nui-skip-links>
+
         <nui-app-header>
             <div slot="left">
                 <nui-button data-action="toggle-sidebar">
@@ -24,10 +28,10 @@
                         <nui-icon name="menu">☰</nui-icon>
                     </button>
                 </nui-button>
-                <h1>Media Service Admin</h1>
+                <h1>Media Service</h1>
             </div>
             <div slot="right">
-                <span id="connection-status" class="status-dot disconnected" title="WebSocket disconnected"></span>
+                <span id="connection-status" class="status-dot disconnected" title="Disconnected"></span>
                 <nui-button data-action="toggle-theme">
                     <button type="button" aria-label="Toggle light/dark theme">
                         <nui-icon name="brightness">⛭</nui-icon>
@@ -36,21 +40,13 @@
             </div>
         </nui-app-header>
 
-        <nui-sidebar behavior="primary">
-            <nui-link-list mode="fold">
-                <!-- Navigation loaded by admin-app.js -->
-            </nui-link-list>
+        <nui-sidebar behavior="primary" id="nav-sidebar">
+            <nui-link-list mode="fold" id="main-navigation"></nui-link-list>
         </nui-sidebar>
 
         <nui-content>
-            <nui-main>
-                <!-- Pages loaded here -->
-            </nui-main>
+            <nui-main></nui-main>
         </nui-content>
-
-        <nui-app-footer>
-            <div id="footer-info">Ready</div>
-        </nui-app-footer>
     </nui-app>
 </body>
 </html>

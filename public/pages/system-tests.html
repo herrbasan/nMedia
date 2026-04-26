@@ -1,0 +1,142 @@
+<div class="page-system-tests">
+	<header style="margin-bottom: var(--nui-space-double)">
+		<h1>System Tests</h1>
+		<p class="lead">Verify service functionality end-to-end.</p>
+	</header>
+
+	<nui-layout columns="2">
+		<nui-card>
+			<h3 style="margin-top: 0">API Connectivity</h3>
+			<nui-button-container>
+				<nui-button><button type="button" data-action="test-health">Health Check</button></nui-button>
+				<nui-button><button type="button" data-action="test-capabilities">Capabilities</button></nui-button>
+			</nui-button-container>
+			<div id="api-result" style="margin-top: var(--nui-space)"></div>
+		</nui-card>
+
+		<nui-card>
+			<h3 style="margin-top: 0">WebSocket</h3>
+			<nui-button-container>
+				<nui-button><button type="button" data-action="test-ws">Test Connection</button></nui-button>
+			</nui-button-container>
+			<div id="ws-result" style="margin-top: var(--nui-space)"></div>
+		</nui-card>
+
+		<nui-card>
+			<h3 style="margin-top: 0">File Upload</h3>
+			<input type="file" id="test-file" />
+			<nui-button-container style="margin-top: var(--nui-space)">
+				<nui-button><button type="button" data-action="test-upload">Upload Test File</button></nui-button>
+			</nui-button-container>
+			<div id="upload-result" style="margin-top: var(--nui-space)"></div>
+		</nui-card>
+
+		<nui-card>
+			<h3 style="margin-top: 0">Progress Streaming</h3>
+			<nui-button-container>
+				<nui-button><button type="button" data-action="test-sse">Test SSE</button></nui-button>
+			</nui-button-container>
+			<div id="sse-result" style="margin-top: var(--nui-space)"></div>
+		</nui-card>
+	</nui-layout>
+</div>
+
+<script type="nui/page">
+function init(element, params, nui) {
+	const apiResult = element.el('#api-result');
+	const wsResult = element.el('#ws-result');
+	const uploadResult = element.el('#upload-result');
+	const sseResult = element.el('#sse-result');
+	const testFile = element.el('#test-file');
+
+	function ok(msg) { return `<nui-badge variant="success">PASS</nui-badge> ${msg}`; }
+	function fail(msg) { return `<nui-badge variant="danger">FAIL</nui-badge> ${msg}`; }
+
+	element.addEventListener('click', async (e) => {
+		const actionEl = e.target.closest('[data-action]');
+		if (!actionEl) return;
+		const action = actionEl.dataset.action;
+
+		switch (action) {
+			case 'test-health': {
+				apiResult.innerHTML = 'Testing...';
+				try {
+					const data = await api.health();
+					apiResult.innerHTML = ok(`Service online on port ${data.port}`);
+				} catch (err) {
+					apiResult.innerHTML = fail(err.message);
+				}
+				break;
+			}
+			case 'test-capabilities': {
+				apiResult.innerHTML = 'Testing...';
+				try {
+					const data = await api.capabilities();
+					const modules = Object.keys(data).join(', ');
+					apiResult.innerHTML = ok(`Modules: ${modules}`);
+				} catch (err) {
+					apiResult.innerHTML = fail(err.message);
+				}
+				break;
+			}
+			case 'test-ws': {
+				wsResult.innerHTML = 'Connecting...';
+				try {
+					const ws = api.connectWebSocket(
+						(msg) => {
+							if (msg.type === 'connected') {
+								wsResult.innerHTML = ok(`Connected, ID: ${msg.id}`);
+							}
+						},
+						() => {},
+						() => wsResult.innerHTML = fail('Disconnected')
+					);
+				} catch (err) {
+					wsResult.innerHTML = fail(err.message);
+				}
+				break;
+			}
+			case 'test-upload': {
+				const file = testFile.files[0];
+				if (!file) {
+					uploadResult.innerHTML = fail('Select a file first');
+					return;
+				}
+				uploadResult.innerHTML = 'Uploading...';
+				try {
+					const data = await api.upload(file);
+					uploadResult.innerHTML = ok(`Uploaded: ${data.fileId} (${data.detectedType})`);
+				} catch (err) {
+					uploadResult.innerHTML = fail(err.message);
+				}
+				break;
+			}
+			case 'test-sse': {
+				sseResult.innerHTML = 'Starting test job...';
+				try {
+					// Create a minimal test job
+					const job = await api.process({
+						input_path: 'C:\\Media\\test.mp4',
+						processor: 'video',
+						options: { mode: 'extract_audio', format: 'mp3' }
+					});
+					sseResult.innerHTML = `Job ${job.jobId} queued. Listening for progress...`;
+
+					let events = [];
+					api.subscribeProgress(job.jobId, (data) => {
+						events.push(data.event);
+						if (data.event === 'start') {
+							sseResult.innerHTML = ok(`SSE working — received: ${events.join(', ')}`);
+						} else if (data.event === 'complete' || data.event === 'error') {
+							sseResult.innerHTML = ok(`SSE complete — events: ${events.join(', ')}`);
+						}
+					});
+				} catch (err) {
+					sseResult.innerHTML = fail(err.message);
+				}
+				break;
+			}
+		}
+	});
+}
+</script>

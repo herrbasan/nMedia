@@ -1,0 +1,107 @@
+<div class="page-job-monitor">
+	<header style="margin-bottom: var(--nui-space-double)">
+		<h1>Job Monitor</h1>
+		<p class="lead">Real-time job queue and progress tracking.</p>
+	</header>
+
+	<section>
+		<nui-card>
+			<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--nui-space)">
+				<h3 style="margin: 0">Jobs</h3>
+				<nui-button><button type="button" id="refresh-btn">Refresh</button></nui-button>
+			</div>
+			<nui-table id="jobs-table">
+				<table class="job-table">
+					<thead>
+						<tr>
+							<th>ID</th>
+							<th>Processor</th>
+							<th>Status</th>
+							<th>Progress</th>
+							<th>Message</th>
+							<th>Actions</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr><td colspan="6">Loading...</td></tr>
+					</tbody>
+				</table>
+			</nui-table>
+		</nui-card>
+	</section>
+</div>
+
+<script type="nui/page">
+function init(element, params, nui) {
+	const tbody = element.el('#jobs-table tbody');
+	const refreshBtn = element.el('#refresh-btn');
+	let pollInterval = null;
+
+	const statusVariant = {
+		queued: 'warning',
+		processing: 'primary',
+		completed: 'success',
+		failed: 'danger',
+		cancelled: 'info',
+	};
+
+	async function loadJobs() {
+		try {
+			const jobs = await api.getJobs();
+			jobs.sort((a, b) => b.createdAt - a.createdAt);
+
+			tbody.innerHTML = jobs.map(j => `
+				<tr data-job-id="${j.jobId}">
+					<td><code>${j.jobId.slice(0, 8)}...</code></td>
+					<td>${j.processor}${j.mode ? ` / ${j.mode}` : ''}</td>
+					<td><nui-badge variant="${statusVariant[j.status] || 'info'}">${j.status}</nui-badge></td>
+					<td><nui-progress value="${j.percent || 0}" hide-text></nui-progress></td>
+					<td>${j.message || ''}</td>
+					<td>
+						${j.status === 'queued' ? `<nui-button><button type="button" data-action="cancel-job" data-job="${j.jobId}">Cancel</button></nui-button>` : ''}
+						${j.assetId ? `<nui-button><button type="button" data-action="download-job" data-asset="${j.assetId}">Download</button></nui-button>` : ''}
+					</td>
+				</tr>
+			`).join('') || '<tr><td colspan="6">No jobs.</td></tr>';
+		} catch {
+			tbody.innerHTML = '<tr><td colspan="6">Failed to load jobs.</td></tr>';
+		}
+	}
+
+	tbody.addEventListener('click', async (e) => {
+		const cancelBtn = e.target.closest('[data-action="cancel-job"]');
+		if (cancelBtn) {
+			try {
+				await api.cancelJob(cancelBtn.dataset.job);
+				nui.components.banner.show({ content: 'Job cancelled', priority: 'info', autoClose: 2000 });
+				loadJobs();
+			} catch (err) {
+				nui.components.banner.show({ content: err.message, priority: 'alert' });
+			}
+			return;
+		}
+
+		const downloadBtn = e.target.closest('[data-action="download-job"]');
+		if (downloadBtn) {
+			try {
+				const blob = await api.getAsset(downloadBtn.dataset.asset);
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = downloadBtn.dataset.asset;
+				a.click();
+				URL.revokeObjectURL(url);
+			} catch (err) {
+				nui.components.banner.show({ content: err.message, priority: 'alert' });
+			}
+		}
+	});
+
+	refreshBtn.addEventListener('click', loadJobs);
+
+	loadJobs();
+	pollInterval = setInterval(loadJobs, 3000);
+
+	element.hide = () => clearInterval(pollInterval);
+}
+</script>
