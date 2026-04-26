@@ -154,11 +154,40 @@ export class JobStore {
     const now = Date.now();
     let cleaned = 0;
 
-    // Clean expired uploads
+    // Clean uploads:
+    // 1. Unprocessed uploads that expired (> 1h)
+    // 2. Processed uploads whose job is completed/failed/cancelled > 1h
+    // 3. Processed uploads whose job was already deleted
+    // 4. Any upload older than 24h (safety net)
     for (const [fileId, upload] of this.uploads) {
+      const jobId = this.uploadToJob.get(fileId);
+      const job = jobId ? this.jobs.get(jobId) : null;
+      const uploadAge = now - upload.createdAt;
+
+      let shouldDelete = false;
+      let reason = '';
+
       if (now > upload.expiresAt && !upload.processed) {
+        shouldDelete = true;
+        reason = 'expired_unprocessed';
+      } else if (upload.processed && job &&
+        (job.status === JobStatus.COMPLETED || job.status === JobStatus.FAILED || job.status === JobStatus.CANCELLED) &&
+        job.completedAt && now - job.completedAt > 3600000) {
+        shouldDelete = true;
+        reason = 'job_complete_expired';
+      } else if (upload.processed && !job) {
+        shouldDelete = true;
+        reason = 'job_missing';
+      } else if (uploadAge > 86400000) {
+        shouldDelete = true;
+        reason = 'safety_24h';
+      }
+
+      if (shouldDelete) {
+        logger.info('JobStore cleanup: deleting upload', { fileId, size: upload.size, reason, tempPath: upload.tempPath });
         this._deleteUploadFile(upload);
         this.uploads.delete(fileId);
+        this.uploadToJob.delete(fileId);
         cleaned++;
       }
     }
@@ -172,15 +201,91 @@ export class JobStore {
         job.completedAt &&
         now - job.completedAt > 3600000
       ) {
+        logger.info('JobStore cleanup: deleting job', { jobId, status: job.status, ageMs: now - job.completedAt });
         this.jobs.delete(jobId);
+        this.uploadToJob.delete(job.fileId);
         cleaned++;
       }
     }
 
+    // Orphan cleanup: delete files in uploadsDir not tracked in uploads Map
+    const orphanUploads = this._cleanupOrphanUploads();
+    if (orphanUploads > 0) {
+      logger.info('JobStore cleanup: removed orphan uploads', { count: orphanUploads });
+      cleaned += orphanUploads;
+    }
+
+    // Orphan cleanup: delete stray files in jobsDir (should only contain jobs.json)
+    const orphanJobs = this._cleanupOrphanJobs();
+    if (orphanJobs > 0) {
+      logger.info('JobStore cleanup: removed orphan job files', { count: orphanJobs });
+      cleaned += orphanJobs;
+    }
+
     if (cleaned > 0) {
       this._persist();
-      logger.debug('JobStore cleanup', { cleaned });
+      logger.info('JobStore cleanup complete', { cleaned, uploadsRemaining: this.uploads.size, jobsRemaining: this.jobs.size });
     }
+  }
+
+  /**
+   * Delete files in jobsDir that are not jobs.json.
+   * @private
+   * @returns {number} number of orphaned files deleted
+   */
+  _cleanupOrphanJobs() {
+    let removed = 0;
+    try {
+      const files = fs.readdirSync(this.storeDir);
+      for (const file of files) {
+        if (file === 'jobs.json') continue;
+        const filePath = path.join(this.storeDir, file);
+        try {
+          const stat = fs.statSync(filePath);
+          if (stat.isFile()) {
+            logger.info('JobStore: removing orphan job file', { file, size: stat.size });
+            fs.unlinkSync(filePath);
+            removed++;
+          }
+        } catch {}
+      }
+    } catch (err) {
+      logger.warn('Failed to clean orphan job files', { error: err.message });
+    }
+    return removed;
+  }
+
+  /**
+   * Delete files in uploadsDir that are not tracked in the uploads Map.
+   * @private
+   * @returns {number} number of orphaned files deleted
+   */
+  _cleanupOrphanUploads() {
+    let removed = 0;
+    try {
+      const trackedPaths = new Set();
+      for (const upload of this.uploads.values()) {
+        if (upload.tempPath) trackedPaths.add(path.basename(upload.tempPath));
+      }
+
+      const files = fs.readdirSync(this.uploadsDir);
+      for (const file of files) {
+        if (!trackedPaths.has(file)) {
+          const filePath = path.join(this.uploadsDir, file);
+          try {
+            const stat = fs.statSync(filePath);
+            if (stat.isFile()) {
+              logger.info('JobStore: removing orphan upload file', { file, size: stat.size });
+              fs.unlinkSync(filePath);
+              removed++;
+            }
+          } catch {}
+        }
+      }
+    } catch (err) {
+      logger.warn('Failed to clean orphan uploads', { error: err.message });
+    }
+    return removed;
   }
 
   _persist() {
@@ -200,10 +305,12 @@ export class JobStore {
   _deleteUploadFile(upload) {
     try {
       if (upload.tempPath && fs.existsSync(upload.tempPath)) {
+        const stat = fs.statSync(upload.tempPath);
         fs.unlinkSync(upload.tempPath);
+        logger.info('JobStore: deleted upload file', { fileId: upload.fileId, path: upload.tempPath, size: stat.size });
       }
     } catch (err) {
-      logger.warn('Failed to delete upload file', { fileId: upload.fileId, error: err.message });
+      logger.warn('Failed to delete upload file', { fileId: upload.fileId, path: upload.tempPath, error: err.message });
     }
   }
 

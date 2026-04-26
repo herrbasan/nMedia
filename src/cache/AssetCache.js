@@ -34,24 +34,102 @@ export class AssetCache {
     this.maxSize = config.cacheMaxSize || 10737418240;
     this.currentSize = 0;
     this.cleanupInterval = null;
+    this.persistPath = path.join(this.cacheDir, 'assets.json');
 
     this._ensureCacheDir();
-    this._loadExisting();
+    this._loadPersisted();
     this._startCleanup();
   }
 
-  _loadExisting() {
+  /**
+   * Load persisted asset metadata from JSON and reconcile with files on disk.
+   * Removes orphaned files (on disk but not in metadata) and stale metadata entries
+   * (in metadata but file missing or expired).
+   * @private
+   */
+  _loadPersisted() {
+    let persisted = [];
     try {
-      const files = fs.readdirSync(this.cacheDir);
-      for (const file of files) {
-        const filePath = path.join(this.cacheDir, file);
-        const stat = fs.statSync(filePath);
-        if (stat.isFile()) {
-          this.currentSize += stat.size;
+      if (fs.existsSync(this.persistPath)) {
+        persisted = JSON.parse(fs.readFileSync(this.persistPath, 'utf8'));
+      }
+    } catch (err) {
+      logger.warn('Failed to load persisted asset cache', { error: err.message });
+    }
+
+    const now = Date.now();
+    const knownFiles = new Set();
+    let loaded = 0;
+    let removed = 0;
+
+    for (const entry of persisted) {
+      if (!entry.storagePath || !fs.existsSync(entry.storagePath)) {
+        logger.info('AssetCache: removing stale entry (file missing)', { id: entry.id, path: entry.storagePath });
+        removed++;
+        continue;
+      }
+      if (now > entry.expiresAt) {
+        logger.info('AssetCache: removing expired file', { id: entry.id, path: entry.storagePath, expiredAt: new Date(entry.expiresAt).toISOString() });
+        try { fs.unlinkSync(entry.storagePath); } catch {}
+        removed++;
+        continue;
+      }
+      const stat = fs.statSync(entry.storagePath);
+      entry.size = stat.size;
+      entry.lastAccessed = entry.lastAccessed || now;
+      this.assets.set(entry.id, entry);
+      this.currentSize += stat.size;
+      knownFiles.add(path.basename(entry.storagePath));
+      loaded++;
+    }
+
+    // Remove orphaned files on disk that are not in metadata
+    try {
+      const diskFiles = fs.readdirSync(this.cacheDir);
+      for (const file of diskFiles) {
+        if (file === 'assets.json') continue;
+        if (!knownFiles.has(file)) {
+          const filePath = path.join(this.cacheDir, file);
+          try {
+            const stat = fs.statSync(filePath);
+            if (stat.isFile()) {
+              logger.info('AssetCache: removing orphan file', { file, size: stat.size });
+              fs.unlinkSync(filePath);
+              removed++;
+            }
+          } catch {}
         }
       }
     } catch (err) {
-      logger.warn('Failed to scan existing cache files', { error: err.message });
+      logger.warn('Failed to scan cache directory for orphans', { error: err.message });
+    }
+
+    // Recalculate currentSize to be accurate
+    this.currentSize = 0;
+    for (const asset of this.assets.values()) {
+      try {
+        const stat = fs.statSync(asset.storagePath);
+        this.currentSize += stat.size;
+        asset.size = stat.size;
+      } catch {
+        logger.info('AssetCache: removing stale entry during recalc', { id: asset.id });
+        this.assets.delete(asset.id);
+      }
+    }
+
+    logger.info('AssetCache loaded', { loaded, removed, currentSize: this.currentSize, cacheDir: this.cacheDir });
+  }
+
+  /**
+   * Persist asset metadata to JSON.
+   * @private
+   */
+  _persist() {
+    try {
+      const data = Array.from(this.assets.values());
+      fs.writeFileSync(this.persistPath, JSON.stringify(data, null, 2));
+    } catch (err) {
+      logger.warn('Failed to persist asset cache', { error: err.message });
     }
   }
 
@@ -181,6 +259,7 @@ export class AssetCache {
       this._enforceMaxSize();
     }
 
+    this._persist();
     logger.info('Asset stored', { id, type, size: buffer.length, mimeType, ttlSeconds: this.ttl / 1000 });
     return asset;
   }
@@ -232,6 +311,7 @@ export class AssetCache {
       this._enforceMaxSize();
     }
 
+    this._persist();
     logger.info('Asset stored from file', { id, type, size: stat.size, sourcePath });
     return asset;
   }
@@ -242,11 +322,18 @@ export class AssetCache {
    */
   _enforceMaxSize() {
     const sorted = Array.from(this.assets.values()).sort((a, b) => a.lastAccessed - b.lastAccessed);
+    let evicted = 0;
 
     for (const asset of sorted) {
       if (this.currentSize <= this.maxSize * 0.8) break;
+      logger.info('AssetCache: evicting LRU asset', { id: asset.id, type: asset.type, size: asset.size, lastAccessed: new Date(asset.lastAccessed).toISOString() });
       this._deleteFile(asset);
       this.assets.delete(asset.id);
+      evicted++;
+    }
+
+    if (evicted > 0) {
+      logger.info('AssetCache: LRU eviction complete', { evicted, currentSize: this.currentSize });
     }
   }
 
@@ -307,6 +394,8 @@ export class AssetCache {
       return null;
     }
 
+    this.markRetrieved(id);
+
     const opts = {};
     if (range && typeof range.start === 'number') {
       opts.start = range.start;
@@ -334,6 +423,7 @@ export class AssetCache {
     asset.retrievedAt = Date.now();
     asset.expiresAt = Date.now(); // Expire immediately (will be cleaned on next cycle)
 
+    this._persist();
     logger.info('Asset marked as retrieved', { id, expiresAt: asset.expiresAt });
     return true;
   }
@@ -349,6 +439,7 @@ export class AssetCache {
 
     this._deleteFile(asset);
     this.assets.delete(id);
+    this._persist();
     logger.info('Asset deleted', { id });
     return true;
   }
@@ -379,6 +470,7 @@ export class AssetCache {
     for (const id of this.assets.keys()) {
       if (this.delete(id)) cleared++;
     }
+    this._persist();
     logger.info(`Asset cache cleared, ${cleared} assets removed`);
     return cleared;
   }
@@ -390,15 +482,22 @@ export class AssetCache {
   cleanup() {
     const now = Date.now();
     let cleaned = 0;
+    const toDelete = [];
 
     for (const [id, asset] of this.assets) {
       if (now > asset.expiresAt) {
-        if (this.delete(id)) cleaned++;
+        toDelete.push(id);
       }
     }
 
+    for (const id of toDelete) {
+      const asset = this.assets.get(id);
+      logger.info('AssetCache cleanup: deleting expired asset', { id, type: asset?.type, size: asset?.size, expiredAt: new Date(asset?.expiresAt).toISOString() });
+      if (this.delete(id)) cleaned++;
+    }
+
     if (cleaned > 0) {
-      logger.debug(`Cleaned up ${cleaned} expired assets`);
+      logger.info(`AssetCache cleanup complete`, { cleaned, currentSize: this.currentSize });
     }
 
     return cleaned;
