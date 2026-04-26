@@ -148,7 +148,7 @@ Stream raw binary upload. Returns a `fileId` for processing.
 |--------|----------|-------------|
 | `Content-Type` | Yes | `application/octet-stream` |
 | `Content-Length` | Yes | Enables pre-flight disk space check |
-| `X-Original-Filename` | Yes | Used for format detection |
+| `X-Original-Filename` | No | Used for format detection fallback (defaults to 'unknown') |
 | `X-Upload-Id` | No | Idempotency key for retry-safe uploads |
 
 **Response (200):**
@@ -204,7 +204,8 @@ Start processing from `fileId` or `input_path`. Returns immediately with `jobId`
   "options": {
     "sample_rate": 16000,
     "format": "mp3"
-  }
+  },
+  "output_path": "D:\\Media\\output\\result.mp3"
 }
 ```
 
@@ -214,7 +215,9 @@ Start processing from `fileId` or `input_path`. Returns immediately with `jobId`
 {
   "jobId": "job-def-456",
   "status": "queued",
-  "queuePosition": 1
+  "queuePosition": 1,
+  "progress_url": "/v1/jobs/job-def-456/progress",
+  "poll_url": "/v1/jobs/job-def-456"
 }
 ```
 
@@ -223,8 +226,9 @@ Start processing from `fileId` or `input_path`. Returns immediately with `jobId`
 | Status | Meaning |
 |--------|---------|
 | 400 | Missing fileId or input_path |
+| 403 | input_path or output_path not in allowed paths |
 | 404 | fileId not found |
-| 403 | input_path not in allowed paths |
+| 409 | Cannot cancel non-queued job |
 | 415 | Unsupported processor type |
 
 ---
@@ -298,6 +302,9 @@ Server-Sent Events stream for real-time progress.
 **Events:**
 
 ```
+event: state
+data: {"event":"state","jobId":"job-def-456","status":"processing","percent":25,"message":"Transcoding..."}
+
 event: start
 data: {"event":"start","jobId":"job-def-456","processor":"audio"}
 
@@ -309,6 +316,9 @@ data: {"event":"complete","jobId":"job-def-456","assetId":"asset-ghi-789","metad
 
 event: error
 data: {"event":"error","jobId":"job-def-456","error":"Processing failed"}
+
+event: cancelled
+data: {"event":"cancelled","jobId":"job-def-456"}
 ```
 
 ---
@@ -335,7 +345,6 @@ Get asset metadata without downloading the file.
   "size": 456789,
   "createdAt": "2026-04-17T05:45:35.123Z",
   "expiresAt": "2026-04-17T06:45:35.123Z",
-  "retrievedAt": null,
   "metadata": {
     "sampleRate": 16000,
     "channels": 1,
@@ -482,20 +491,26 @@ WebSocket connection for progress tracking and binary transfer.
 
 | Message | Description |
 |---------|-------------|
+| `{ "type": "connected", "id": "..." }` | Sent immediately on connection |
+| `{ "type": "state", "jobId": "...", "status": "...", "percent": 50 }` | Current job state (sent on subscribe) |
 | `{ "type": "subscribed", "jobId": "..." }` | Subscription confirmed |
+| `{ "type": "unsubscribed", "jobId": "..." }` | Unsubscription confirmed |
 | `{ "type": "progress", "jobId": "...", "percent": 50, "message": "..." }` | Progress update |
 | `{ "type": "complete", "jobId": "...", "assetId": "..." }` | Job complete |
 | `{ "type": "error", "jobId": "...", "error": "..." }` | Job failed |
+| `{ "type": "cancelled", "jobId": "..." }` | Job was cancelled |
 | `{ "type": "pong", "timestamp": 1234567890 }` | Heartbeat pong |
+| `{ "type": "upload_accepted", "uploadId": "..." }` | Upload accepted, ready for binary |
 | Binary frames | Download data (after download_request) |
 
 **Binary Upload Workflow:**
 
 ```
 1. Client → { type: "upload_start", uploadId: "...", filename: "...", size: 12345 }
-2. Client → [binary chunks...]
-3. Client → { type: "upload_complete", uploadId: "..." }
-4. Server → { type: "upload_ready", fileId: "...", detectedType: "..." }
+2. Server → { type: "upload_accepted", uploadId: "...", maxSize: ... }
+3. Client → [binary chunks...]
+4. Client → { type: "upload_complete", uploadId: "..." }
+5. Server → { type: "upload_ready", fileId: "...", detectedType: "..." }
 ```
 
 **Binary Download Workflow:**
@@ -515,11 +530,17 @@ WebSocket connection for progress tracking and binary transfer.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `max_dimension` | number | 1024 | Longest edge constraint (64-4096) |
+| `max_dimension` | number | 1024 | Longest edge constraint (1-10000) |
 | `quality` | number | 85 | Output quality 1-100 |
 | `format` | string | jpeg | Output format: jpeg, png, webp, avif, gif |
 | `strip_exif` | boolean | true | Strip EXIF metadata |
 | `crop` | object | - | Crop configuration |
+| `rotate` | number | - | Rotate: 90, 180, or 270 |
+| `flip` | boolean | false | Vertical flip |
+| `flop` | boolean | false | Horizontal flip |
+| `grayscale` | boolean | false | Convert to grayscale |
+| `normalize` | boolean | false | Normalize contrast |
+| `blur` | number | 0 | Blur sigma (0-20) |
 
 **Crop Options:**
 
@@ -527,12 +548,15 @@ WebSocket connection for progress tracking and binary transfer.
 {
   "crop": {
     "type": "region",
-    "x": 0.25, "y": 0.25, "width": 0.5, "height": 0.5
+    "left": 0.25, "top": 0.25, "right": 0.75, "bottom": 0.75
   }
 }
 ```
 
-Crop types: `region` (normalized coords 0-1), `center` (% of image), `grid` (cell extraction)
+Crop types:
+- `region`: `{ left, top, right, bottom }` (normalized coords 0-1)
+- `center`: `{ width, height }` (% of image, default 50)
+- `grid`: `{ cols, rows, cells }` (cells is array of cell indices to extract)
 
 ---
 
@@ -540,10 +564,9 @@ Crop types: `region` (normalized coords 0-1), `center` (% of image), `grid` (cel
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `sample_rate` | number | 16000 | Output sample rate: 8000, 16000, 22050, 44100, 48000 |
-| `channels` | number | 1 | Output channels: 1 (mono) or 2 (stereo) |
-| `format` | string | mp3 | Output format: mp3, wav, ogg, m4a |
-| `audio_codec` | string | auto | Specific codec (from capabilities) |
+| `sample_rate` | number/string | 16000 | Output sample rate: 8000, 16000, 22050, 44100, 48000, or `"source"` |
+| `channels` | number/string | 1 | Output channels: 1, 2, or `"source"` |
+| `format` | string | mp3 | Output format: mp3, wav, ogg, m4a, flac, aac, opus |
 
 ---
 
@@ -587,8 +610,12 @@ Crop types: `region` (normalized coords 0-1), `center` (% of image), `grid` (cel
 | 202 | Accepted (async task queued) |
 | 400 | Bad request |
 | 404 | Not found |
+| 409 | Conflict (cannot cancel active job) |
+| 411 | Length required (missing Content-Length) |
 | 413 | File too large |
 | 415 | Unsupported format |
+| 429 | Too many concurrent uploads |
+| 507 | Insufficient disk space |
 | 5XX | Processing error |
 
 ### Error Response Format
@@ -619,11 +646,11 @@ All configuration is managed via `config.json` in the project root.
 |-------|---------|-------------|
 | `media.maxFileSizeMb` | 9007199254740991 (essentially unlimited) | Maximum upload size (MB) |
 | `media.allowedInputPaths` | [] | Allowed paths for input_path processing |
-| `media.allowedOutputPaths` | [] | Allowed paths for output file writing |
-| `workers.mode` | process | Worker execution mode: process, thread, or queue |
+| `media.allowedOutputPaths` | [] | Allowed paths for output_path file writing |
+| `workers.mode` | queue | Worker execution mode: `queue`, `thread`, or `process`. Use `process` for audio/video |
 | `workers.maxConcurrentTasks` | 4 | Max concurrent workers |
 | `cache.ttl` | 3600 | Asset cache TTL (seconds) |
-| `cache.maxSizeMb` | 10240 | Max cache size (MB) |
+| `cache.maxSize` | 10737418240 | Max cache size in **bytes** (e.g. 10737418240 = 10GB) |
 
 See `config.json` for full configuration reference.
 

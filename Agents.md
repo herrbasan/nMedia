@@ -106,15 +106,15 @@ This project uses git submodules located in `/modules`. These are all **our own 
 |-----------|------------|--------------|
 | ImageProcessor | nImage (native NAPI) | Resize, format conversion, cropping (region/center/grid), EXIF stripping. Supports RAW, HEIC, and 150+ formats |
 | AudioProcessor | nVideo (native NAPI) | Resampling (8-48kHz), channel conversion, format conversion (mp3/wav/ogg/m4a). Direct FFmpeg library integration. |
-| VideoProcessor | nVideo (native NAPI) | Audio extraction, keyframe extraction at configurable FPS. Direct FFmpeg library integration. |
+| VideoProcessor | nVideo (native NAPI) | Audio extraction, keyframe extraction, full transcode, CLI passthrough. Direct FFmpeg library integration. |
 
 #### nVideo Native Module (`modules/nVideo/`)
 - Direct FFmpeg C API integration (no CLI spawning)
 - File-to-file transcoding runs entirely in C++
 - Audio filter graphs (`abuffer → aformat → asetnsamples → abuffersink`)
 - Native progress callbacks (percent, speed, bitrate, ETA)
-- Automatic GPU codec selection based on `config.media.gpu.platform`
 - SHA256-based caching with transmit-once TTL
+- GPU codec must be explicitly specified in options; no automatic selection occurs
 
 **GPU Platforms:**
 | Platform | Video Decode | Video Encode |
@@ -156,17 +156,26 @@ This project uses git submodules located in `/modules`. These are all **our own 
 - `max_dimension`: Longest edge constraint (default 1024px)
 - `quality`: Output quality 1-100 (default 85)
 - `format`: jpeg/png/webp/avif/gif
-- `crop`: region (normalized coords), center (% of image), grid (cell extraction)
+- `crop`: region (`left`/`top`/`right`/`bottom` normalized coords 0-1), center (`width`/`height` % of image), grid (`cols`/`rows` + `cells` array)
+- `rotate`: 90, 180, or 270
+- `flip`: vertical flip
+- `flop`: horizontal flip
+- `grayscale`: convert to grayscale
+- `normalize`: normalize contrast
+- `blur`: blur sigma 0-20
 
 **Audio:**
 - `sample_rate`: 8000/16000/22050/44100/48000 Hz (default 16000 for STT)
 - `channels`: 1 (mono) or 2 (stereo), default mono
-- `format`: mp3/wav/ogg/m4a
+- `format`: mp3/wav/ogg/m4a/flac/aac/opus
+- `sample_rate` and `channels` also accept `"source"` to preserve original values
 
 **Video:**
-- `mode`: extract_audio or extract_keyframes
+- `mode`: extract_audio, extract_keyframes, transcode, or cli
 - `fps`: Frame rate for keyframe extraction (1-30)
 - `max_dimension`: Max frame dimension
+- `video_codec` / `audio_codec`: Explicit codec selection (no auto-selection)
+- `hwaccel`: Must be explicitly specified; no auto-injection occurs
 
 ## Task System
 
@@ -185,9 +194,9 @@ Configured via `workers.mode` in `config.json`:
 
 | Mode | Behavior | Use Case |
 |------|----------|----------|
-| `process` (default) | Each task spawns a `child_process.fork` | Maximum isolation — native crashes don't affect main process or other workers |
+| `queue` (default) | Tasks run serialized on the main thread | Memory-constrained, simpler debugging. **Broken** — `Worker.js` only branches for `thread`/`process`; queue mode falls through with `undefined` result |
 | `thread` | Each task spawns a `worker_thread` | True parallelism, lighter than process mode |
-| `queue` | Tasks run on main thread, serialized by queue | Memory-constrained, simpler debugging |
+| `process` | Each task spawns a `child_process.fork` | Maximum isolation — native crashes don't affect main process or other workers. **Strongly recommended** for audio/video |
 
 **Process mode is strongly recommended** for audio/video. A native module panic in nVideo will kill only the child process, not the main process or other workers.
 
@@ -209,12 +218,13 @@ Configured via `workers.mode` in `config.json`:
 
 1. Client sends raw binary to `POST /v1/upload` **or** provides `input_path` to `POST /v1/process`
 2. Route handler validates input (magic bytes, path allowlist)
-3. `POST /v1/process` returns `jobId` immediately
+3. `POST /v1/process` returns `jobId` immediately (also `progress_url` and `poll_url`)
 4. Client subscribes to progress via SSE (`/v1/jobs/:jobId/progress`) or WebSocket (`/v1/ws`)
 5. PipelineExecutor routes to appropriate processor
 6. Processor performs transformation with native progress callbacks
 7. Result stored in AssetCache; `complete` event includes `assetId`
 8. Client downloads from `/v1/assets/:assetId`
+9. Optional: `output_path` in process request writes result directly to filesystem
 
 ## Error Handling Contract
 
@@ -238,10 +248,10 @@ Fixed in `src/api/routes/upload.js`: the `rawRequest` `close` event was destroyi
 Native modules are loaded in worker threads via `createRequire(import.meta.url)` because ESM `worker_threads` does not support direct `require()`.
 
 ### Worker Process Mode
-Added `process` mode (child_process.fork) as the default worker execution mode for maximum isolation. Native crashes in nVideo only kill the child process, not the main process or other workers. `Worker.js` supports three modes: `process`, `thread`, and `queue`.
+Added `process` mode (child_process.fork) for maximum isolation. Native crashes in nVideo only kill the child process, not the main process or other workers. `Worker.js` supports three modes: `process`, `thread`, and `queue`. Note: `config.js` defaults to `queue`, but `process` is strongly recommended for audio/video.
 
 ### hwaccel Handling
-Hardware acceleration is **only applied when explicitly requested** via `options.hwaccel`. The previous auto-injection of `hwaccel: 'cuda'` for NVENC codecs has been removed across all paths (VideoProcessor, TaskWorker, and frontend CLI parser) to prevent the CUDA access violation segfault. Users must explicitly specify `-hwaccel cuda` in CLI mode or set `hwaccel` in transcode options.
+Hardware acceleration is **only applied when explicitly requested** via `options.hwaccel`. Auto-injection has been removed from `TaskWorker.js` and the frontend CLI parser. **However, `VideoProcessor.js` still auto-injects `hwaccel: 'cuda'` when an NVENC codec is used** — this is a known inconsistency that may cause CUDA access violation segfaults if not explicitly managed. Users should explicitly specify `hwaccel` in transcode options to avoid surprises.
 
 ### Zero-Copy GPU Acceleration Pipeline
 The data-flow logic in `src/tasks/TaskWorker.js` has been patched to unconditionally propagate `cli_command` and `hwaccel` overrides to the underlying FFmpeg runner. This allows the construction of true 100% GPU-accelerated *zero-copy* pipelines where frames remain in VRAM for decoding, transforming (e.g., `-vf scale_cuda=format=p010le`), and encoding (e.g., `av1_nvenc`), utilizing virtually zero CPU.

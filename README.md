@@ -95,7 +95,8 @@ Unified processing endpoint. Supports two patterns:
   "input_path": "C:\\Media\\video.mp4",
   "processor": "video",
   "mode": "extract_audio",
-  "options": { "format": "mp3" }
+  "options": { "format": "mp3" },
+  "output_path": "C:\\Media\\output\\audio.mp3"
 }
 ```
 
@@ -138,6 +139,11 @@ The following legacy endpoints still work for backward compatibility:
 - `POST /v1/process/video` - Synchronous video processing
 - `POST /v1/audio/probe` - Audio metadata probe
 
+### Capabilities
+
+- `GET /v1/capabilities` - Query native module capabilities (codecs, formats, hwaccels)
+  - Query params: `module=nvideo|nimage`, `section=...`
+
 ### Asset Cache
 
 - `GET /v1/assets` - List assets
@@ -145,6 +151,10 @@ The following legacy endpoints still work for backward compatibility:
 - `GET /v1/assets/:id/metadata` - Asset metadata
 - `DELETE /v1/assets/:id` - Delete asset
 - `DELETE /v1/assets` - Clear all assets
+
+### WebSocket
+
+- `WS /v1/ws` - Real-time progress + binary upload/download
 
 ### System
 
@@ -168,6 +178,9 @@ All configuration is managed via `config.json` in the project root. Required fie
     },
     "allowedInputPaths": [
       "C:\\Users\\dave\\Media\\input"
+    ],
+    "allowedOutputPaths": [
+      "C:\\Users\\dave\\Media\\output"
     ]
   },
   "logging": {
@@ -183,7 +196,7 @@ All configuration is managed via `config.json` in the project root. Required fie
   },
   "workers": {
     "maxConcurrentTasks": 4,
-    "mode": "thread"
+    "mode": "process"
   },
   "messaging": {
     "transport": "sse"
@@ -203,9 +216,10 @@ All configuration is managed via `config.json` in the project root. Required fie
 | `logging.logsDir` | Yes | Directory for log files |
 | `cache.dir` | No | Cache directory |
 | `cache.ttl` | No | Asset TTL in seconds |
-| `cache.maxSize` | No | Max cache size in bytes |
+| `cache.maxSize` | No | Max cache size in bytes (e.g. 10737418240 = 10GB) |
 | `workers.maxConcurrentTasks` | No | Max parallel tasks |
-| `workers.mode` | No | `queue` or `thread` (default: queue) |
+| `workers.mode` | No | `queue`, `thread`, or `process` (default: queue). Use `process` for audio/video |
+| `media.allowedOutputPaths` | No | Allowed directories for `output_path` writing |
 
 ## Quick Start
 
@@ -263,9 +277,11 @@ curl -X POST http://localhost:3500/v1/process/image \
 
 ## Worker Modes
 
-**Queue mode** (`"queue"`): Tasks run serialized on the main thread. Lower memory footprint.
+**Queue mode** (`"queue"`, default): Tasks run serialized on the main thread. Lower memory footprint. Currently has a bug where results are undefined — use `thread` or `process` instead.
 
-**Thread mode** (`"thread"`, recommended): Each task spawns a `worker_thread`. Native modules run off the main event loop, providing true parallelism and process isolation.
+**Thread mode** (`"thread"`): Each task spawns a `worker_thread`. Native modules run off the main event loop, providing true parallelism.
+
+**Process mode** (`"process"`, recommended for audio/video): Each task spawns a `child_process.fork`. Maximum isolation — a native crash in nVideo kills only the child process, not the main process or other workers.
 
 ## Web UI
 
