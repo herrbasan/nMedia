@@ -95,30 +95,15 @@ router.addRoute('DELETE', '/v1/assets', handleClearAssets);
 // Capabilities endpoint
 router.addRoute('GET', '/v1/capabilities', handleCapabilities);
 
-// Static file serving for Admin UI
+// Static file serving for Web UI
 const publicDir = path.join(__dirname, '../public');
 const modulesDir = path.join(__dirname, '../modules');
 
-// Admin UI - serves from public/admin
-router.addRoute('GET', '/admin/*', StaticFileServer.createHandler(path.join(publicDir, 'admin')));
-
-// Redirect /admin to /admin/ (for relative paths to work)
-router.addRoute('GET', '/admin', (ctx) => {
-  ctx.rawResponse.writeHead(302, { 'Location': '/admin/' });
-  ctx.rawResponse.end();
-});
-
-// Task Builder UI - serves from public/taskbuilder
-router.addRoute('GET', '/taskbuilder/*', StaticFileServer.createHandler(path.join(publicDir, 'taskbuilder')));
-
-// Redirect /taskbuilder to /taskbuilder/
-router.addRoute('GET', '/taskbuilder', (ctx) => {
-  ctx.rawResponse.writeHead(302, { 'Location': '/taskbuilder/' });
-  ctx.rawResponse.end();
-});
-
-// Modules access for NUI (so NUI files can be loaded from modules/nui_wc2)
+// Modules access for NUI (must be before catch-all)
 router.addRoute('GET', '/modules/*', StaticFileServer.createHandler(modulesDir));
+
+// Web UI - serves from public/ (index.html at root) — catch-all last
+router.addRoute('GET', '/*', StaticFileServer.createHandler(publicDir));
 
 // Create HTTP server
 const server = createServer((req, res) => {
@@ -160,8 +145,7 @@ server.listen(config.port, () => {
   logger.info(`Media Service started on port ${config.port}`, {}, 'System', { console: true });
   logger.info(`Max file size: ${config.maxFileSizeMb}MB`, {}, 'System', { console: true });
   logger.info(`Log level: ${config.logLevel}`, {}, 'System', { console: true });
-  logger.info(`Admin UI available at http://localhost:${config.port}/admin/`, {}, 'System', { console: true });
-  logger.info(`Task Builder UI available at http://localhost:${config.port}/taskbuilder/`, {}, 'System', { console: true });
+  logger.info(`Web UI available at http://localhost:${config.port}/`, {}, 'System', { console: true });
   logger.info(`WebSocket endpoint: ws://localhost:${config.port}/v1/ws`, {}, 'System', { console: true });
   logger.info(`Capabilities endpoint: http://localhost:${config.port}/v1/capabilities`, {}, 'System', { console: true });
 });
