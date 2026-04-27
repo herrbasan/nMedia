@@ -660,7 +660,7 @@ Crop types:
 
 ## Configuration
 
-All configuration is managed via `config.json` in the project root.
+All configuration is managed via `config.json` in the project root. Copy `config.example.json` to `config.json` and adjust paths for your environment. The config loader throws on missing required values — this is intentional.
 
 **Required fields:**
 
@@ -682,7 +682,7 @@ All configuration is managed via `config.json` in the project root.
 | `cache.ttl` | 3600 | Asset cache TTL (seconds) |
 | `cache.maxSize` | 10737418240 | Max cache size in **bytes** (e.g. 10737418240 = 10GB) |
 
-See `config.json` for full configuration reference.
+See `config.example.json` for full configuration reference.
 
 ---
 

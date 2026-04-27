@@ -31,7 +31,7 @@ Proper documentation for the project, similar in style to nImage and nVideo modu
 
 ## Configuration
 
-All configuration is managed via `config.json` in the project root. No `.env` defaults are used. The config loader throws on missing required values - this is intentional.
+All configuration is managed via `config.json` in the project root. Copy `config.example.json` to `config.json` and adjust paths for your environment. The config loader throws on missing required values — this is intentional. No `.env` files are used.
 
 Required fields:
 - `server.port`

@@ -114,7 +114,7 @@ The following legacy endpoints still work for backward compatibility:
 
 ## Configuration
 
-All configuration is managed via `config.json` in the project root. Required fields will throw an error at startup if missing.
+All configuration is managed via `config.json` in the project root. Copy `config.example.json` to `config.json` and adjust paths for your environment. Required fields will throw an error at startup if missing.
 
 ```json
 {

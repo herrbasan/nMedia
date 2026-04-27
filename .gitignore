@@ -7,9 +7,8 @@ _Archive/
 node_modules/
 deps/
 
-# Environment
-.env
-.env.local
+# Config
+config.json
 
 # Claude
 .claude/
