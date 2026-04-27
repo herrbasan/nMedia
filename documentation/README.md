@@ -5,6 +5,7 @@
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [Web UI](#web-ui)
 - [Architecture](#architecture)
 - [API Reference](#api-reference)
   - [Upload](#upload)
@@ -81,6 +82,35 @@ const { jobId } = await fetch('http://localhost:3501/v1/process', {
   }),
 }).then(r => r.json());
 ```
+
+---
+
+## Web UI
+
+A built-in web interface is available at the service root (`http://localhost:PORT/`). It combines service monitoring with an interactive task explorer for finding optimal API configurations.
+
+### Pages
+
+| Page | Route | Purpose |
+|------|-------|---------|
+| **Dashboard** | `#page=dashboard` | Service health, active jobs, cache stats, recent activity table |
+| **Task Explorer** | `#page=task-explorer` | Interactive tool: file dropzone, processor selector, all options exposed, live API command preview (curl/fetch/JSON), run test with SSE progress |
+| **Job Monitor** | `#page=job-monitor` | Real-time job queue with progress bars, cancel/download actions |
+| **System Tests** | `#page=system-tests` | End-to-end verification of upload, WebSocket, SSE, and API connectivity |
+| **Cache Manager** | `#page=cache-manager` | Browse cached assets, view metadata, delete individual or clear all |
+
+### Task Explorer
+
+The primary purpose of the web UI is finding optimal settings for integration workflows:
+
+1. **Input**: Drag & drop a file, or enter a server path. The dropzone attempts to parse the file path for file-to-file workflows.
+2. **Processor**: Select image/audio/video — the options panel updates dynamically.
+3. **Options**: All processor options are exposed as form controls. Values default to service defaults.
+4. **API Preview**: Three tabs show the live-generated API request as curl, fetch, or JSON.
+5. **Run**: Uploads file if needed, starts processing, subscribes to SSE progress, displays result with download link.
+6. **Copy**: Copies the active command tab to clipboard.
+
+The task explorer is **stateless** — no presets or saved configurations. Copy the command and integrate it into your workflow.
 
 ---
 

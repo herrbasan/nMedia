@@ -259,6 +259,169 @@ The data-flow logic in `src/tasks/TaskWorker.js` has been patched to uncondition
 ### Disk-to-Disk Processing Exceptions
 Fixed a crash in `src/tasks/Worker.js` that occurred when jobs utilized hardware acceleration and outputted results directly to disk without passing through software memory. The worker was erroneously querying `result.buffer.length` on disk-only resolutions, throwing a `Cannot read properties of undefined (reading 'length')` error that bubbled up to the UI. The caching flow now properly forks between memory buffers (`result.buffer`) and disk outputs (`result.filePath` / `result.outputPath`).
 
+## Web Frontend
+
+The web frontend (`public/`) is a unified NUI-based application that combines service monitoring with task exploration. It serves as both an admin dashboard and a settings explorer for finding optimal API configurations.
+
+### Purpose
+
+- **Dashboard**: Service health, active jobs, cache stats, recent activity
+- **Task Explorer**: Interactive tool for testing all processor options and generating API commands (curl, fetch, JSON)
+- **Job Monitor**: Real-time job queue with progress tracking, cancel/download actions
+- **System Tests**: Verify connectivity, upload, WebSocket, SSE progress streaming
+- **Cache Manager**: Browse assets, view metadata, delete individual or clear all
+
+### Architecture
+
+- **NUI Web Components**: Built on `modules/nui_wc2` — native custom elements, no framework
+- **Fragment Router**: SPA routing via `nui.setupRouter()`, pages are HTML fragments cached after first load
+- **Page Scripts**: Each page uses `<script type="nui/page">` with `init(element, params, nui)` — runs once per page, scoped to page wrapper
+- **Shared API Client**: `js/api-client.js` wraps all Media Service endpoints, exposes `window.api` globally
+- **WebSocket**: Auto-connects on app load, reconnects on disconnect, broadcasts messages via `window.dispatchEvent(new CustomEvent('ws-message', { detail: msg }))`
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `public/index.html` | App shell with NUI layout, sidebar navigation, theme toggle |
+| `public/js/app.js` | Router setup, navigation data, WS connection management, global action handlers |
+| `public/js/api-client.js` | All API calls: upload, process, jobs, assets, capabilities, SSE, WebSocket. Command builders for curl/fetch |
+| `public/pages/task-explorer.html` | Main tool: file dropzone, processor selector, dynamic options panel, live API preview, run test |
+| `public/pages/dashboard.html` | Service stats, recent jobs table (polls every 5s) |
+| `public/pages/job-monitor.html` | Job queue with progress bars, cancel/download (polls every 3s) |
+| `public/pages/system-tests.html` | End-to-end verification of all transport mechanisms |
+| `public/pages/cache-manager.html` | Asset grid, metadata viewer, bulk delete |
+
+### Task Explorer Design
+
+The core purpose is finding optimal settings for workflows:
+
+1. **Input**: File dropzone (drag/drop or click), or server path input. Dropzone attempts to parse file path for file-to-file workflows
+2. **Processor**: Select image/audio/video — options panel updates dynamically
+3. **Options**: All processor options exposed as form controls (sliders, selects, checkboxes). Values default to service defaults
+4. **API Preview**: Live-updating tabs showing curl, fetch, and JSON payload for current settings
+5. **Run**: Uploads file if needed, starts job, subscribes to SSE progress, displays result with download link
+6. **Copy**: Copies the active command tab to clipboard
+
+Stateless — no presets or saved configurations. The user copies the command and integrates it into their workflow.
+
+## Job System
+
+The job system manages asynchronous processing and persists state across restarts.
+
+### Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| **JobStore** | `src/jobs/JobStore.js` | Disk-backed persistence for jobs and uploads. JSON file at `cache/jobs/jobs.json` |
+| **TaskManager** | `src/tasks/TaskManager.js` | Singleton coordinator, bridges HTTP layer to task queue |
+| **TaskQueue** | `src/tasks/TaskQueue.js` | FIFO queue with concurrency control |
+| **Worker** | `src/tasks/Worker.js` | Picks up tasks, spawns thread/process or runs on main thread |
+| **TaskWorker** | `src/tasks/TaskWorker.js` | Worker thread bootstrap (thread mode only) |
+| **Task** | `src/tasks/Task.js` | Task state machine and promise wrapper |
+
+### Job Lifecycle
+
+```
+queued → processing → completed/failed/cancelled
+```
+
+- Jobs are created with status `queued` and a queue position
+- When a worker is available, the job transitions to `processing`
+- On completion, the `assetId` is set and `completedAt` timestamped
+- On failure, `error` is set
+- On cancellation (only while queued), status becomes `cancelled`
+
+### Persistence
+
+JobStore persists to `cache/jobs/jobs.json` on every mutation:
+- **Jobs**: All job entries with full state
+- **Uploads**: Upload metadata (fileId, tempPath, detected type, size, processed flag)
+- **uploadToJob**: Mapping from fileId to jobId
+- **nextQueuePosition**: Monotonically increasing counter
+
+### Startup Recovery
+
+On restart:
+1. Load persisted jobs and uploads from JSON
+2. Jobs in `processing` state are marked `failed` ("Service restarted during processing")
+3. Jobs in `queued` remain queued (will be re-processed)
+
+### Cleanup
+
+Runs every 5 minutes:
+- **Uploads deleted when**:
+  - Unprocessed and expired (> 1h)
+  - Processed and job completed/failed/cancelled > 1h ago
+  - Processed but job no longer exists
+  - Older than 24h (safety net)
+- **Jobs deleted when**: completed/failed/cancelled > 1h ago
+- **Orphan files**: Files in `cache/uploads/` not tracked in uploads Map are deleted
+- **Orphan job files**: Stray files in `cache/jobs/` (only `jobs.json` should remain) are deleted
+
+### ID Chain
+
+```
+fileId (upload) → jobId (process) → assetId (result)
+```
+
+## Cache System
+
+Two independent cache systems: AssetCache (processed results) and JobStore uploads (raw inputs).
+
+### AssetCache (`src/cache/AssetCache.js`)
+
+Stores processed media results with TTL-based expiration.
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `cacheDir` | `cache/assets/` | Storage directory |
+| `ttl` | 3600s | Time-to-live for new assets |
+| `maxSize` | 10GB | Max total cache size (LRU eviction) |
+
+**TTL Behavior:**
+- New assets get `expiresAt = now + ttl`
+- On first download (`markRetrieved`), `expiresAt` is set to `now` (expire immediately)
+- Cleanup runs every 5 minutes, deleting expired assets
+
+**Persistence:**
+- Metadata persisted to `cache/assets/assets.json` on every mutation
+- On startup: loads metadata, deletes orphaned files, recalculates `currentSize`
+- Files without metadata entries are deleted as orphans
+
+**LRU Eviction:**
+- Triggered when `currentSize > maxSize`
+- Evicts least-recently-accessed assets until below 80% of max
+- Logs each eviction with asset ID, type, size
+
+### JobStore Uploads (`src/jobs/JobStore.js`)
+
+Stores raw uploaded files before processing.
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `uploadsDir` | `cache/uploads/` | Storage directory |
+| `uploadTTL` | 3600ms | Expiry for unprocessed uploads |
+
+**Upload Lifecycle:**
+1. File uploaded via `POST /v1/upload` → written to `cache/uploads/` as temp file
+2. Upload registered in JobStore with `processed = false`
+3. On process start, upload marked `processed = true`
+4. Cleanup deletes upload file and entry when conditions met (see Job System cleanup)
+
+### Storage Layout
+
+```
+cache/
+├── assets/          # Processed results (AssetCache)
+│   ├── assets.json  # Metadata persistence
+│   └── {uuid}.{ext} # Asset files
+├── uploads/         # Raw uploads (JobStore)
+│   └── {uuid}.tmp   # Upload temp files
+└── jobs/            # Job persistence
+    └── jobs.json    # Job + upload metadata
+```
+
 ## LLM Integration Notes
 
 - Images are downscaled to reduce token count while preserving visual fidelity

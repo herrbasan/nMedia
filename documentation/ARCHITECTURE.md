@@ -147,26 +147,56 @@ Raw Node.js WebSocket implementation (no external `ws` dependency).
 
 **Location:** `src/jobs/JobStore.js`
 
-Disk-backed job persistence and upload tracking.
+Disk-backed job and upload persistence with startup recovery.
 
-**Features:**
-- Jobs persisted to `./cache/jobs/jobs.json`
-- On startup: processing jobs marked `failed`, queued jobs re-queued
-- Uploads have 1-hour TTL if never processed
-- Background cleanup runs periodically
+**Storage layout:**
+- `cache/jobs/jobs.json` — persisted jobs, uploads, uploadToJob mapping, nextQueuePosition
+- `cache/uploads/` — raw uploaded temp files
+
+**Job lifecycle:**
+```
+queued → processing → completed/failed/cancelled
+```
+
+**Startup recovery:**
+1. Load persisted jobs and uploads from JSON
+2. Jobs in `processing` state marked `failed` ("Service restarted during processing")
+3. Jobs in `queued` remain queued (will be re-processed)
+
+**Cleanup (every 5 minutes):**
+- **Uploads deleted when:**
+  - Unprocessed and expired (> 1h)
+  - Processed and job completed/failed/cancelled > 1h ago
+  - Processed but job no longer exists
+  - Older than 24h (safety net)
+- **Jobs deleted when:** completed/failed/cancelled > 1h ago
+- **Orphan cleanup:** Files in `cache/uploads/` not tracked in uploads Map are deleted
+
+**ID chain:** `fileId` (upload) → `jobId` (process) → `assetId` (result)
 
 ### AssetCache
 
 **Location:** `src/cache/AssetCache.js`
 
-Stores processing results with TTL management.
+Disk-backed asset storage with TTL management, LRU eviction, and JSON persistence.
 
-**Configuration:**
-- Storage: `./cache/assets/`
-- Default TTL: 1 hour
-- Retrieved TTL: 0 (immediate cleanup on next cycle)
-- Max cache size: 10GB (configurable)
-- Cleanup interval: 5 minutes
+**Storage layout:**
+- `cache/assets/assets.json` — metadata persistence
+- `cache/assets/{uuid}.{ext}` — asset files
+
+**TTL behavior:**
+- New assets get `expiresAt = now + ttl` (default 1 hour)
+- On first download (`markRetrieved`), `expiresAt` set to `now` (expire immediately)
+- Cleanup runs every 5 minutes, deleting expired assets
+
+**Persistence:**
+- Metadata persisted to `cache/assets/assets.json` on every mutation
+- On startup: loads metadata, deletes orphaned files, recalculates `currentSize`
+
+**LRU eviction:**
+- Triggered when `currentSize > maxSize`
+- Evicts least-recently-accessed assets until below 80% of max
+- Logs each eviction with asset ID, type, size
 
 ## Worker Execution Modes
 
