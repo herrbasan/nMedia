@@ -129,10 +129,15 @@ async function _handleUploadBased(ctx, fileId, processor, mode, options, outputP
     return;
   }
 
-  // Validate processor matches detected type
+  // nVideo handles both audio and video using the 'video' processor.
+  // Allow 'video' processor to handle 'audio' uploads.
   if (upload.detectedType !== processor) {
-    ctx.error(400, `Upload detected as ${upload.detectedType}, but processor is ${processor}`);
-    return;
+    if (processor === 'video' && upload.detectedType === 'audio') {
+      // Allow video processor to handle audio files
+    } else {
+      ctx.error(400, `Upload detected as ${upload.detectedType}, but processor is ${processor}`);
+      return;
+    }
   }
 
   // Validate video mode if applicable
