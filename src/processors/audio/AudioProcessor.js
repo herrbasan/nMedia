@@ -112,10 +112,13 @@ class AudioProcessor extends Processor {
       sample_rate = 16000,
       channels = 1,
       format = 'mp3',
+      audio_bitrate,
     } = options;
 
     const targetSampleRate = sample_rate === 'source' ? sourceMetadata.sampleRate : sample_rate;
     const targetChannels = channels === 'source' ? sourceMetadata.channels : channels;
+
+    const bitrate = audio_bitrate || (format === 'mp3' || format === 'm4a' ? 128000 : 0);
 
     const outputId = uuidv4();
     const outputExt = FORMAT_EXTENSIONS[format] || format;
@@ -132,7 +135,7 @@ class AudioProcessor extends Processor {
             codec: AUDIO_CODECS[format],
             sampleRate: targetSampleRate,
             channels: targetChannels,
-            bitrate: format === 'mp3' || format === 'm4a' ? 128000 : 0,
+            bitrate,
           },
           cache: false,
           onProgress: (p) => {

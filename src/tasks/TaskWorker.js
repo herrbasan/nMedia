@@ -82,6 +82,7 @@ async function processAudio(inputSource, options, cacheDir) {
   const format = options.format || 'mp3';
   const sampleRate = rawSampleRate === 'source' ? 0 : parseInt(rawSampleRate, 10);
   const channelCount = rawChannels === 'source' ? 0 : parseInt(rawChannels, 10);
+  const bitrate = options.audio_bitrate || (format === 'mp3' || format === 'm4a' ? 128000 : 0);
 
   const inputPath = resolveInputPath(inputSource, cacheDir);
   const shouldCleanupInput = inputSource.type === 'buffer';
@@ -95,7 +96,7 @@ async function processAudio(inputSource, options, cacheDir) {
           codec: AUDIO_CODECS[format],
           sampleRate,
           channels: channelCount,
-          bitrate: format === 'mp3' || format === 'm4a' ? 128000 : 0,
+          bitrate,
         },
         cache: false,
         onProgress: (p) => {
