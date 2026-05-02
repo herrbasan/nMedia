@@ -168,7 +168,11 @@ export class TaskWorker {
     } finally {
       this.activeTask = null;
       if (this.nativeWorker) {
-        this.nativeWorker.terminate();
+        if (typeof this.nativeWorker.terminate === 'function') {
+          this.nativeWorker.terminate();
+        } else if (typeof this.nativeWorker.kill === 'function') {
+          this.nativeWorker.kill();
+        }
         this.nativeWorker = null;
       }
     }
