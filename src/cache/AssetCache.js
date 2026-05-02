@@ -375,7 +375,6 @@ export class AssetCache {
       return null;
     }
 
-    this.markRetrieved(id);
     return fs.readFileSync(asset.storagePath);
   }
 
@@ -393,8 +392,6 @@ export class AssetCache {
       this.delete(id);
       return null;
     }
-
-    this.markRetrieved(id);
 
     const opts = {};
     if (range && typeof range.start === 'number') {
