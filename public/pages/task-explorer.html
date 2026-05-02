@@ -89,9 +89,8 @@ function init(element, params, nui) {
 	// --- State ---
 	let selectedFile = null;
 	let fileId = null;
-	let capabilities = null;
 	let uploadMode = true;
-	let currentSSE = null; // Track active SSE connection to prevent leaks
+	let currentSSE = null;
 
 	// --- DOM refs ---
 	const dropzone = element.el('#dropzone');
@@ -108,18 +107,132 @@ function init(element, params, nui) {
 	const copyBtn = element.el('#copy-cmd');
 	const resultCard = element.el('#result-card');
 	const resultArea = element.el('#result-area');
-	const commandTabs = element.el('#command-tabs');
 	const uploadToggle = element.el('#upload-toggle');
-
-	// --- Dropzone ---
 	const dropzoneHint = element.el('#dropzone-hint');
 
+	// --- Codec/Format definitions ---
+	const VIDEO_CODECS = {
+		'CPU Encoders': {
+			'libx264': 'H.264 (x264)',
+			'libx265': 'H.265/HEVC (x265)',
+			'libsvtav1': 'AV1 (SVT-AV1)',
+			'libvpx-vp9': 'VP9 (libvpx)',
+			'libvpx-vp8': 'VP8 (libvpx)',
+			'mpeg4': 'MPEG-4',
+			'mpeg2video': 'MPEG-2',
+		},
+		'NVIDIA NVENC': {
+			'h264_nvenc': 'H.264 (NVENC)',
+			'hevc_nvenc': 'HEVC (NVENC)',
+			'av1_nvenc': 'AV1 (NVENC)',
+		},
+		'Intel QuickSync (QSV)': {
+			'h264_qsv': 'H.264 (QSV)',
+			'hevc_qsv': 'HEVC (QSV)',
+			'av1_qsv': 'AV1 (QSV)',
+		},
+		'VAAPI (AMD/Intel)': {
+			'h264_vaapi': 'H.264 (VAAPI)',
+			'hevc_vaapi': 'HEVC (VAAPI)',
+			'av1_vaapi': 'AV1 (VAAPI)',
+		},
+	};
+
+	const VIDEO_CONTAINERS = ['mp4', 'webm', 'mkv', 'mov', 'avi', 'ts'];
+
+	const AUDIO_CODECS = {
+		'libmp3lame': 'MP3 (LAME)',
+		'aac': 'AAC',
+		'libopus': 'Opus',
+		'libvorbis': 'Vorbis (OGG)',
+		'flac': 'FLAC (lossless)',
+		'pcm_s16le': 'WAV (PCM 16-bit)',
+		'pcm_s24le': 'WAV (PCM 24-bit)',
+		'pcm_f32le': 'WAV (PCM 32-bit float)',
+		'ac3': 'AC3 (Dolby Digital)',
+		'eac3': 'E-AC3 (Dolby Digital+)',
+	};
+
+	const AUDIO_FORMATS = ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'opus'];
+
+	// --- Options definitions ---
+	const OPTIONS_DEF = {
+		image: [
+			{ section: 'Output' },
+			{ name: 'format', label: 'Format', type: 'select', options: ['jpeg','png','webp','avif'], default: 'jpeg',
+				help: 'AVIF quality is auto-scaled (slider × 0.55)' },
+			{ name: 'quality', label: 'Quality', type: 'range', min: 1, max: 100, default: 85 },
+			{ name: 'max_dimension', label: 'Max Dimension', type: 'number', min: 1, max: 10000, default: 1024,
+				help: 'Longest edge in pixels' },
+			{ name: 'strip_exif', label: 'Strip EXIF', type: 'checkbox', default: true },
+
+			{ section: 'Transforms' },
+			{ name: 'rotate', label: 'Rotate', type: 'select', options: ['','90','180','270'], default: '' },
+			{ name: 'flip', label: 'Flip Vertical', type: 'checkbox', default: false },
+			{ name: 'flop', label: 'Flip Horizontal', type: 'checkbox', default: false },
+			{ name: 'grayscale', label: 'Grayscale', type: 'checkbox', default: false },
+			{ name: 'normalize', label: 'Normalize Contrast', type: 'checkbox', default: false },
+			{ name: 'blur', label: 'Blur Sigma', type: 'range', min: 0, max: 20, step: 0.5, default: 0 },
+		],
+		audio: [
+			{ section: 'Output' },
+			{ name: 'format', label: 'Format', type: 'select', options: AUDIO_FORMATS, default: 'mp3' },
+			{ name: 'sample_rate', label: 'Sample Rate', type: 'select',
+				options: ['source','8000','16000','22050','44100','48000'], default: 'source',
+				help: '"source" preserves original sample rate' },
+			{ name: 'channels', label: 'Channels', type: 'select',
+				options: ['source','1','2'], default: 'source',
+				help: '1=mono, 2=stereo, "source" preserves original' },
+			{ name: 'bitrate', label: 'Bitrate (kbps)', type: 'select',
+				options: ['','64','96','128','160','192','256','320'], default: '',
+				help: 'Applied to lossy formats (MP3/AAC/OGG/Opus). Empty = encoder default.' },
+		],
+		video: [
+			{ section: 'Mode' },
+			{ name: 'mode', label: 'Mode', type: 'select',
+				options: ['extract_audio','extract_keyframes','transcode','cli'], default: 'transcode' },
+
+			{ section: 'Transcode', modes: ['transcode','cli'] },
+			{ name: 'video_codec', label: 'Video Codec', type: 'codec-select', codecs: VIDEO_CODECS, default: 'libx264' },
+			{ name: 'audio_codec', label: 'Audio Codec', type: 'select',
+				options: ['','aac','libmp3lame','libopus','libvorbis','flac','copy'], default: 'aac',
+				help: '"copy" passes through original audio stream' },
+			{ name: 'output_format', label: 'Container', type: 'select', options: VIDEO_CONTAINERS, default: 'mp4' },
+			{ name: 'hwaccel', label: 'HW Acceleration', type: 'select',
+				options: ['','cuda','vaapi','qsv','nvdec'], default: '',
+				help: 'Auto-set for NVENC/QSV/VAAPI codecs. Override for custom decode.' },
+			{ name: 'crf', label: 'CRF / Quality', type: 'range', min: 0, max: 51, default: 23,
+				help: 'Lower = better quality. 0=lossless, 18=visually lossless, 23=default, 51=worst.' },
+			{ name: 'preset', label: 'Encoding Preset', type: 'select',
+				options: ['','ultrafast','superfast','veryfast','faster','fast','medium','slow','slower','veryslow'],
+				default: 'medium',
+				help: 'Slower = better compression/quality. NVENC maps to p1-p7.' },
+			{ name: 'max_dimension', label: 'Max Dimension', type: 'number', min: 1, max: 10000, default: 1024,
+				help: 'Longest edge. Leave empty to preserve original.' },
+			{ name: 'audio_bitrate', label: 'Audio Bitrate (bps)', type: 'select',
+				options: ['','64000','96000','128000','160000','192000','256000','320000'], default: '128000' },
+			{ name: 'no_audio', label: 'No Audio (-an)', type: 'checkbox', default: false },
+			{ name: 'no_video', label: 'No Video (-vn)', type: 'checkbox', default: false },
+
+			{ section: 'Keyframes', modes: ['extract_keyframes'] },
+			{ name: 'fps', label: 'FPS', type: 'number', min: 1, max: 30, default: 1 },
+			{ name: 'max_dimension_kf', label: 'Max Frame Size', type: 'number', min: 1, max: 10000, default: 1024 },
+
+			{ section: 'Audio Extract', modes: ['extract_audio'] },
+			{ name: 'extract_format', label: 'Audio Format', type: 'select', options: ['mp3','wav','ogg','m4a'], default: 'mp3' },
+
+			{ section: 'CLI Passthrough', modes: ['cli'] },
+			{ name: 'cli_command', label: 'FFmpeg CLI Args', type: 'text', default: '',
+				placeholder: '-c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k',
+				help: 'Raw FFmpeg arguments. Overrides all other transcode options.' },
+		],
+	};
+
+	// --- Dropzone ---
 	function updateDropzoneHint() {
-		if (uploadMode) {
-			dropzoneHint.textContent = 'Drag & drop a file here, or click to browse';
-		} else {
-			dropzoneHint.textContent = 'Click to pick a file via system dialog (path will be captured)';
-		}
+		dropzoneHint.textContent = uploadMode
+			? 'Drag & drop a file here, or click to browse'
+			: 'Click to pick a file via system dialog (path will be captured)';
 	}
 
 	dropzone.addEventListener('click', async () => {
@@ -130,34 +243,25 @@ function init(element, params, nui) {
 				try {
 					const [handle] = await window.showOpenFilePicker();
 					const file = await handle.getFile();
-					let filePath = null;
-					if (handle.path) filePath = handle.path;
-					else if (file.path) filePath = file.path;
+					let filePath = handle.path || file.path || null;
 					handleFile(file, filePath);
-				} catch { /* User cancelled */ }
+				} catch { /* cancelled */ }
 			} else {
 				fileInput.click();
 			}
 		}
 	});
 
-	dropzone.addEventListener('dragover', (e) => {
-		e.preventDefault();
-		dropzone.classList.add('drag-over');
-	});
+	dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag-over'); });
 	dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
 	dropzone.addEventListener('drop', (e) => {
 		e.preventDefault();
 		dropzone.classList.remove('drag-over');
 		const file = e.dataTransfer.files[0];
-		if (file) {
-			let filePath = null;
-			if (file.path) filePath = file.path;
-			handleFile(file, filePath);
-		}
+		if (file) handleFile(file, file.path || null);
 	});
 	fileInput.addEventListener('change', (e) => {
-		if (e.target.files[0]) handleFile(e.target.files[0], e.target.files[0].path);
+		if (e.target.files[0]) handleFile(e.target.files[0], e.target.files[0].path || null);
 	});
 
 	function handleFile(file, filePath) {
@@ -167,47 +271,31 @@ function init(element, params, nui) {
 		if (filePath && filePath.length > 1 && filePath[1] === ':') {
 			inputPath.value = filePath;
 		} else if (!uploadMode && !inputPath.value) {
-			fileInfo.textContent += ' (path not available — please enter server path manually or use Electron)';
+			fileInfo.textContent += ' (path not available — enter server path manually)';
 		}
 		updatePreview();
 	}
 
-	// --- Options definitions ---
-	const OPTIONS_DEF = {
-		image: [
-			{ name: 'max_dimension', label: 'Max Dimension', type: 'number', min: 1, max: 10000, default: 1024 },
-			{ name: 'quality', label: 'Quality', type: 'range', min: 1, max: 100, default: 85 },
-			{ name: 'format', label: 'Format', type: 'select', options: ['jpeg','png','webp','avif','gif'], default: 'jpeg' },
-			{ name: 'strip_exif', label: 'Strip EXIF', type: 'checkbox', default: true },
-			{ name: 'rotate', label: 'Rotate', type: 'select', options: ['','90','180','270'], default: '' },
-			{ name: 'flip', label: 'Flip Vertical', type: 'checkbox', default: false },
-			{ name: 'flop', label: 'Flip Horizontal', type: 'checkbox', default: false },
-			{ name: 'grayscale', label: 'Grayscale', type: 'checkbox', default: false },
-			{ name: 'normalize', label: 'Normalize', type: 'checkbox', default: false },
-			{ name: 'blur', label: 'Blur Sigma', type: 'range', min: 0, max: 20, default: 0 },
-		],
-		audio: [
-			{ name: 'sample_rate', label: 'Sample Rate', type: 'select', options: ['8000','16000','22050','44100','48000','source'], default: '16000' },
-			{ name: 'channels', label: 'Channels', type: 'select', options: ['1','2','source'], default: '1' },
-			{ name: 'format', label: 'Format', type: 'select', options: ['mp3','wav','ogg','m4a','flac','aac','opus'], default: 'mp3' },
-		],
-		video: [
-			{ name: 'mode', label: 'Mode', type: 'select', options: ['extract_audio','extract_keyframes','transcode','cli'], default: 'extract_audio' },
-			{ name: 'fps', label: 'FPS (keyframes)', type: 'number', min: 1, max: 30, default: 1 },
-			{ name: 'max_dimension', label: 'Max Dimension', type: 'number', min: 1, max: 10000, default: 1024 },
-			{ name: 'output_format', label: 'Format', type: 'select', options: ['mp4','webm','avi','mkv'], default: 'mp4' },
-			{ name: 'video_codec', label: 'Video Codec', type: 'text', default: '' },
-			{ name: 'audio_codec', label: 'Audio Codec', type: 'text', default: '' },
-			{ name: 'hwaccel', label: 'HW Accel', type: 'select', options: ['','cuda','vaapi','qsv'], default: '' },
-		],
-	};
-
+	// --- Options UI builder ---
 	function buildOptionsUI() {
 		const processor = processorSelect.value;
 		const defs = OPTIONS_DEF[processor] || [];
+		const currentMode = getModeValue();
 		dynamicOptions.innerHTML = '';
 
 		defs.forEach(def => {
+			// Section headers
+			if (def.section) {
+				const header = document.createElement('h4');
+				header.textContent = def.section;
+				header.style.cssText = 'margin: var(--nui-space-double) 0 var(--nui-space-half); font-size: 0.95rem; color: var(--color-text-secondary); border-bottom: 1px solid var(--border-shade1); padding-bottom: var(--nui-space-quarter);';
+				dynamicOptions.appendChild(header);
+				return;
+			}
+
+			// Mode-filtered options
+			if (def.modes && !def.modes.includes(currentMode)) return;
+
 			const group = document.createElement('nui-input-group');
 			group.style.marginTop = 'var(--nui-space)';
 
@@ -216,7 +304,25 @@ function init(element, params, nui) {
 			group.appendChild(label);
 
 			let inputWrapper;
-			if (def.type === 'select') {
+			if (def.type === 'codec-select') {
+				// Grouped codec select with optgroups
+				inputWrapper = document.createElement('nui-select');
+				const select = document.createElement('select');
+				select.dataset.optName = def.name;
+				for (const [groupName, codecs] of Object.entries(def.codecs)) {
+					const optgroup = document.createElement('optgroup');
+					optgroup.label = groupName;
+					for (const [value, displayName] of Object.entries(codecs)) {
+						const option = document.createElement('option');
+						option.value = value;
+						option.textContent = displayName;
+						if (value === def.default) option.selected = true;
+						optgroup.appendChild(option);
+					}
+					select.appendChild(optgroup);
+				}
+				inputWrapper.appendChild(select);
+			} else if (def.type === 'select') {
 				inputWrapper = document.createElement('nui-select');
 				const select = document.createElement('select');
 				select.dataset.optName = def.name;
@@ -245,6 +351,7 @@ function init(element, params, nui) {
 				input.dataset.optName = def.name;
 				input.min = def.min;
 				input.max = def.max;
+				if (def.step) input.step = def.step;
 				input.value = def.default;
 				inputWrapper.appendChild(input);
 			} else {
@@ -253,12 +360,22 @@ function init(element, params, nui) {
 				input.type = def.type;
 				input.dataset.optName = def.name;
 				input.value = def.default;
+				if (def.placeholder) input.placeholder = def.placeholder;
 				if (def.min !== undefined) input.min = def.min;
 				if (def.max !== undefined) input.max = def.max;
 				inputWrapper.appendChild(input);
 			}
 
 			group.appendChild(inputWrapper);
+
+			// Help text
+			if (def.help) {
+				const help = document.createElement('small');
+				help.textContent = def.help;
+				help.style.cssText = 'display: block; color: var(--color-text-secondary); font-size: 0.75rem; margin-top: 2px;';
+				group.appendChild(help);
+			}
+
 			dynamicOptions.appendChild(group);
 		});
 
@@ -268,22 +385,54 @@ function init(element, params, nui) {
 		});
 	}
 
+	function getModeValue() {
+		const modeEl = dynamicOptions.querySelector('[data-opt-name="mode"]');
+		return modeEl ? modeEl.value : 'transcode';
+	}
+
 	function collectOptions() {
 		const processor = processorSelect.value;
 		const defs = OPTIONS_DEF[processor] || [];
+		const currentMode = getModeValue();
 		const opts = {};
+
 		defs.forEach(def => {
+			if (def.section) return;
+			if (def.modes && !def.modes.includes(currentMode)) return;
+
 			const el = dynamicOptions.querySelector(`[data-opt-name="${def.name}"]`);
 			if (!el) return;
+
 			let val;
 			if (def.type === 'checkbox') val = el.checked;
 			else if (def.type === 'number') val = parseInt(el.value) || 0;
-			else if (def.type === 'range') val = parseInt(el.value);
+			else if (def.type === 'range') val = parseFloat(el.value);
 			else val = el.value;
-			if (val !== '' && val !== false && val !== def.default) {
-				opts[def.name] = val;
+
+			if (val === '' || val === false) return;
+			if (val === def.default && def.name !== 'mode') return;
+
+			// Special handling for audio bitrate
+			if (def.name === 'bitrate' && val) {
+				opts.audio_bitrate = parseInt(val) * 1000;
+				return;
 			}
+
+			// Map extract_format to format for audio extract mode
+			if (def.name === 'extract_format') {
+				opts.format = val;
+				return;
+			}
+
+			// Map max_dimension_kf to max_dimension for keyframes
+			if (def.name === 'max_dimension_kf') {
+				opts.max_dimension = val;
+				return;
+			}
+
+			opts[def.name] = val;
 		});
+
 		return opts;
 	}
 
@@ -315,11 +464,7 @@ function init(element, params, nui) {
 
 	// --- Run ---
 	runBtn.addEventListener('click', async () => {
-		// Close previous SSE connection to prevent leaks
-		if (currentSSE) {
-			currentSSE.close();
-			currentSSE = null;
-		}
+		if (currentSSE) { currentSSE.close(); currentSSE = null; }
 
 		resultCard.hidden = false;
 		resultArea.innerHTML = '<nui-progress type="busy"></nui-progress> <p>Running...</p>';
@@ -347,7 +492,7 @@ function init(element, params, nui) {
 				return;
 			}
 			if (!job.jobId) {
-				resultArea.innerHTML = `<nui-banner type="alert"><span>Failed to create job: invalid response from server</span></nui-banner>`;
+				resultArea.innerHTML = `<nui-banner type="alert"><span>Failed to create job</span></nui-banner>`;
 				return;
 			}
 
@@ -380,12 +525,11 @@ function init(element, params, nui) {
 
 				api.getAsset(assetId).then((blob) => {
 					const url = URL.createObjectURL(blob);
-					console.log('[task-explorer] asset loaded', { assetId, processor, mode, blobSize: blob.size, blobType: blob.type, url });
 
 					if (processor === 'image') {
 						html += `<div class="result-preview"><img src="${url}" alt="Result" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid var(--border-shade1);"></div>`;
 						if (metadata?.cropAssetIds && metadata.cropAssetIds.length > 1) {
-							html += `<p><strong>Crop results (${metadata.cropAssetIds.length} images):</strong></p><div class="crop-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:var(--nui-space);">`;
+							html += `<p><strong>Crop results (${metadata.cropAssetIds.length}):</strong></p><div class="crop-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:var(--nui-space);">`;
 							for (const cropId of metadata.cropAssetIds.slice(1)) {
 								html += `<nui-card style="padding:4px"><img src="${API_BASE}/v1/assets/${cropId}" alt="crop" style="width:100%;border-radius:4px;"></nui-card>`;
 							}
@@ -396,9 +540,7 @@ function init(element, params, nui) {
 					} else if (processor === 'video') {
 						if (mode === 'extract_keyframes') {
 							html += `<div class="result-preview"><img src="${url}" alt="First keyframe" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid var(--border-shade1);"></div>`;
-							if (metadata?.frameCount) {
-								html += `<p>Extracted ${metadata.frameCount} keyframes</p>`;
-							}
+							if (metadata?.frameCount) html += `<p>Extracted ${metadata.frameCount} keyframes</p>`;
 						} else if (mode === 'extract_audio') {
 							html += `<audio controls src="${url}" style="width:100%;margin-top:var(--nui-space);"></audio>`;
 						} else {
@@ -412,7 +554,6 @@ function init(element, params, nui) {
 
 					resultArea.innerHTML += html;
 				}).catch((err) => {
-					console.error('[task-explorer] asset load failed', { assetId, error: err.message });
 					html += `<p><nui-badge variant="warning">Preview unavailable</nui-badge> ${err.message}</p>
 						<nui-button><button type="button" data-action="download-asset" data-asset="${assetId}">Download</button></nui-button>`;
 					resultArea.innerHTML += html;
@@ -427,13 +568,12 @@ function init(element, params, nui) {
 	resultArea.addEventListener('click', async (e) => {
 		const btn = e.target.closest('[data-action="download-asset"]');
 		if (!btn) return;
-		const assetId = btn.dataset.asset;
 		try {
-			const blob = await api.getAsset(assetId);
+			const blob = await api.getAsset(btn.dataset.asset);
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
-			a.download = assetId;
+			a.download = btn.dataset.asset;
 			a.click();
 			URL.revokeObjectURL(url);
 		} catch (err) {
@@ -457,11 +597,7 @@ function init(element, params, nui) {
 	});
 
 	// Processor change
-	processorSelect.addEventListener('change', () => {
-		buildOptionsUI();
-		updatePreview();
-	});
-
+	processorSelect.addEventListener('change', () => { buildOptionsUI(); updatePreview(); });
 	inputPath.addEventListener('input', updatePreview);
 	outputPath.addEventListener('input', updatePreview);
 
@@ -472,15 +608,8 @@ function init(element, params, nui) {
 		updatePreview();
 	});
 
-	// Cleanup SSE on page hide
-	element.hide = () => {
-		if (currentSSE) {
-			currentSSE.close();
-			currentSSE = null;
-		}
-	};
+	element.hide = () => { if (currentSSE) { currentSSE.close(); currentSSE = null; } };
 
-	// Init
 	buildOptionsUI();
 	updatePreview();
 }

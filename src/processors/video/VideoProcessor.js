@@ -25,10 +25,10 @@ try {
   throw new Error(`nImage module not found. Error: ${e.message}`);
 }
 
-const MIME_TYPES = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', mp4: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime' };
-const AUDIO_CODECS = { mp3: 'libmp3lame', wav: 'pcm_s16le', ogg: 'libvorbis', m4a: 'aac' };
-const VIDEO_CODECS = { libx264: 'libx264', libx265: 'libx265', h264_nvenc: 'h264_nvenc', hevc_nvenc: 'hevc_nvenc', h264_vaapi: 'h264_vaapi', hevc_vaapi: 'hevc_vaapi', h264_qsv: 'h264_qsv', hevc_qsv: 'hevc_qsv' };
-const CONTAINER_MAP = { mp4: 'mp4', webm: 'webm', mkv: 'mkv', mov: 'mov' };
+const MIME_TYPES = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', mp4: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime', avi: 'video/avi', ts: 'video/mp2t' };
+const AUDIO_CODECS = { mp3: 'libmp3lame', wav: 'pcm_s16le', ogg: 'libvorbis', m4a: 'aac', flac: 'flac', aac: 'aac', opus: 'libopus', copy: 'copy' };
+const VIDEO_CODECS = { libx264: 'libx264', libx265: 'libx265', h264_nvenc: 'h264_nvenc', hevc_nvenc: 'hevc_nvenc', av1_nvenc: 'av1_nvenc', h264_vaapi: 'h264_vaapi', hevc_vaapi: 'hevc_vaapi', av1_vaapi: 'av1_vaapi', h264_qsv: 'h264_qsv', hevc_qsv: 'hevc_qsv', av1_qsv: 'av1_qsv', libvpx_vp9: 'libvpx-vp9', libvpx_vp8: 'libvpx-vp8', libsvtav1: 'libsvtav1', mpeg4: 'mpeg4', mpeg2video: 'mpeg2video' };
+const CONTAINER_MAP = { mp4: 'mp4', webm: 'webm', mkv: 'mkv', mov: 'mov', avi: 'avi', ts: 'ts' };
 
 // NVENC preset mapping: x264-style presets to NVENC p1-p7
 const NVENC_PRESET_MAP = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', faster: 'p4', fast: 'p5', medium: 'p4', slow: 'p6', slower: 'p7', veryslow: 'p7' };
@@ -36,16 +36,14 @@ const NVENC_PRESET_MAP = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', fas
   // Strict allowlist for arbitrary CLI options (FFmpeg Recipe Converter)
   // Options not in these lists are dropped to prevent native access violations
   const CODEC_ALLOWLIST = {
-    // Base NVENC options supported across all NVENC codecs (h264, hevc, av1)
     nvenc_base: ['cq', 'rc', 'preset', 'tune', 'pix_fmt', 'profile', 'maxrate', 'bufsize', 'g', 'b', 'bitrate'],
-    // Options specific to h264_nvenc & hevc_nvenc (NOT supported on av1_nvenc)
     nvenc_advanced: ['spatial_aq', 'temporal_aq', 'multipass'],
-    // Intel QuickSync
     qsv_base: ['crf', 'preset', 'profile', 'maxrate', 'bufsize', 'g', 'b', 'bitrate'],
-    // AMD/Intel VAAPI
     vaapi_base: ['qp', 'rc_mode', 'profile', 'maxrate', 'bufsize', 'g', 'b', 'bitrate'],
-    // Software Encoders
-    cpu_base: ['crf', 'preset', 'tune', 'profile', 'level', 'maxrate', 'bufsize', 'g', 'b', 'bitrate', 'pix_fmt']
+    cpu_base: ['crf', 'preset', 'tune', 'profile', 'level', 'maxrate', 'bufsize', 'g', 'b', 'bitrate', 'pix_fmt'],
+    vp9_base: ['crf', 'cpu-used', 'row-mt', 'tile-columns', 'tile-rows', 'b', 'bitrate'],
+    vp8_base: ['crf', 'cpu-used', 'b', 'bitrate'],
+    svtav1_base: ['crf', 'preset', 'profile', 'b', 'bitrate'],
   };
 
 /**
@@ -58,6 +56,10 @@ function buildVideoOptions(videoCodec, options) {
   const isNvenc = videoCodec && videoCodec.includes('nvenc');
   const isQsv = videoCodec && videoCodec.includes('qsv');
   const isVaapi = videoCodec && videoCodec.includes('vaapi');
+  const isVp9 = videoCodec === 'libvpx-vp9';
+  const isVp8 = videoCodec === 'libvpx-vp8';
+  const isSvtAv1 = videoCodec === 'libsvtav1';
+  const isCpu = !isNvenc && !isQsv && !isVaapi && !isVp9 && !isVp8 && !isSvtAv1;
 
   // Start with any existing videoOptions from CLI, or empty
   const videoOptions = { ...(options.videoOptions || {}) };
@@ -65,8 +67,7 @@ function buildVideoOptions(videoCodec, options) {
   // Map well-known options into the options map with codec-specific naming
   if (options.crf !== undefined && options.crf !== null) {
     if (isNvenc) {
-      // NVENC uses 'cq' instead of 'crf'
-      if (videoOptions.crf !== undefined) delete videoOptions.crf; // Remove any stale 'crf'
+      if (videoOptions.crf !== undefined) delete videoOptions.crf;
       videoOptions.cq = String(options.crf);
     } else {
       videoOptions.crf = String(options.crf);
@@ -75,16 +76,16 @@ function buildVideoOptions(videoCodec, options) {
 
   if (options.preset) {
     if (isNvenc) {
-      // NVENC uses p1-p7 presets
       videoOptions.preset = NVENC_PRESET_MAP[options.preset] || options.preset;
-    } else if (isQsv) {
-      // QSV uses same preset names as x264
-      videoOptions.preset = options.preset;
-    } else if (isVaapi) {
-      // VAAPI uses preset names directly
-      videoOptions.preset = options.preset;
+    } else if (isSvtAv1) {
+      // SVT-AV1 uses numeric presets 0-13 (0=fastest, 13=slowest)
+      const svtPreset = { ultrafast: '0', superfast: '1', veryfast: '2', faster: '3', fast: '4', medium: '6', slow: '8', slower: '10', veryslow: '12' }[options.preset];
+      videoOptions.preset = svtPreset || options.preset;
+    } else if (isVp9) {
+      // VP9 uses cpu-used (0-8, lower=slower)
+      const vp9Preset = { ultrafast: '8', superfast: '7', veryfast: '6', faster: '5', fast: '4', medium: '2', slow: '1', slower: '0', veryslow: '0' }[options.preset];
+      videoOptions['cpu-used'] = vp9Preset || options.preset;
     } else {
-      // CPU encoders (libx264, libx265, etc.) use preset directly
       videoOptions.preset = options.preset;
     }
   }
@@ -99,7 +100,6 @@ function buildVideoOptions(videoCodec, options) {
 
     if (isNvenc) {
       allowedKeys = [...CODEC_ALLOWLIST.nvenc_base];
-      // av1_nvenc crashes hard on these options
       if (videoCodec !== 'av1_nvenc') {
         allowedKeys = [...allowedKeys, ...CODEC_ALLOWLIST.nvenc_advanced];
       }
@@ -107,6 +107,12 @@ function buildVideoOptions(videoCodec, options) {
       allowedKeys = [...CODEC_ALLOWLIST.qsv_base];
     } else if (isVaapi) {
       allowedKeys = [...CODEC_ALLOWLIST.vaapi_base];
+    } else if (isVp9) {
+      allowedKeys = [...CODEC_ALLOWLIST.vp9_base];
+    } else if (isVp8) {
+      allowedKeys = [...CODEC_ALLOWLIST.vp8_base];
+    } else if (isSvtAv1) {
+      allowedKeys = [...CODEC_ALLOWLIST.svtav1_base];
     } else {
       allowedKeys = [...CODEC_ALLOWLIST.cpu_base];
     }
@@ -409,16 +415,20 @@ class VideoProcessor extends Processor {
       const transcodeOpts = {
         cache: false,
       };
-      if (options.hwaccel) {
-        transcodeOpts.hwaccel = options.hwaccel;
-      } else if (video_codec && video_codec.includes('nvenc')) {
-        transcodeOpts.hwaccel = 'cuda';
-      }
+    if (options.hwaccel) {
+      transcodeOpts.hwaccel = options.hwaccel;
+    } else if (video_codec && video_codec.includes('nvenc')) {
+      transcodeOpts.hwaccel = 'cuda';
+    } else if (video_codec && video_codec.includes('qsv')) {
+      transcodeOpts.hwaccel = 'qsv';
+    } else if (video_codec && video_codec.includes('vaapi')) {
+      transcodeOpts.hwaccel = 'vaapi';
+    }
 
-        if (options.useNative !== undefined) { transcodeOpts.useNative = options.useNative; }
-        if (options.cli_command) { transcodeOpts.cli_command = options.cli_command; }
-        
-      if (!options.no_video) {
+    if (options.useNative !== undefined) { transcodeOpts.useNative = options.useNative; }
+    if (options.cli_command) { transcodeOpts.cli_command = options.cli_command; }
+
+    if (!options.no_video) {
         transcodeOpts.video = {
           codec: video_codec,
           width: targetWidth || undefined,
@@ -530,13 +540,13 @@ class VideoProcessor extends Processor {
       transcodeOpts.hwaccel = 'cuda';
     }
 
-        if (options.useNative !== undefined) { transcodeOpts.useNative = options.useNative; }
-        if (options.cli_command) { transcodeOpts.cli_command = options.cli_command; }
-        
-      if (!options.no_video) {
-        transcodeOpts.video = {
-          codec: video_codec,
-          options: buildVideoOptions(video_codec, options),
+      if (options.useNative !== undefined) { transcodeOpts.useNative = options.useNative; }
+      if (options.cli_command) { transcodeOpts.cli_command = options.cli_command; }
+
+    if (!options.no_video) {
+      transcodeOpts.video = {
+        codec: video_codec,
+        options: buildVideoOptions(video_codec, options),
         };
         if (targetWidth) transcodeOpts.video.width = targetWidth;
         if (targetHeight) transcodeOpts.video.height = targetHeight;
@@ -813,6 +823,10 @@ class VideoProcessor extends Processor {
         transcodeOpts.hwaccel = options.hwaccel;
       } else if (video_codec && video_codec.includes('nvenc')) {
         transcodeOpts.hwaccel = 'cuda';
+      } else if (video_codec && video_codec.includes('qsv')) {
+        transcodeOpts.hwaccel = 'qsv';
+      } else if (video_codec && video_codec.includes('vaapi')) {
+        transcodeOpts.hwaccel = 'vaapi';
       }
 
       if (options.useNative !== undefined) { transcodeOpts.useNative = options.useNative; }
