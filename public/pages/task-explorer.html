@@ -167,7 +167,7 @@ function init(element, params, nui) {
 			{ name: 'strip_exif', label: 'Strip EXIF', type: 'checkbox', default: true },
 
 			{ section: 'Transforms' },
-			{ name: 'rotate', label: 'Rotate', type: 'select', options: ['','90','180','270'], default: '' },
+			{ name: 'rotate', label: 'Rotate', type: 'select', options: ['','90','180','270'], default: '', numeric: true },
 			{ name: 'flip', label: 'Flip Vertical', type: 'checkbox', default: false },
 			{ name: 'flop', label: 'Flip Horizontal', type: 'checkbox', default: false },
 			{ name: 'grayscale', label: 'Grayscale', type: 'checkbox', default: false },
@@ -416,6 +416,11 @@ function init(element, params, nui) {
 			if (def.name === 'bitrate' && val) {
 				opts.audio_bitrate = parseInt(val) * 1000;
 				return;
+			}
+
+			// Handle numeric select values (rotate, etc.)
+			if (def.type === 'select' && def.numeric && val) {
+				val = parseInt(val);
 			}
 
 			// Map extract_format to format for audio extract mode

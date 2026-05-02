@@ -38,7 +38,8 @@ class ImageProcessor extends Processor {
     if (format !== undefined && !['jpeg', 'png', 'webp', 'avif', 'gif'].includes(format)) {
       throw new Error('format must be jpeg, png, webp, avif, or gif');
     }
-    if (rotate !== undefined && ![90, 180, 270].includes(rotate)) {
+    const parsedRotate = rotate !== undefined && rotate !== null ? parseInt(rotate) : undefined;
+    if (parsedRotate !== undefined && ![90, 180, 270].includes(parsedRotate)) {
       throw new Error('rotate must be 90, 180, or 270');
     }
     if (blur !== undefined && (blur < 0 || blur > 20)) {
@@ -198,6 +199,8 @@ class ImageProcessor extends Processor {
       _inputSource,
     } = options;
 
+    const parsedRotate = rotate ? parseInt(rotate) : null;
+
     let inputSource = input;
     let originalSize;
 
@@ -226,9 +229,9 @@ class ImageProcessor extends Processor {
     let pipeline = nImage(inputSource);
 
     // Apply transforms
-    if (rotate) {
-      onProgress?.(20, `Rotating ${rotate}°`);
-      pipeline.rotate(rotate);
+    if (parsedRotate) {
+      onProgress?.(20, `Rotating ${parsedRotate}°`);
+      pipeline.rotate(parsedRotate);
     }
 
     if (flip) {

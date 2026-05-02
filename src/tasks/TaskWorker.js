@@ -322,6 +322,9 @@ async function processImage(inputSource, options) {
     blur = 0,
   } = options;
 
+  const parsedRotate = rotate ? parseInt(rotate) : null;
+  } = options;
+
   const img = await initNImage();
 
   const meta = await img(inputBuffer).metadata();
@@ -333,9 +336,9 @@ async function processImage(inputSource, options) {
 
   let pipeline = img(inputBuffer);
 
-  if (rotate) {
-    sendMessage({ type: 'progress', percent: 20, message: `Rotating ${rotate}\u00B0` });
-    pipeline = pipeline.rotate(rotate);
+  if (parsedRotate) {
+    sendMessage({ type: 'progress', percent: 20, message: `Rotating ${parsedRotate}°` });
+    pipeline = pipeline.rotate(parsedRotate);
   }
 
   if (flip) {
