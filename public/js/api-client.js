@@ -1,8 +1,33 @@
 /**
  * Shared API client for Media Service
+ *
+ * Auto-detects the API base URL. When the web UI is served from the Node
+ * server (same origin), relative URLs are used. When served from an external
+ * server such as FiveServer, the client points to the Node backend.
+ *
+ * Override: localStorage.setItem('ms_api_base', 'http://localhost:3501')
  */
 
-const API_BASE = '';
+function detectApiBase() {
+	const explicit = localStorage.getItem('ms_api_base');
+	if (explicit) return explicit;
+
+	// If served from file:// (rare), default to localhost:3501
+	if (window.location.protocol === 'file:') return 'http://localhost:3501';
+
+	// If served from Node on port 3501, use relative URLs (same-origin)
+	if (window.location.port === '3501') return '';
+
+	// Otherwise assume external server (FiveServer, etc.) → point to Node
+	return 'http://localhost:3501';
+}
+
+const API_BASE = detectApiBase();
+
+// Expose for inline page scripts that need to construct raw fetch URLs
+if (typeof window !== 'undefined') {
+	window.API_BASE = API_BASE;
+}
 
 let wsConnection = null;
 let wsCallbacks = new Map();
@@ -32,7 +57,6 @@ export const api = {
 			const xhr = new XMLHttpRequest();
 			xhr.open('POST', `${API_BASE}/v1/upload`);
 			xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-			xhr.setRequestHeader('Content-Length', file.size);
 			xhr.setRequestHeader('X-Original-Filename', file.name);
 
 			if (onProgress) {
@@ -62,7 +86,11 @@ export const api = {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(body),
 		});
-		return res.json();
+		const data = await res.json();
+		if (!res.ok) {
+			throw new Error(data.error || `HTTP ${res.status}`);
+		}
+		return data;
 	},
 
 	// === Jobs ===
@@ -110,7 +138,7 @@ export const api = {
 			try {
 				const data = JSON.parse(e.data);
 				onEvent(data);
-				if (data.event === 'complete' || data.event === 'error' || data.event === 'cancelled') {
+				if (data.type === 'complete' || data.type === 'error' || data.type === 'cancelled') {
 					evtSource.close();
 				}
 			} catch {}
@@ -124,7 +152,9 @@ export const api = {
 	// === WebSocket ===
 	connectWebSocket(onMessage, onOpen, onClose) {
 		const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-		const ws = new WebSocket(`${protocol}//${window.location.host}/v1/ws`);
+		// Use API_BASE host if cross-origin, otherwise current host
+		const host = API_BASE ? API_BASE.replace(/^https?:\/\//, '') : window.location.host;
+		const ws = new WebSocket(`${protocol}//${host}/v1/ws`);
 
 		ws.onopen = () => {
 			if (onOpen) onOpen();
@@ -153,7 +183,8 @@ export const api = {
 
 	// === Command builders ===
 	buildCurl(endpoint, method, headers, body) {
-		let cmd = `curl -X ${method} http://localhost:${window.location.port}${endpoint}`;
+		const base = API_BASE || `http://localhost:${window.location.port}`;
+		let cmd = `curl -X ${method} ${base}${endpoint}`;
 		for (const [k, v] of Object.entries(headers || {})) {
 			cmd += ` \\\n  -H "${k}: ${v}"`;
 		}
@@ -164,9 +195,10 @@ export const api = {
 	},
 
 	buildFetch(endpoint, method, headers, body) {
+		const base = API_BASE || `http://localhost:${window.location.port}`;
 		const opts = { method, headers };
 		if (body) opts.body = JSON.stringify(body, null, 2);
-		return `fetch('http://localhost:${window.location.port}${endpoint}', ${JSON.stringify(opts, null, 2)})`;
+		return `fetch('${base}${endpoint}', ${JSON.stringify(opts, null, 2)})`;
 	},
 
 	formatBytes(bytes) {

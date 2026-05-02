@@ -24,6 +24,9 @@ export class HttpServer {
 
     const ctx = new Context(req, res);
 
+    // CORS: allow cross-origin requests from external dev servers (FiveServer, etc.)
+    HttpServer.sendCors(res);
+
     try {
       // Log request
       logger.info(`${req.method} ${req.url}`);

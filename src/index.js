@@ -102,6 +102,9 @@ const modulesDir = path.join(__dirname, '../modules');
 // Modules access for NUI (must be before catch-all)
 router.addRoute('GET', '/modules/*', StaticFileServer.createHandler(modulesDir));
 
+// Web UI - also available under /public/ for compatibility with external dev servers
+router.addRoute('GET', '/public/*', StaticFileServer.createHandler(publicDir));
+
 // Web UI - serves from public/ (index.html at root) — catch-all last
 router.addRoute('GET', '/*', StaticFileServer.createHandler(publicDir));
 

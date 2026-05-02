@@ -1,4 +1,4 @@
-import { nui } from '../modules/nui_wc2/NUI/nui.js';
+import { nui } from '../../modules/nui_wc2/NUI/nui.js';
 import { api } from './api-client.js';
 
 // Global action handler

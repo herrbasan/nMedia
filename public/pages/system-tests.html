@@ -124,10 +124,10 @@ function init(element, params, nui) {
 
 					let events = [];
 					api.subscribeProgress(job.jobId, (data) => {
-						events.push(data.event);
-						if (data.event === 'start') {
+						events.push(data.type);
+						if (data.type === 'start') {
 							sseResult.innerHTML = ok(`SSE working — received: ${events.join(', ')}`);
-						} else if (data.event === 'complete' || data.event === 'error') {
+						} else if (data.type === 'complete' || data.type === 'error') {
 							sseResult.innerHTML = ok(`SSE complete — events: ${events.join(', ')}`);
 						}
 					});

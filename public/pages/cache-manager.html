@@ -92,7 +92,7 @@ function init(element, params, nui) {
 		const metaBtn = e.target.closest('[data-action="view-meta"]');
 		if (metaBtn) {
 			try {
-				const res = await fetch(`/v1/assets/${metaBtn.dataset.id}/metadata`);
+				const res = await fetch(`${API_BASE}/v1/assets/${metaBtn.dataset.id}/metadata`);
 				const data = await res.json();
 				await nui.components.dialog.alert('Asset Metadata', `
 					<nui-code><pre><code>${JSON.stringify(data, null, 2)}</code></pre></nui-code>
