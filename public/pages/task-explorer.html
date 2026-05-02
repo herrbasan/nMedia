@@ -12,14 +12,14 @@
 			<nui-input-group style="margin-top: var(--nui-space)">
 				<label for="input-path">Or use server path</label>
 				<nui-input>
-					<input type="text" id="input-path" placeholder="D:\\Work\\_GIT\\MediaService\\tests\\assets\\images\\IMG_2593.CR2" value="D:\\Work\\_GIT\\MediaService\\tests\\assets\\images\\IMG_2593.CR2" />
+					<input type="text" id="input-path" placeholder="D:\\Media\\input\\file.jpg" />
 				</nui-input>
 			</nui-input-group>
 
 			<nui-input-group style="margin-top: var(--nui-space)">
 				<label for="output-path">Output path (optional)</label>
 				<nui-input>
-					<input type="text" id="output-path" placeholder="D:\\Work\\_GIT\\MediaService\\tests\\converted" value="D:\\Work\\_GIT\\MediaService\\tests\\converted" />
+					<input type="text" id="output-path" placeholder="D:\\Media\\output" />
 				</nui-input>
 			</nui-input-group>
 
@@ -90,7 +90,8 @@ function init(element, params, nui) {
 	let selectedFile = null;
 	let fileId = null;
 	let capabilities = null;
-	let uploadMode = true; // true = upload file, false = file-to-file via path
+	let uploadMode = true;
+	let currentSSE = null; // Track active SSE connection to prevent leaks
 
 	// --- DOM refs ---
 	const dropzone = element.el('#dropzone');
@@ -125,24 +126,16 @@ function init(element, params, nui) {
 		if (uploadMode) {
 			fileInput.click();
 		} else {
-			// File-to-file mode: use File System Access API to get real path
 			if (window.showOpenFilePicker) {
 				try {
 					const [handle] = await window.showOpenFilePicker();
 					const file = await handle.getFile();
-					// Try to resolve path via handle (non-standard but works in some environments)
 					let filePath = null;
-					if (handle.path) {
-						filePath = handle.path;
-					} else if (file.path) {
-						filePath = file.path;
-					}
+					if (handle.path) filePath = handle.path;
+					else if (file.path) filePath = file.path;
 					handleFile(file, filePath);
-				} catch {
-					// User cancelled picker
-				}
+				} catch { /* User cancelled */ }
 			} else {
-				// Fallback for browsers without showOpenFilePicker
 				fileInput.click();
 			}
 		}
@@ -158,12 +151,8 @@ function init(element, params, nui) {
 		dropzone.classList.remove('drag-over');
 		const file = e.dataTransfer.files[0];
 		if (file) {
-			// In upload mode, just take the file. In file-to-file mode, warn about path.
 			let filePath = null;
-			// Electron: file.path has the absolute path
-			if (file.path) {
-				filePath = file.path;
-			}
+			if (file.path) filePath = file.path;
 			handleFile(file, filePath);
 		}
 	});
@@ -175,11 +164,9 @@ function init(element, params, nui) {
 		selectedFile = file;
 		fileId = null;
 		fileInfo.textContent = `${file.name} — ${api.formatBytes(file.size)}`;
-		// Only set path if we got an absolute path (Electron or File System Access API)
 		if (filePath && filePath.length > 1 && filePath[1] === ':') {
 			inputPath.value = filePath;
 		} else if (!uploadMode && !inputPath.value) {
-			// In file-to-file mode without a valid path, show a hint
 			fileInfo.textContent += ' (path not available — please enter server path manually or use Electron)';
 		}
 		updatePreview();
@@ -208,7 +195,7 @@ function init(element, params, nui) {
 			{ name: 'mode', label: 'Mode', type: 'select', options: ['extract_audio','extract_keyframes','transcode','cli'], default: 'extract_audio' },
 			{ name: 'fps', label: 'FPS (keyframes)', type: 'number', min: 1, max: 30, default: 1 },
 			{ name: 'max_dimension', label: 'Max Dimension', type: 'number', min: 1, max: 10000, default: 1024 },
-			{ name: 'format', label: 'Format', type: 'select', options: ['mp4','webm','avi','mkv'], default: 'mp4' },
+			{ name: 'output_format', label: 'Format', type: 'select', options: ['mp4','webm','avi','mkv'], default: 'mp4' },
 			{ name: 'video_codec', label: 'Video Codec', type: 'text', default: '' },
 			{ name: 'audio_codec', label: 'Audio Codec', type: 'text', default: '' },
 			{ name: 'hwaccel', label: 'HW Accel', type: 'select', options: ['','cuda','vaapi','qsv'], default: '' },
@@ -275,7 +262,6 @@ function init(element, params, nui) {
 			dynamicOptions.appendChild(group);
 		});
 
-		// Attach listeners to all new inputs
 		dynamicOptions.querySelectorAll('input, select').forEach(el => {
 			el.addEventListener('change', updatePreview);
 			el.addEventListener('input', updatePreview);
@@ -329,11 +315,16 @@ function init(element, params, nui) {
 
 	// --- Run ---
 	runBtn.addEventListener('click', async () => {
+		// Close previous SSE connection to prevent leaks
+		if (currentSSE) {
+			currentSSE.close();
+			currentSSE = null;
+		}
+
 		resultCard.hidden = false;
 		resultArea.innerHTML = '<nui-progress type="busy"></nui-progress> <p>Running...</p>';
 
 		try {
-			// Upload file if in upload mode
 			if (uploadMode && selectedFile && !fileId) {
 				resultArea.innerHTML = '<p>Uploading...</p>';
 				const upload = await api.upload(selectedFile, (pct) => {
@@ -342,7 +333,6 @@ function init(element, params, nui) {
 				fileId = upload.fileId;
 			}
 
-			// Start processing
 			const req = buildRequest();
 			if (!req.fileId && !req.input_path) {
 				resultArea.innerHTML = '<nui-banner type="warning"><span>Please provide a file or input path.</span></nui-banner>';
@@ -352,7 +342,6 @@ function init(element, params, nui) {
 			resultArea.innerHTML = `<p>Starting job...</p>`;
 			const job = await api.process(req);
 
-			// Check for error response
 			if (job.error) {
 				resultArea.innerHTML = `<nui-banner type="alert"><span>${job.error}</span></nui-banner>`;
 				return;
@@ -362,13 +351,12 @@ function init(element, params, nui) {
 				return;
 			}
 
-			// Subscribe to progress
 			let progressHtml = `<p>Job: <code>${job.jobId}</code> — Status: ${job.status}</p>
 				<nui-progress value="0" id="job-progress"></nui-progress>
 				<p id="job-message"></p>`;
 			resultArea.innerHTML = progressHtml;
 
-			api.subscribeProgress(job.jobId, (data) => {
+			currentSSE = api.subscribeProgress(job.jobId, (data) => {
 				const progressEl = resultArea.el('#job-progress');
 				const msgEl = resultArea.el('#job-message');
 				if (progressEl) progressEl.setAttribute('value', data.percent || 0);
@@ -386,7 +374,6 @@ function init(element, params, nui) {
 				const mode = collectOptions().mode;
 				let html = `<hr/><p><nui-badge variant="success">Complete</nui-badge> Asset ID: <code>${assetId}</code></p>`;
 
-				// Show output path if set
 				if (outputPath.value.trim()) {
 					html += `<p>Written to: <code>${outputPath.value.trim()}</code></p>`;
 				}
@@ -396,9 +383,7 @@ function init(element, params, nui) {
 					console.log('[task-explorer] asset loaded', { assetId, processor, mode, blobSize: blob.size, blobType: blob.type, url });
 
 					if (processor === 'image') {
-						// Image result
 						html += `<div class="result-preview"><img src="${url}" alt="Result" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid var(--border-shade1);"></div>`;
-						// Multi-crop: show additional frames
 						if (metadata?.cropAssetIds && metadata.cropAssetIds.length > 1) {
 							html += `<p><strong>Crop results (${metadata.cropAssetIds.length} images):</strong></p><div class="crop-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:var(--nui-space);">`;
 							for (const cropId of metadata.cropAssetIds.slice(1)) {
@@ -407,20 +392,16 @@ function init(element, params, nui) {
 							html += `</div>`;
 						}
 					} else if (processor === 'audio') {
-						// Audio result
 						html += `<audio controls src="${url}" style="width:100%;margin-top:var(--nui-space);"></audio>`;
 					} else if (processor === 'video') {
 						if (mode === 'extract_keyframes') {
-							// Keyframes: show first frame + frame count
 							html += `<div class="result-preview"><img src="${url}" alt="First keyframe" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid var(--border-shade1);"></div>`;
 							if (metadata?.frameCount) {
 								html += `<p>Extracted ${metadata.frameCount} keyframes</p>`;
 							}
 						} else if (mode === 'extract_audio') {
-							// Extracted audio track
 							html += `<audio controls src="${url}" style="width:100%;margin-top:var(--nui-space);"></audio>`;
 						} else {
-							// Video transcode or cli
 							html += `<video controls src="${url}" style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid var(--border-shade1);"></video>`;
 						}
 					}
@@ -430,7 +411,6 @@ function init(element, params, nui) {
 					</nui-button-container>`;
 
 					resultArea.innerHTML += html;
-					console.log('[task-explorer] result rendered', { assetId, htmlLength: html.length });
 				}).catch((err) => {
 					console.error('[task-explorer] asset load failed', { assetId, error: err.message });
 					html += `<p><nui-badge variant="warning">Preview unavailable</nui-badge> ${err.message}</p>
@@ -487,10 +467,18 @@ function init(element, params, nui) {
 
 	uploadToggle.addEventListener('change', (e) => {
 		uploadMode = e.target.checked;
-		if (!uploadMode) fileId = null; // clear fileId so path is used
+		if (!uploadMode) fileId = null;
 		updateDropzoneHint();
 		updatePreview();
 	});
+
+	// Cleanup SSE on page hide
+	element.hide = () => {
+		if (currentSSE) {
+			currentSSE.close();
+			currentSSE = null;
+		}
+	};
 
 	// Init
 	buildOptionsUI();

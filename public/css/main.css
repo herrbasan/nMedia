@@ -58,11 +58,6 @@
 	gap: var(--nui-space);
 }
 
-.page-task-explorer .preview-section .api-preview {
-	flex: 1;
-	overflow-y: auto;
-}
-
 /* Dropzone styling */
 .dropzone-area {
 	border: 2px dashed var(--border-shade1);

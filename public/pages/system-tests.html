@@ -18,6 +18,7 @@
 			<h3 style="margin-top: 0">WebSocket</h3>
 			<nui-button-container>
 				<nui-button><button type="button" data-action="test-ws">Test Connection</button></nui-button>
+				<nui-button><button type="button" data-action="test-ws-progress">Test Progress</button></nui-button>
 			</nui-button-container>
 			<div id="ws-result" style="margin-top: var(--nui-space)"></div>
 		</nui-card>
@@ -33,6 +34,7 @@
 
 		<nui-card>
 			<h3 style="margin-top: 0">Progress Streaming</h3>
+			<p style="font-size:0.85rem;color:var(--color-text-secondary)">Upload a file first, then test SSE progress.</p>
 			<nui-button-container>
 				<nui-button><button type="button" data-action="test-sse">Test SSE</button></nui-button>
 			</nui-button-container>
@@ -48,6 +50,8 @@ function init(element, params, nui) {
 	const uploadResult = element.el('#upload-result');
 	const sseResult = element.el('#sse-result');
 	const testFile = element.el('#test-file');
+
+	let lastFileId = null;
 
 	function ok(msg) { return `<nui-badge variant="success">PASS</nui-badge> ${msg}`; }
 	function fail(msg) { return `<nui-badge variant="danger">FAIL</nui-badge> ${msg}`; }
@@ -96,6 +100,45 @@ function init(element, params, nui) {
 				}
 				break;
 			}
+			case 'test-ws-progress': {
+				wsResult.innerHTML = 'Testing WS progress subscription...';
+				try {
+					// Use global WS connection to subscribe to a job
+					if (!window.api.ws || window.api.ws.readyState !== WebSocket.OPEN) {
+						wsResult.innerHTML = fail('WebSocket not connected. Connect first.');
+						return;
+					}
+					// Create a quick job and subscribe via WS
+					const job = await api.process({
+						input_path: testFile.files[0]?.path || '',
+						processor: 'image',
+						options: { max_dimension: 100, format: 'jpeg' }
+					});
+					if (job.error || !job.jobId) {
+						wsResult.innerHTML = fail(job.error || 'Failed to create job');
+						return;
+					}
+
+					const events = [];
+					const handler = (msg) => {
+						if (msg.jobId === job.jobId) {
+							events.push(msg.type);
+							if (msg.type === 'complete') {
+								wsResult.innerHTML = ok(`WS progress working — events: ${events.join(', ')}`);
+								window.removeEventListener('ws-message', handler);
+							} else if (msg.type === 'error') {
+								wsResult.innerHTML = fail(`Job error: ${msg.error}`);
+								window.removeEventListener('ws-message', handler);
+							}
+						}
+					};
+					window.addEventListener('ws-message', handler);
+					window.api.ws.send(JSON.stringify({ type: 'subscribe', jobId: job.jobId }));
+				} catch (err) {
+					wsResult.innerHTML = fail(err.message);
+				}
+				break;
+			}
 			case 'test-upload': {
 				const file = testFile.files[0];
 				if (!file) {
@@ -105,21 +148,29 @@ function init(element, params, nui) {
 				uploadResult.innerHTML = 'Uploading...';
 				try {
 					const data = await api.upload(file);
-					uploadResult.innerHTML = ok(`Uploaded: ${data.fileId} (${data.detectedType})`);
+					lastFileId = data.fileId;
+					uploadResult.innerHTML = ok(`Uploaded: ${data.fileId} (${data.detectedType}, ${api.formatBytes(data.size)})`);
 				} catch (err) {
 					uploadResult.innerHTML = fail(err.message);
 				}
 				break;
 			}
 			case 'test-sse': {
+				if (!lastFileId) {
+					sseResult.innerHTML = fail('Upload a file first using the File Upload test.');
+					return;
+				}
 				sseResult.innerHTML = 'Starting test job...';
 				try {
-					// Create a minimal test job
 					const job = await api.process({
-						input_path: 'C:\\Media\\test.mp4',
-						processor: 'video',
-						options: { mode: 'extract_audio', format: 'mp3' }
+						fileId: lastFileId,
+						processor: 'image',
+						options: { max_dimension: 256, quality: 70, format: 'png' }
 					});
+					if (job.error || !job.jobId) {
+						sseResult.innerHTML = fail(job.error || 'Failed to create job');
+						return;
+					}
 					sseResult.innerHTML = `Job ${job.jobId} queued. Listening for progress...`;
 
 					let events = [];
@@ -127,8 +178,10 @@ function init(element, params, nui) {
 						events.push(data.type);
 						if (data.type === 'start') {
 							sseResult.innerHTML = ok(`SSE working — received: ${events.join(', ')}`);
-						} else if (data.type === 'complete' || data.type === 'error') {
-							sseResult.innerHTML = ok(`SSE complete — events: ${events.join(', ')}`);
+						} else if (data.type === 'complete') {
+							sseResult.innerHTML = ok(`SSE complete — events: ${events.join(', ')}, Asset: ${data.assetId}`);
+						} else if (data.type === 'error') {
+							sseResult.innerHTML = fail(`Job error: ${data.error}`);
 						}
 					});
 				} catch (err) {

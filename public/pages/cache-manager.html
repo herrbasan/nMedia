@@ -11,7 +11,10 @@
 					<strong>Total Assets:</strong> <span id="total-assets">—</span> <br/>
 					<strong>Total Size:</strong> <span id="total-size">—</span>
 				</div>
-				<nui-button variant="danger"><button type="button" id="clear-all-btn">Clear All</button></nui-button>
+				<div style="display:flex;gap:var(--nui-space)">
+					<nui-button><button type="button" id="refresh-btn">Refresh</button></nui-button>
+					<nui-button variant="danger"><button type="button" id="clear-all-btn">Clear All</button></nui-button>
+				</div>
 			</div>
 		</nui-card>
 	</section>
@@ -27,6 +30,7 @@ function init(element, params, nui) {
 	const totalSizeEl = element.el('#total-size');
 	const assetsGrid = element.el('#assets-grid');
 	const clearBtn = element.el('#clear-all-btn');
+	const refreshBtn = element.el('#refresh-btn');
 
 	async function loadAssets() {
 		try {
@@ -117,6 +121,14 @@ function init(element, params, nui) {
 			nui.components.banner.show({ content: err.message, priority: 'alert' });
 		}
 	});
+
+	refreshBtn.addEventListener('click', loadAssets);
+
+	// Auto-refresh every 10 seconds
+	const refreshInterval = setInterval(loadAssets, 10000);
+
+	// Cleanup on page hide
+	element.hide = () => clearInterval(refreshInterval);
 
 	loadAssets();
 }

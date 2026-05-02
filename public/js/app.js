@@ -16,11 +16,19 @@ document.addEventListener('click', (e) => {
 			break;
 		case 'toggle-theme': {
 			const current = document.documentElement.style.colorScheme || 'light';
-			document.documentElement.style.colorScheme = current === 'dark' ? 'light' : 'dark';
+			const next = current === 'dark' ? 'light' : 'dark';
+			document.documentElement.style.colorScheme = next;
+			localStorage.setItem('ms_theme', next);
 			break;
 		}
 	}
 });
+
+// Restore theme preference
+const savedTheme = localStorage.getItem('ms_theme');
+if (savedTheme) {
+	document.documentElement.style.colorScheme = savedTheme;
+}
 
 // WebSocket connection management
 let ws = null;
@@ -40,7 +48,6 @@ function connectWebSocket() {
 	try {
 		ws = api.connectWebSocket(
 			(msg) => {
-				// Broadcast WS messages to interested pages
 				window.dispatchEvent(new CustomEvent('ws-message', { detail: msg }));
 			},
 			() => updateConnectionStatus('connected'),
@@ -53,6 +60,12 @@ function connectWebSocket() {
 		updateConnectionStatus('disconnected');
 	}
 }
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+	if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+	if (ws) ws.close();
+});
 
 // Navigation
 const navigationData = [
