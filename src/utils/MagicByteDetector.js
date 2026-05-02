@@ -44,7 +44,7 @@ export class MagicByteDetector {
       if (ftyp.includes('71742020') || ftyp.includes('4D344120')) {
         return { type: 'video', mimeType: 'video/quicktime' };
       }
-      if (ftyp.includes('6D346120') || ftyp.includes('4D344120')) {
+      if (ftyp.includes('6D346120') || ftyp.includes('4D344120') || ftyp.includes('6D346220') || ftyp.includes('4D344220')) {
         return { type: 'audio', mimeType: 'audio/mp4' };
       }
       if (ftyp.includes('61766331') || ftyp.includes('68766331')) {
@@ -96,6 +96,7 @@ export class MagicByteDetector {
       ogg: { type: 'audio', mimeType: 'audio/ogg' },
       flac: { type: 'audio', mimeType: 'audio/flac' },
       m4a: { type: 'audio', mimeType: 'audio/mp4' },
+      m4b: { type: 'audio', mimeType: 'audio/mp4' },
       aac: { type: 'audio', mimeType: 'audio/aac' },
       wma: { type: 'audio', mimeType: 'audio/x-ms-wma' },
       mp4: { type: 'video', mimeType: 'video/mp4' },
