@@ -204,11 +204,40 @@ Configured via `workers.mode` in `config.json`:
 
 | Mode | Behavior | Use Case |
 |------|----------|----------|
-| `process` (default) | Each task spawns a `child_process.fork` | Maximum isolation — native crashes don't affect main process or other workers |
+| `queue` (default) | Tasks run on main thread via `PipelineExecutor`, serialized by queue | Memory-constrained, simpler debugging |
 | `thread` | Each task spawns a `worker_thread` | True parallelism, lighter than process mode |
-| `queue` | Tasks run on main thread, serialized by queue | Memory-constrained, simpler debugging |
+| `process` | Each task spawns a `child_process.fork` | Maximum isolation — native crashes don't affect main process or other workers |
 
 **Process mode is strongly recommended** for audio/video. A native module panic in nVideo will kill only the child process, not the main process or other workers.
+
+## Graceful Shutdown
+
+The service handles `SIGTERM` and `SIGINT` signals for clean shutdown:
+
+1. HTTP server stops accepting new connections
+2. All WebSocket connections are closed with `1001 Going Away`
+3. Task manager stops accepting new tasks
+4. Asset cache and job store cleanup intervals are cleared
+5. Job state is persisted to disk
+6. Process exits with code 0
+
+## Configuration Validation
+
+At startup, `config.js` validates all required fields and throws immediately if any are missing:
+
+| Required Field | Description |
+|----------------|-------------|
+| `server.port` | HTTP server port |
+| `logging.logsDir` | Log directory path |
+| `media.gpu.platform` | GPU platform: nvenc, vaapi, qsv, cpu |
+| `media.maxFileSizeMb` | Maximum upload size (MB) |
+| `cache.dir` | Asset cache directory |
+| `cache.ttl` | Asset cache TTL (seconds) |
+| `cache.maxSize` | Max cache size (bytes) |
+| `workers.mode` | Worker execution mode: `queue`, `thread`, or `process` |
+| `workers.maxConcurrentTasks` | Max concurrent workers |
+
+No defaults are provided for required fields — explicit configuration is mandatory.
 
 ## Data Flow
 

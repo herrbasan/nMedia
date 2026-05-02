@@ -660,27 +660,37 @@ Crop types:
 
 ## Configuration
 
-All configuration is managed via `config.json` in the project root. Copy `config.example.json` to `config.json` and adjust paths for your environment. The config loader throws on missing required values — this is intentional.
+All configuration is managed via `config.json` in the project root. Copy `config.example.json` to `config.json` and adjust paths for your environment. The config loader throws on missing required values — this is intentional. No defaults are provided for required fields.
 
-**Required fields:**
+**Required fields (validated at startup):**
 
 | Field | Description |
 |-------|-------------|
 | `server.port` | HTTP server port |
 | `logging.logsDir` | Log directory path |
 | `media.gpu.platform` | GPU platform: nvenc, vaapi, qsv, cpu |
+| `media.maxFileSizeMb` | Maximum upload size (MB) |
+| `cache.dir` | Asset cache directory |
+| `cache.ttl` | Asset cache TTL (seconds) |
+| `cache.maxSize` | Max cache size (bytes) |
+| `workers.mode` | Worker execution mode: `queue`, `thread`, or `process` |
+| `workers.maxConcurrentTasks` | Max concurrent workers |
 
-**Key optional fields:**
+**Optional fields:**
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `media.maxFileSizeMb` | 9007199254740991 (essentially unlimited) | Maximum upload size (MB) |
+| `server.host` | `0.0.0.0` | Bind address |
+| `server.maxConcurrentUploads` | 4 | Max concurrent upload streams |
 | `media.allowedInputPaths` | [] | Allowed paths for input_path processing |
 | `media.allowedOutputPaths` | [] | Allowed paths for output_path file writing |
-| `workers.mode` | queue | Worker execution mode: `queue`, `thread`, or `process`. Use `process` for audio/video |
-| `workers.maxConcurrentTasks` | 4 | Max concurrent workers |
-| `cache.ttl` | 3600 | Asset cache TTL (seconds) |
-| `cache.maxSize` | 10737418240 | Max cache size in **bytes** (e.g. 10737418240 = 10GB) |
+| `media.gpu.device` | 0 | GPU device index |
+| `media.gpu.maxConcurrentSessions` | 4 | Max concurrent GPU sessions |
+| `media.allowUncPaths` | false | Allow UNC network paths |
+| `logging.level` | info | Log level: info, warn, error, debug |
+| `logging.sessionPrefix` | ms | Session log filename prefix |
+| `logging.retentionDays` | 7 | Log retention period |
+| `messaging.transport` | sse | Default messaging transport |
 
 See `config.example.json` for full configuration reference.
 
