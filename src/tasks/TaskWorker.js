@@ -323,7 +323,6 @@ async function processImage(inputSource, options) {
   } = options;
 
   const parsedRotate = rotate ? parseInt(rotate) : null;
-  } = options;
 
   const img = await initNImage();
 
