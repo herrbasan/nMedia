@@ -150,6 +150,15 @@ export class JobStore {
     this.cleanupInterval.unref();
   }
 
+  shutdown() {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+    this._persist();
+    logger.info('JobStore shutdown');
+  }
+
   _cleanup() {
     const now = Date.now();
     let cleaned = 0;

@@ -276,7 +276,7 @@ export async function handleVideoProbe(ctx) {
     } else if (ctx.body?.base64) {
       const base64Data = ctx.body.base64.replace(/^data:[^;]+;base64,/, '');
       const buf = Buffer.from(base64Data, 'base64');
-      const tempDir = config.media.cacheDir || path.join(process.cwd(), 'cache');
+      const tempDir = config.cacheDir || path.join(process.cwd(), 'cache');
       probePath = path.join(tempDir, `probe-${uuidv4()}.tmp`);
       fs.writeFileSync(probePath, buf);
       shouldCleanup = true;
@@ -318,18 +318,4 @@ export async function handleVideoProbe(ctx) {
       try { fs.unlinkSync(probePath); } catch {}
     }
   }
-}
-
-/**
- * SSE progress endpoint for video jobs.
- * GET /v1/process/progress/:jobId
- */
-export async function handleVideoProgress(ctx) {
-  const { jobId } = ctx.params;
-
-  // Create SSE connection
-  const actualJobId = ctx.createSseJob();
-
-  // Send initial connection message
-  ProgressReporter.send(actualJobId, 'connected', { jobId: actualJobId });
 }

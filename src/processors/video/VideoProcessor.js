@@ -808,9 +808,6 @@ class VideoProcessor extends Processor {
         onComplete: (result) => {
           onProgress?.(95, 'Finalizing');
         },
-        onError: (error) => {
-          reject?.(new Error(error.message || 'nVideo transcode failed'));
-        },
       };
       if (options.hwaccel) {
         transcodeOpts.hwaccel = options.hwaccel;
@@ -818,8 +815,8 @@ class VideoProcessor extends Processor {
         transcodeOpts.hwaccel = 'cuda';
       }
 
-        if (options.useNative !== undefined) { transcodeOpts.useNative = options.useNative; }
-        if (options.cli_command) { transcodeOpts.cli_command = options.cli_command; }
+      if (options.useNative !== undefined) { transcodeOpts.useNative = options.useNative; }
+      if (options.cli_command) { transcodeOpts.cli_command = options.cli_command; }
         
 
       // Build video options

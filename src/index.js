@@ -41,6 +41,9 @@ import {
 } from './api/routes/jobs.js';
 import { WebSocketServer } from './server/WebSocketServer.js';
 import { handleWebSocketMessage } from './api/routes/websocket.js';
+import { taskManager } from './tasks/TaskManager.js';
+import { assetCache } from './cache/AssetCache.js';
+import { jobStore } from './jobs/JobStore.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -154,3 +157,34 @@ server.listen(config.port, () => {
 });
 
 export default server;
+
+// Graceful shutdown
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  logger.info(`${signal} received, shutting down gracefully...`, {}, 'System', { console: true });
+
+  // Stop accepting new connections
+  server.close(() => {
+    logger.info('HTTP server closed', {}, 'System');
+  });
+
+  // Close all WebSocket connections
+  wsServer.closeAll();
+
+  // Stop task processing
+  taskManager.shutdown();
+
+  // Stop cleanup intervals
+  assetCache.shutdown();
+  jobStore.shutdown();
+
+  logger.info('Media Service shut down', {}, 'System', { console: true });
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

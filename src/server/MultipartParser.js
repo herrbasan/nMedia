@@ -196,25 +196,6 @@ export class MultipartParser {
     return -1;
   }
 
-  _findBoundaryFromEnd(fd, boundaryStr, fileSize, chunkSize) {
-    // Read from end of file backwards to find boundary
-    const searchBuf = Buffer.alloc(chunkSize);
-    const readStart = Math.max(0, fileSize - chunkSize);
-    
-    try {
-      const bytesRead = fs.readSync(fd, searchBuf, 0, Math.min(chunkSize, fileSize), readStart);
-      if (bytesRead === 0) return -1;
-      
-      const data = searchBuf.slice(0, bytesRead);
-      const idx = data.lastIndexOf(boundaryStr);
-      if (idx !== -1) {
-        return readStart + idx;
-      }
-    } catch {}
-    
-    return -1;
-  }
-
   _copyFileRange(fd, offset, length, outputPath) {
     const CHUNK_SIZE = 16 * 1024 * 1024; // 16MB chunks
     const writeFd = fs.openSync(outputPath, 'w');

@@ -61,6 +61,13 @@ export class WebSocketServer extends EventEmitter {
       conn.send(data);
     }
   }
+
+  closeAll() {
+    for (const conn of this.connections.values()) {
+      conn.close(1001, 'Server shutting down');
+    }
+    this.connections.clear();
+  }
 }
 
 /**

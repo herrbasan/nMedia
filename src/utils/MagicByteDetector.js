@@ -63,11 +63,6 @@ export class MagicByteDetector {
       return { type: 'video', mimeType: 'video/avi' };
     }
 
-    // FLAC (also audio)
-    if (hex.startsWith('664C6143')) {
-      return { type: 'audio', mimeType: 'audio/flac' };
-    }
-
     return null;
   }
 

@@ -25,6 +25,30 @@ if (!config.media?.gpu?.platform) {
   throw new Error('media.gpu.platform is required in config.json (e.g., "nvenc", "vaapi", "cpu")');
 }
 
+if (config.media.maxFileSizeMb === undefined || config.media.maxFileSizeMb === null) {
+  throw new Error('media.maxFileSizeMb is required in config.json');
+}
+
+if (!config.cache?.dir) {
+  throw new Error('cache.dir is required in config.json');
+}
+
+if (config.cache.ttl === undefined || config.cache.ttl === null) {
+  throw new Error('cache.ttl is required in config.json');
+}
+
+if (config.cache.maxSize === undefined || config.cache.maxSize === null) {
+  throw new Error('cache.maxSize is required in config.json (in bytes)');
+}
+
+if (!config.workers?.mode) {
+  throw new Error('workers.mode is required in config.json ("queue", "thread", or "process")');
+}
+
+if (config.workers.maxConcurrentTasks === undefined || config.workers.maxConcurrentTasks === null) {
+  throw new Error('workers.maxConcurrentTasks is required in config.json');
+}
+
 export default {
   port: config.server.port,
   host: config.server.host,

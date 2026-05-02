@@ -58,24 +58,27 @@ export class TaskWorker {
       if (this.mode === 'thread') {
         logger.info('Worker spawning thread', { taskId: task.id });
         result = await this._processInThread(task, inputSource);
-        } else if (this.mode === 'process') {
-          logger.info('Worker spawning child process', { taskId: task.id });
-          result = await this._processInChildProcess(task, inputSource);
+      } else if (this.mode === 'process') {
+        logger.info('Worker spawning child process', { taskId: task.id });
+        result = await this._processInChildProcess(task, inputSource);
+      } else if (this.mode === 'queue') {
+        logger.info('Worker processing on main thread', { taskId: task.id });
+        result = await this._processInQueue(task, inputSource);
       }
 
       // Store result in asset cache
-        if (result?.buffer || result?.filePath || result?.outputPath) {
-          const mimeType = result.metadata?.mimeType || this._getMimeType(task.type);
-          let asset;
-          
-          const fileP = result.filePath || result.outputPath;
-          if (fileP) {
-            logger.info('Worker caching result from file', { taskId: task.id, filePath: fileP, mimeType });
-            asset = assetCache.storeFile(task.type, fileP, mimeType, result.metadata);
-          } else if (result.buffer) {
-            logger.info('Worker caching result', { taskId: task.id, bufferSize: result.buffer.length, mimeType });
-            asset = assetCache.store(task.type, result.buffer, mimeType, result.metadata);
-          }
+      if (result?.buffer || result?.filePath || result?.outputPath) {
+        const mimeType = result.metadata?.mimeType || this._getMimeType(task.type);
+        let asset;
+
+        const fileP = result.filePath || result.outputPath;
+        if (fileP) {
+          logger.info('Worker caching result from file', { taskId: task.id, filePath: fileP, mimeType });
+          asset = assetCache.storeFile(task.type, fileP, mimeType, result.metadata);
+        } else if (result.buffer) {
+          logger.info('Worker caching result', { taskId: task.id, bufferSize: result.buffer.length, mimeType });
+          asset = assetCache.store(task.type, result.buffer, mimeType, result.metadata);
+        }
 
         logger.info('Worker result cached', { taskId: task.id, assetId: asset.id });
 
