@@ -248,7 +248,7 @@ Fixed in `src/api/routes/upload.js`: the `rawRequest` `close` event was destroyi
 Native modules are loaded in worker threads via `createRequire(import.meta.url)` because ESM `worker_threads` does not support direct `require()`.
 
 ### Worker Process Mode
-Added `process` mode (child_process.fork) for maximum isolation. Native crashes in nVideo only kill the child process, not the main process or other workers. `Worker.js` supports three modes: `process`, `thread`, and `queue`. Note: `config.js` defaults to `queue`, but `process` is strongly recommended for audio/video.
+Added `process` mode (child_process.fork) for maximum isolation. Native crashes in nVideo only kill the child process, not the main process or other workers. `Worker.js` supports three modes: `process`, `thread`, and `queue`. All three modes are now functional.
 
 ### hwaccel Handling
 Hardware acceleration is **only applied when explicitly requested** via `options.hwaccel`. Auto-injection has been removed from `TaskWorker.js` and the frontend CLI parser. **However, `VideoProcessor.js` still auto-injects `hwaccel: 'cuda'` when an NVENC codec is used** — this is a known inconsistency that may cause CUDA access violation segfaults if not explicitly managed. Users should explicitly specify `hwaccel` in transcode options to avoid surprises.
@@ -258,6 +258,33 @@ The data-flow logic in `src/tasks/TaskWorker.js` has been patched to uncondition
 
 ### Disk-to-Disk Processing Exceptions
 Fixed a crash in `src/tasks/Worker.js` that occurred when jobs utilized hardware acceleration and outputted results directly to disk without passing through software memory. The worker was erroneously querying `result.buffer.length` on disk-only resolutions, throwing a `Cannot read properties of undefined (reading 'length')` error that bubbled up to the UI. The caching flow now properly forks between memory buffers (`result.buffer`) and disk outputs (`result.filePath` / `result.outputPath`).
+
+### Queue Mode Fixed
+`Worker.js` now properly handles `queue` mode via `_processInQueue()` which routes through `PipelineExecutor.execute()` on the main thread. Previously, queue mode fell through with `undefined` result.
+
+### Config Validation
+`config.js` now validates all required fields at startup: `server.port`, `logging.logsDir`, `media.gpu.platform`, `media.maxFileSizeMb`, `cache.dir`, `cache.ttl`, `cache.maxSize`, `workers.mode`, `workers.maxConcurrentTasks`. Missing fields throw immediately.
+
+### Graceful Shutdown
+Added `SIGTERM`/`SIGINT` handlers to `src/index.js`. On shutdown: HTTP server closes, all WebSocket connections are terminated, task manager stops accepting new tasks, cache/job cleanup intervals are stopped, and JobStore persists state to disk.
+
+### Dead Code Cleanup
+Removed `MultipartParser._findBoundaryFromEnd()` (never called), duplicate FLAC detection in `MagicByteDetector`, dead `handleVideoProgress()` route in `video.js`, and empty `src/api/middleware/` directory.
+
+### E2E Tests Rewritten
+`tests/e2e.test.js` now tests the unified transport flow: `POST /v1/upload` → `POST /v1/process` → `GET /v1/jobs/:id` → `GET /v1/assets/:id`. Tests image, audio, and video processing, path-based processing, job listing, and error cases. Port updated to 3501.
+
+### UUID Generation
+Replaced `Math.random()`-based UUID generator with `crypto.randomUUID()` for proper v4 UUIDs.
+
+### Web Frontend Fixes
+- SSE EventSource leak fixed in Task Explorer (connection tracked and closed)
+- WS reconnect timer cleared on page unload
+- Theme preference persisted to localStorage
+- Hardcoded dev paths removed from Task Explorer
+- System Tests no longer use hardcoded `C:\Media\test.mp4`
+- Cache Manager auto-refreshes every 10s
+- Dead CSS rule (`.api-preview`) removed
 
 ## Web Frontend
 
