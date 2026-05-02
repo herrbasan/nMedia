@@ -236,7 +236,7 @@ class VideoProcessor extends Processor {
       await new Promise((resolve, reject) => {
         nVideo.extractAudio(inputPath, outputPath, {
           codec: AUDIO_CODECS[format],
-          bitrate: 128000,
+          bitrate: options.audio_bitrate || 128000,
           cache: false,
           onProgress: (p) => {
             const mappedPercent = Math.min(95, 10 + Math.round(Math.min(100, p.percent) * 0.8));
@@ -276,7 +276,7 @@ class VideoProcessor extends Processor {
     await new Promise((resolve, reject) => {
       nVideo.extractAudio(inputPath, outputPath, {
         codec: AUDIO_CODECS[format],
-        bitrate: 128000,
+        bitrate: options.audio_bitrate || 128000,
         cache: false,
         onProgress: (p) => {
           const mappedPercent = Math.min(95, 10 + Math.round(Math.min(100, p.percent) * 0.8));
@@ -624,7 +624,7 @@ class VideoProcessor extends Processor {
       await new Promise((resolve, reject) => {
         nVideo.extractAudio(inputPath, outputPath, {
           codec: AUDIO_CODECS[format],
-          bitrate: 128000,
+          bitrate: options.audio_bitrate || 128000,
           cache: false,
           onProgress: (p) => {
             const mappedPercent = Math.min(95, 15 + Math.round(Math.min(100, p.percent) * 0.75));

@@ -81,8 +81,8 @@ export async function handleAudio(ctx) {
     }
 
     // Parse options - support 'source' for sample_rate and channels
-    const sampleRateValue = ctx.body.sample_rate || '16000';
-    const channelsValue = ctx.body.channels || '1';
+    const sampleRateValue = ctx.body.sample_rate || 'source';
+    const channelsValue = ctx.body.channels || 'source';
     
     const options = {
       sample_rate: sampleRateValue === 'source' ? 'source' : parseInt(sampleRateValue),

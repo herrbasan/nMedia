@@ -109,8 +109,8 @@ class AudioProcessor extends Processor {
     }
 
     const {
-      sample_rate = 16000,
-      channels = 1,
+      sample_rate = 'source',
+      channels = 'source',
       format = 'mp3',
       audio_bitrate,
     } = options;

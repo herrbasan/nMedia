@@ -77,8 +77,8 @@ function resolveInputPath(inputSource, cacheDir) {
 }
 
 async function processAudio(inputSource, options, cacheDir) {
-  const rawSampleRate = options.sample_rate ?? '16000';
-  const rawChannels = options.channels ?? '1';
+  const rawSampleRate = options.sample_rate ?? 'source';
+  const rawChannels = options.channels ?? 'source';
   const format = options.format || 'mp3';
   const sampleRate = rawSampleRate === 'source' ? 0 : parseInt(rawSampleRate, 10);
   const channelCount = rawChannels === 'source' ? 0 : parseInt(rawChannels, 10);
@@ -129,7 +129,7 @@ async function processVideo(inputSource, options, cacheDir) {
       await new Promise((resolve, reject) => {
         nVideo.extractAudio(inputPath, outputPath, {
           codec: AUDIO_CODECS[format],
-          bitrate: 128000,
+          bitrate: options.audio_bitrate || 128000,
           cache: false,
           onProgress: (p) => {
             sendMessage({ type: 'progress', percent: p.percent, message: `Extracting audio: ${Math.round(p.percent)}%` });
