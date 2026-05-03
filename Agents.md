@@ -61,7 +61,7 @@ Test assets are located in `/tests/assets/`:
 |------|---------|
 | `tests/index.js` | Unit test runner (processors) |
 | `tests/ws-integration-test.js` | WebSocket end-to-end test (spawns service, tests WS upload/process/download) |
-| `tests/e2e.test.js` | Legacy HTTP E2E tests (**outdated**, needs update for unified transport) |
+| `tests/e2e.test.js` | HTTP E2E tests (unified transport flow) |
 | `tests/manual-readme-test.js` | Manual nVideo transcoding test |
 
 ## Core Development Maxims
@@ -194,7 +194,7 @@ Configured via `workers.mode` in `config.json`:
 
 | Mode | Behavior | Use Case |
 |------|----------|----------|
-| `queue` (default) | Tasks run serialized on the main thread | Memory-constrained, simpler debugging. **Broken** — `Worker.js` only branches for `thread`/`process`; queue mode falls through with `undefined` result |
+| `queue` (default) | Tasks run serialized on the main thread | Memory-constrained, simpler debugging |
 | `thread` | Each task spawns a `worker_thread` | True parallelism, lighter than process mode |
 | `process` | Each task spawns a `child_process.fork` | Maximum isolation — native crashes don't affect main process or other workers. **Strongly recommended** for audio/video |
 
@@ -251,7 +251,7 @@ Native modules are loaded in worker threads via `createRequire(import.meta.url)`
 Added `process` mode (child_process.fork) for maximum isolation. Native crashes in nVideo only kill the child process, not the main process or other workers. `Worker.js` supports three modes: `process`, `thread`, and `queue`. All three modes are now functional.
 
 ### hwaccel Handling
-Hardware acceleration is **only applied when explicitly requested** via `options.hwaccel`. Auto-injection has been removed from `TaskWorker.js` and the frontend CLI parser. **However, `VideoProcessor.js` still auto-injects `hwaccel: 'cuda'` when an NVENC codec is used** — this is a known inconsistency that may cause CUDA access violation segfaults if not explicitly managed. Users should explicitly specify `hwaccel` in transcode options to avoid surprises.
+Hardware acceleration is **only applied when explicitly requested** via `options.hwaccel`. No auto-injection occurs in any processor or worker. Users must explicitly specify `hwaccel` in transcode options to enable GPU acceleration.
 
 ### Zero-Copy GPU Acceleration Pipeline
 The data-flow logic in `src/tasks/TaskWorker.js` has been patched to unconditionally propagate `cli_command` and `hwaccel` overrides to the underlying FFmpeg runner. This allows the construction of true 100% GPU-accelerated *zero-copy* pipelines where frames remain in VRAM for decoding, transforming (e.g., `-vf scale_cuda=format=p010le`), and encoding (e.g., `av1_nvenc`), utilizing virtually zero CPU.

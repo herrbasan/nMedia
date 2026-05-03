@@ -82,7 +82,7 @@ Uses nVideo (native NAPI with direct FFmpeg library integration).
 **Capabilities:**
 - Sample rate conversion (8k-48k Hz)
 - Channel conversion (mono/stereo)
-- Format conversion (MP3, WAV, OGG, M4A)
+- Format conversion (MP3, WAV, OGG, M4A, FLAC, AAC, Opus)
 - Audio probing (metadata extraction)
 
 **Processing flow:**
@@ -204,7 +204,7 @@ Configured via `workers.mode` in `config.json`:
 
 | Mode | Behavior | Use Case |
 |------|----------|----------|
-| `queue` (default) | Tasks run on main thread via `PipelineExecutor`, serialized by queue | Memory-constrained, simpler debugging |
+| `queue` | Tasks run on main thread via `PipelineExecutor`, serialized by queue | Memory-constrained, simpler debugging |
 | `thread` | Each task spawns a `worker_thread` | True parallelism, lighter than process mode |
 | `process` | Each task spawns a `child_process.fork` | Maximum isolation — native crashes don't affect main process or other workers |
 

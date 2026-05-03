@@ -417,12 +417,6 @@ class VideoProcessor extends Processor {
       };
     if (options.hwaccel) {
       transcodeOpts.hwaccel = options.hwaccel;
-    } else if (video_codec && video_codec.includes('nvenc')) {
-      transcodeOpts.hwaccel = 'cuda';
-    } else if (video_codec && video_codec.includes('qsv')) {
-      transcodeOpts.hwaccel = 'qsv';
-    } else if (video_codec && video_codec.includes('vaapi')) {
-      transcodeOpts.hwaccel = 'vaapi';
     }
 
     if (options.useNative !== undefined) { transcodeOpts.useNative = options.useNative; }
@@ -536,8 +530,6 @@ class VideoProcessor extends Processor {
     };
     if (options.hwaccel) {
       transcodeOpts.hwaccel = options.hwaccel;
-    } else if (video_codec && video_codec.includes('nvenc')) {
-      transcodeOpts.hwaccel = 'cuda';
     }
 
       if (options.useNative !== undefined) { transcodeOpts.useNative = options.useNative; }
@@ -821,12 +813,6 @@ class VideoProcessor extends Processor {
       };
       if (options.hwaccel) {
         transcodeOpts.hwaccel = options.hwaccel;
-      } else if (video_codec && video_codec.includes('nvenc')) {
-        transcodeOpts.hwaccel = 'cuda';
-      } else if (video_codec && video_codec.includes('qsv')) {
-        transcodeOpts.hwaccel = 'qsv';
-      } else if (video_codec && video_codec.includes('vaapi')) {
-        transcodeOpts.hwaccel = 'vaapi';
       }
 
       if (options.useNative !== undefined) { transcodeOpts.useNative = options.useNative; }

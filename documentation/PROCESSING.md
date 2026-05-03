@@ -67,7 +67,7 @@ Format Detection (magic bytes, ~0.5µs)
 
 **Region crop** (normalized coordinates 0-1):
 ```json
-{ "crop": { "type": "region", "x": 0.25, "y": 0.25, "width": 0.5, "height": 0.5 } }
+{ "crop": { "type": "region", "left": 0.25, "top": 0.25, "right": 0.75, "bottom": 0.75 } }
 ```
 
 **Center crop** (percentage of image):
@@ -75,10 +75,14 @@ Format Detection (magic bytes, ~0.5µs)
 { "crop": { "type": "center", "width": 50, "height": 50 } }
 ```
 
+Defaults to 50% if only `width` is provided.
+
 **Grid crop** (extract cells):
 ```json
-{ "crop": { "type": "grid", "cols": 3, "rows": 3 } }
+{ "crop": { "type": "grid", "cols": 3, "rows": 3, "cells": [0, 1, 2] } }
 ```
+
+`cells` is an array of cell indices (0 = top-left, read left-to-right, top-to-bottom). If omitted, all cells are extracted.
 
 ### RAW Decode Quality Presets
 
@@ -117,7 +121,7 @@ Format Detection (magic bytes, ~0.5µs)
   "sample_rate": 16000,
   "channels": 1,
   "format": "mp3",
-  "audio_codec": "libmp3lame"
+  "audio_bitrate": 128000
 }
 ```
 
@@ -133,16 +137,15 @@ Format Detection (magic bytes, ~0.5µs)
 
 ### Audio Codecs
 
-| Codec | Bitrate | Quality | Use Case |
-|-------|---------|---------|----------|
-| aac | 128-256k | Good | Universal compatibility |
-| libfdk_aac | 128-256k | Excellent | Best AAC encoder |
-| libopus | 96-160k | Excellent | Modern, low-latency, streaming |
-| flac | Variable | Lossless | Archiving, editing |
-| libmp3lame | 192-320k | Good | Legacy compatibility |
-| ac3 | 384-640k | Good | DVD/Blu-ray |
-| eac3 | 192-1024k | Good | Dolby Digital+ |
-| pcm_s16le | ~1411k | Lossless | Uncompressed, editing |
+| Format | Codec | Bitrate | Quality | Use Case |
+|--------|-------|---------|---------|----------|
+| mp3 | libmp3lame | 128-320k | Good | Legacy compatibility |
+| wav | pcm_s16le | ~1411k | Lossless | Uncompressed, editing |
+| ogg | libvorbis | 128-256k | Good | Open source |
+| m4a | aac | 128-256k | Good | Universal compatibility |
+| flac | flac | Variable | Lossless | Archiving, editing |
+| aac | aac | 128-256k | Good | Universal compatibility |
+| opus | libopus | 96-160k | Excellent | Modern, low-latency, streaming |
 
 ---
 

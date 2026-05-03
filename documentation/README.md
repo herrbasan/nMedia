@@ -597,6 +597,7 @@ Crop types:
 | `sample_rate` | number/string | 16000 | Output sample rate: 8000, 16000, 22050, 44100, 48000, or `"source"` |
 | `channels` | number/string | 1 | Output channels: 1, 2, or `"source"` |
 | `format` | string | mp3 | Output format: mp3, wav, ogg, m4a, flac, aac, opus |
+| `audio_bitrate` | number | 128000 | Audio bitrate in bits per second (e.g., 128000 = 128kbps) |
 
 ---
 
@@ -614,8 +615,12 @@ Crop types:
 | `preset` | string | medium | Encoding preset (ultrafast to veryslow) |
 | `width` | number | - | Output width |
 | `height` | number | - | Output height |
+| `hwaccel` | string | - | Hardware acceleration: `cuda`, `qsv`, `vaapi`. Must be explicitly specified |
+| `audio_bitrate` | number | 128000 | Audio bitrate in bits per second |
 | `videoOptions` | object | - | Arbitrary video encoder options (CLI mode) |
 | `audioOptions` | object | - | Arbitrary audio encoder options (CLI mode) |
+| `cli_command` | string | - | Raw FFmpeg CLI command override (advanced) |
+| `useNative` | boolean | - | Force native C++ transcode path |
 | `no_video` | boolean | false | Disable video stream (`-vn`) |
 | `no_audio` | boolean | false | Disable audio stream (`-an`) |
 
