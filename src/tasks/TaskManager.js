@@ -111,7 +111,7 @@ class TaskManager {
   }
 
   /**
-   * Cancel a pending task
+   * Cancel a pending or running task
    * @param {string} id
    * @returns {boolean}
    */
@@ -124,7 +124,15 @@ class TaskManager {
       return true;
     }
 
-    // Can't cancel running/completed/failed tasks
+    if (task.status === TaskStatus.RUNNING) {
+      // Find the worker processing this task and kill it
+      const worker = this.workers.find((w) => w.activeTask?.id === id);
+      if (worker) {
+        worker.cancel();
+        return true;
+      }
+    }
+
     return false;
   }
 

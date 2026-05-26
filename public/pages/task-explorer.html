@@ -190,41 +190,21 @@ function init(element, params, nui) {
 		video: [
 			{ section: 'Mode' },
 			{ name: 'mode', label: 'Mode', type: 'select',
-				options: ['extract_audio','extract_keyframes','transcode','cli'], default: 'transcode' },
+				options: ['extract_audio','extract_keyframes','transcode'], default: 'transcode' },
 
-			{ section: 'Transcode', modes: ['transcode','cli'] },
-			{ name: 'video_codec', label: 'Video Codec', type: 'codec-select', codecs: VIDEO_CODECS, default: 'libx264' },
-			{ name: 'audio_codec', label: 'Audio Codec', type: 'select',
-				options: ['','aac','libmp3lame','libopus','libvorbis','flac','copy'], default: 'aac',
-				help: '"copy" passes through original audio stream' },
-			{ name: 'output_format', label: 'Container', type: 'select', options: VIDEO_CONTAINERS, default: 'mp4' },
-			{ name: 'hwaccel', label: 'HW Acceleration', type: 'select',
-				options: ['','cuda','vaapi','qsv','nvdec'], default: '',
-				help: 'Auto-set for NVENC/QSV/VAAPI codecs. Override for custom decode.' },
-			{ name: 'crf', label: 'CRF / Quality', type: 'range', min: 0, max: 51, default: 23,
-				help: 'Lower = better quality. 0=lossless, 18=visually lossless, 23=default, 51=worst.' },
-			{ name: 'preset', label: 'Encoding Preset', type: 'select',
-				options: ['','ultrafast','superfast','veryfast','faster','fast','medium','slow','slower','veryslow'],
-				default: 'medium',
-				help: 'Slower = better compression/quality. NVENC maps to p1-p7.' },
-			{ name: 'max_dimension', label: 'Max Dimension', type: 'number', min: 1, max: 10000, default: 1024,
-				help: 'Longest edge. Leave empty to preserve original.' },
-			{ name: 'audio_bitrate', label: 'Audio Bitrate (bps)', type: 'select',
-				options: ['','64000','96000','128000','160000','192000','256000','320000'], default: '128000' },
-			{ name: 'no_audio', label: 'No Audio (-an)', type: 'checkbox', default: false },
-			{ name: 'no_video', label: 'No Video (-vn)', type: 'checkbox', default: false },
+			{ section: 'Transcode', modes: ['transcode'] },
+			{ name: 'cli_command', label: 'FFmpeg CLI Args', type: 'text', default: '',
+				placeholder: '-c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k',
+				help: 'Raw FFmpeg arguments. See recipe dropdown for presets.' },
+			{ name: 'recipe', label: 'Recipe', type: 'select', options: ['','H.264 Web','H.265 Archive','AV1 Modern','Copy Streams','Audio Only (MP3)','Audio Only (WAV)','NVENC H.264'], default: '',
+				help: 'Select a preset to populate the CLI args field.' },
 
 			{ section: 'Keyframes', modes: ['extract_keyframes'] },
 			{ name: 'fps', label: 'FPS', type: 'number', min: 1, max: 30, default: 1 },
 			{ name: 'max_dimension_kf', label: 'Max Frame Size', type: 'number', min: 1, max: 10000, default: 1024 },
 
 			{ section: 'Audio Extract', modes: ['extract_audio'] },
-			{ name: 'extract_format', label: 'Audio Format', type: 'select', options: ['mp3','wav','ogg','m4a'], default: 'mp3' },
-
-			{ section: 'CLI Passthrough', modes: ['cli'] },
-			{ name: 'cli_command', label: 'FFmpeg CLI Args', type: 'text', default: '',
-				placeholder: '-c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k',
-				help: 'Raw FFmpeg arguments. Overrides all other transcode options.' },
+			{ name: 'extract_format', label: 'Audio Format', type: 'select', options: ['mp3','wav','ogg','m4a','flac','aac','opus'], default: 'mp3' },
 		],
 	};
 
@@ -435,6 +415,11 @@ function init(element, params, nui) {
 				return;
 			}
 
+			// Recipe dropdown populates cli_command — don't include recipe in payload
+			if (def.name === 'recipe') {
+				return;
+			}
+
 			opts[def.name] = val;
 		});
 
@@ -614,6 +599,29 @@ function init(element, params, nui) {
 	});
 
 	element.hide = () => { if (currentSSE) { currentSSE.close(); currentSSE = null; } };
+
+	// Recipe dropdown populates CLI command field
+	const RECIPES = {
+		'H.264 Web': '-c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k',
+		'H.265 Archive': '-c:v libx265 -crf 23 -preset medium -c:a aac -b:a 128k',
+		'AV1 Modern': '-c:v libsvtav1 -crf 30 -preset 6 -c:a libopus -b:a 128k',
+		'Copy Streams': '-c:v copy -c:a copy',
+		'Audio Only (MP3)': '-vn -c:a libmp3lame -b:a 128k',
+		'Audio Only (WAV)': '-vn -c:a pcm_s16le',
+		'NVENC H.264': '-hwaccel cuda -c:v h264_nvenc -preset p4 -cq 23 -c:a aac -b:a 128k',
+	};
+	dynamicOptions.addEventListener('change', (e) => {
+		if (e.target.dataset.optName === 'recipe') {
+			const recipe = e.target.value;
+			if (recipe && RECIPES[recipe]) {
+				const cliEl = dynamicOptions.querySelector('[data-opt-name="cli_command"]');
+				if (cliEl) {
+					cliEl.value = RECIPES[recipe];
+					updatePreview();
+				}
+			}
+		}
+	});
 
 	buildOptionsUI();
 	updatePreview();

@@ -172,149 +172,45 @@ async function processVideo(inputSource, options, cacheDir) {
 
   if (mode === 'extract_audio') {
     sendMessage({ type: 'progress', percent: 5, message: 'Mode: extract_audio' });
+    const codec = AUDIO_CODECS[format];
+    if (!codec) throw new Error(`Unsupported audio format: ${format}`);
+    const bitrate = options.audio_bitrate || 128000;
+    const brK = Math.floor(bitrate / 1000);
+    const cliCommand = `-vn -c:a ${codec} -b:a ${brK}k`;
     const outputId = crypto.randomUUID();
     const outputPath = path.join(cacheDir, `output-${outputId}.${format}`);
 
     try {
-      await new Promise((resolve, reject) => {
-        nVideo.extractAudio(inputPath, outputPath, {
-          codec: AUDIO_CODECS[format],
-          bitrate: options.audio_bitrate || 128000,
-          cache: false,
-          onProgress: (p) => {
-            sendMessage({ type: 'progress', percent: p.percent, message: `Extracting audio: ${Math.round(p.percent)}%` });
-          },
-          onComplete: (result) => resolve(result),
-          onError: (error) => reject(new Error(error.message || 'nVideo extractAudio failed')),
-        });
-      });
-
-        const stat = fs.statSync(outputPath);
-        return { filePath: outputPath, metadata: { outputSize: stat.size, mode, format, mimeType: MIME_TYPES[format] } };
-      } finally {
-        if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
-      }
+      await runFfmpeg(inputPath, outputPath, cliCommand);
+      const stat = fs.statSync(outputPath);
+      return { filePath: outputPath, metadata: { outputSize: stat.size, mode, format, mimeType: MIME_TYPES[format] } };
+    } finally {
+      if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
     }
+  }
 
-    if (mode === 'transcode' || mode === 'cli') {
+  if (mode === 'transcode') {
     sendMessage({ type: 'progress', percent: 5, message: 'Mode: transcode' });
-    const output_format = options.output_format || 'mp4';
-    const video_codec = options.video_codec || 'libx264';
-    const audio_codec = options.audio_codec || 'aac';
-    const width = options.width ? parseInt(options.width) : undefined;
-    const height = options.height ? parseInt(options.height) : undefined;
-    const crf = options.crf !== undefined ? parseInt(options.crf) : 23;
-    const preset = options.preset || 'medium';
-    const audio_bitrate = options.audio_bitrate !== undefined ? parseInt(options.audio_bitrate) : 128000;
-    const output_fps = options.fps ? parseInt(options.fps) : undefined;
-    const isNvenc = video_codec && video_codec.includes('nvenc');
-
-    sendMessage({ type: 'progress', percent: 10, message: 'Probing source video' });
-    const probeResult = nVideo.probe(inputPath);
-    const videoStream = probeResult.streams.find(s => s.type === 'video');
-    sendMessage({ type: 'progress', percent: 15, message: `Source: ${videoStream?.width}x${videoStream?.height}, ${probeResult.format.duration?.toFixed(1) || '?'}s` });
-    const audioStream = probeResult.streams.find(s => s.type === 'audio');
-    const sourceWidth = videoStream?.width;
-    const sourceHeight = videoStream?.height;
-    const sourceDuration = probeResult.format.duration;
-
-    let targetWidth = width;
-    let targetHeight = height;
-
-    // Apply max_dimension if no explicit width/height set
-    const maxDim = options.max_dimension ? parseInt(options.max_dimension) : undefined;
-    if (!targetWidth && !targetHeight && maxDim && maxDim > 0) {
-      const sourceLongEdge = Math.max(sourceWidth, sourceHeight);
-      if (sourceLongEdge > maxDim) {
-        const scale = maxDim / sourceLongEdge;
-        targetWidth = Math.round(sourceWidth * scale);
-        targetHeight = Math.round(sourceHeight * scale);
-      }
-    }
-
-    if (targetWidth && !targetHeight) {
-      targetHeight = Math.round(sourceHeight * (targetWidth / sourceWidth));
-    } else if (targetHeight && !targetWidth) {
-      targetWidth = Math.round(sourceWidth * (targetHeight / sourceHeight));
-    }
-    if (targetWidth) targetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth + 1;
-    if (targetHeight) targetHeight = targetHeight % 2 === 0 ? targetHeight : targetHeight + 1;
-
+    const cliCommand = options.cli_command || '-c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k';
+    const outputExt = path.extname(inputPath).slice(1) || 'mp4';
     const outputId = crypto.randomUUID();
-    const outputExt = { mp4: 'mp4', webm: 'webm', mkv: 'mkv', mov: 'mov', avi: 'avi', ts: 'ts', flv: 'flv', '3gp': '3gp', ogv: 'ogv', wmv: 'wmv' }[output_format] || output_format;
     const outputPath = path.join(cacheDir, `output-${outputId}.${outputExt}`);
 
     try {
-      const transcodeOpts = {
-        cache: false,
+      await runFfmpeg(inputPath, outputPath, cliCommand);
+      const stat = fs.statSync(outputPath);
+      return {
+        filePath: outputPath,
+        metadata: {
+          outputSize: stat.size,
+          mode: 'transcode',
+          mimeType: MIME_TYPES[outputExt] || 'video/mp4',
+        },
       };
-      if (options.hwaccel) {
-        transcodeOpts.hwaccel = options.hwaccel;
-      }
-      if (options.useNative !== undefined) {
-        transcodeOpts.useNative = options.useNative;
-      }
-      if (options.cli_command) {
-        transcodeOpts.cli_command = options.cli_command;
-      }
-
-      if (!options.no_video) {
-        transcodeOpts.video = { codec: video_codec };
-        if (isNvenc) {
-          // NVENC uses p1-p7 presets and cq (not crf)
-          const presetMap = { ultrafast: 'p1', superfast: 'p2', veryfast: 'p3', faster: 'p4', fast: 'p5', medium: 'p4', slow: 'p6', slower: 'p7', veryslow: 'p7' };
-          transcodeOpts.video.preset = presetMap[preset] || preset;
-          transcodeOpts.video.cq = crf;
-        } else {
-          transcodeOpts.video.preset = preset;
-          transcodeOpts.video.crf = crf;
-        }
-        if (options.videoOptions) {
-          transcodeOpts.video.options = options.videoOptions;
-        }
-        if (targetWidth) transcodeOpts.video.width = targetWidth;
-        if (targetHeight) transcodeOpts.video.height = targetHeight;
-        if (output_fps) transcodeOpts.video.fps = output_fps;
-      } else {
-        transcodeOpts.video = null;
-      }
-      if (audioStream && !options.no_audio) {
-        transcodeOpts.audio = { codec: audio_codec, bitrate: audio_bitrate };
-        if (options.audioOptions) {
-          transcodeOpts.audio.options = options.audioOptions;
-        }
-      } else if (options.no_audio) {
-        transcodeOpts.audio = null;
-      }
-
-      await new Promise((resolve, reject) => {
-        transcodeOpts.onProgress = (p) => {
-          const msg = p.speed ? `Transcoding: ${Math.round(p.percent)}% (${p.speed.toFixed(1)}x)` : `Transcoding: ${Math.round(p.percent)}%`;
-          sendMessage({ type: 'progress', percent: p.percent, message: msg });
-        };
-        transcodeOpts.onComplete = (result) => resolve(result);
-        transcodeOpts.onError = (error) => reject(new Error(error.message || 'nVideo transcode failed'));
-        nVideo.transcode(inputPath, outputPath, transcodeOpts);
-      });
-
-        const stat = fs.statSync(outputPath);
-        return {
-          filePath: outputPath,
-          metadata: {
-            outputSize: stat.size,
-            mode: 'transcode',
-            output_format,
-            video_codec,
-            audio_codec,
-            dimensions: targetWidth && targetHeight ? `${targetWidth}x${targetHeight}` : `${sourceWidth}x${sourceHeight}`,
-            duration: sourceDuration,
-            mimeType: { mp4: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime', avi: 'video/x-msvideo', ts: 'video/mp2t', flv: 'video/x-flv', '3gp': 'video/3gpp', ogv: 'video/ogg', wmv: 'video/x-ms-wmv' }[output_format] || 'video/mp4',
-          },
-        };
-      } finally {
-        if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
-      }
+    } finally {
+      if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
     }
+  }
 
   // extract_keyframes
   sendMessage({ type: 'progress', percent: 5, message: 'Mode: extract_keyframes' });
@@ -348,6 +244,23 @@ async function processVideo(inputSource, options, cacheDir) {
   } finally {
     if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
   }
+}
+
+function runFfmpeg(inputPath, outputPath, cliCommand) {
+  return new Promise((resolve, reject) => {
+    nVideo.transcode(inputPath, outputPath, {
+      cli_command: cliCommand,
+      cache: false,
+      onProgress: (p) => {
+        const msg = p.speed
+          ? `Processing: ${Math.round(p.percent)}% (${p.speed.toFixed(1)}x)`
+          : `Processing: ${Math.round(p.percent)}%`;
+        sendMessage({ type: 'progress', percent: p.percent, message: msg });
+      },
+      onComplete: (result) => resolve(result),
+      onError: (error) => reject(new Error(error.message || 'FFmpeg processing failed')),
+    });
+  });
 }
 
 async function processImage(inputSource, options) {

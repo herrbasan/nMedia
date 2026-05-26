@@ -36,6 +36,23 @@ export class TaskWorker {
   }
 
   /**
+   * Cancel the currently running task by killing the native worker.
+   * @returns {boolean}
+   */
+  cancel() {
+    if (!this.activeTask || !this.nativeWorker) {
+      return false;
+    }
+    logger.info('Cancelling worker task', { workerId: this.id, taskId: this.activeTask.id });
+    if (typeof this.nativeWorker.terminate === 'function') {
+      this.nativeWorker.terminate();
+    } else if (typeof this.nativeWorker.kill === 'function') {
+      this.nativeWorker.kill();
+    }
+    return true;
+  }
+
+  /**
    * Process a task
    * @param {import('./Task.js').Task} task
    */

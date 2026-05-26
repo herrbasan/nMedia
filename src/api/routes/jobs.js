@@ -130,8 +130,8 @@ export async function handleCancelJob(ctx) {
       return;
     }
 
-    if (job.status !== JobStatus.QUEUED) {
-      ctx.error(409, `Cannot cancel job with status: ${job.status}. Only queued jobs can be cancelled.`);
+    if (job.status !== JobStatus.QUEUED && job.status !== JobStatus.PROCESSING) {
+      ctx.error(409, `Cannot cancel job with status: ${job.status}. Only queued or processing jobs can be cancelled.`);
       return;
     }
 
