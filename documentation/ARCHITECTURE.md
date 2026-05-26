@@ -98,11 +98,11 @@ Uses nVideo for all video operations.
 
 **Processing modes:**
 
-| Mode | Description | nVideo Method |
-|------|-------------|---------------|
-| `extract_audio` | Extract audio track | `nVideo.extractAudio()` |
-| `extract_keyframes` | Extract frames at FPS | `nVideo.thumbnail()` loop |
-| `transcode` | Full video transcode | `nVideo.transcode()` |
+| Mode | Description | Implementation |
+|------|-------------|----------------|
+| `extract_audio` | Extract audio track | FFmpeg CLI (`-vn -c:a ...`) via `nVideo.transcode()` |
+| `extract_keyframes` | Extract frames at FPS | Native `nVideo.thumbnail()` loop + nImage JPEG |
+| `transcode` | Full video transcode | FFmpeg CLI via `nVideo.transcode({ cli_command: ... })` |
 
 **GPU codec selection** — codecs must be explicitly specified in options; no auto-injection occurs:
 

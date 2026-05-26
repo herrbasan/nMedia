@@ -191,76 +191,36 @@ Extracts frames at a specified FPS for LLM vision analysis.
 
 #### Transcode
 
-Full video transcode with codec and quality options.
+Full video transcode via FFmpeg CLI. All encoding parameters are passed as raw FFmpeg arguments.
 
 ```json
 {
   "mode": "transcode",
-  "output_format": "mp4",
-  "video_codec": "libx264",
-  "audio_codec": "aac",
-  "crf": 23,
-  "preset": "medium",
-  "width": 1920,
-  "height": 1080
+  "cli_command": "-c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k"
 }
 ```
 
-**nVideo method:** `nVideo.transcode(input, output, opts)`
+**nVideo method:** `nVideo.transcode(input, output, { cli_command: ... })`
 
 **Flow:**
 1. Probe video for source metadata
-2. Build video/audio filter graphs
-3. Transcode with hardware acceleration if specified
-4. Return processed video
+2. Spawn FFmpeg with the provided CLI arguments
+3. Stream output to disk
+4. Return processed video file path
 
-#### CLI Passthrough
+The `cli_command` value is passed directly to FFmpeg after the input file. Any valid FFmpeg arguments can be used: codec selection (`-c:v`, `-c:a`), quality (`-crf`, `-cq`), bitrate (`-b:v`, `-b:a`), filters (`-vf`, `-af`), hardware acceleration (`-hwaccel cuda`), etc. There is no structured option building or validation — the caller is responsible for constructing valid FFmpeg command lines.
 
-FFmpeg CLI flag passthrough for advanced encoding control. Parse CLI-style flags into structured options.
+**Common recipes:**
 
-```json
-{
-  "mode": "cli",
-  "output_format": "mp4",
-  "video_codec": "h264_nvenc",
-  "audio_codec": "aac",
-  "preset": "medium",
-  "crf": 23,
-  "videoOptions": {
-    "rc": "constqp",
-    "qp": "21",
-    "tune": "hq"
-  },
-  "audioOptions": {
-    "b": "128000"
-  }
-}
-```
-
-**Supported CLI flags (parsed from `videoOptions`/`audioOptions`):**
-
-| Flag | Maps To | Description |
-|------|---------|-------------|
-| `-c:v` | `video_codec` | Video codec |
-| `-c:a` | `audio_codec` | Audio codec |
-| `-preset` | `preset` | Encoding preset |
-| `-crf` | `crf` | Quality (CPU codecs) |
-| `-cq` / `-qp` | `crf` | Quality (NVENC) |
-| `-b:v` | `videoOptions.b` | Video bitrate |
-| `-b:a` | `audioOptions.b` | Audio bitrate |
-| `-ar` | `audioOptions.ar` | Audio sample rate |
-| `-ac` | `audioOptions.ac` | Audio channels |
-| `-r` | `fps` | Frame rate |
-| `-s` | `width`/`height` | Resolution |
-| `-vf` | `filters` | Video filter graph |
-| `-af` | `audioOptions.af` | Audio filter graph |
-| `-pix_fmt` | `videoOptions.pix_fmt` | Pixel format |
-| `-g` | `videoOptions.g` | GOP size |
-| `-threads` | `videoOptions.threads` | Thread count |
-| `-an` | `no_audio: true` | Disable audio |
-| `-vn` | `no_video: true` | Disable video |
-
-All other flags are passed through as-is to the encoder via `av_opt_set()`.
+| Recipe | CLI Command |
+|--------|-------------|
+| H.264 Web | `-c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k` |
+| H.265 Archive | `-c:v libx265 -crf 23 -preset medium -c:a aac -b:a 128k` |
+| AV1 Modern | `-c:v libsvtav1 -crf 30 -preset 6 -c:a libopus -b:a 128k` |
+| Copy Streams | `-c:v copy -c:a copy` |
+| Audio Only (MP3) | `-vn -c:a libmp3lame -b:a 128k` |
+| Audio Only (WAV) | `-vn -c:a pcm_s16le` |
+| NVENC H.264 | `-hwaccel cuda -c:v h264_nvenc -preset p4 -cq 23 -c:a aac -b:a 128k` |
 
 ### Hardware Acceleration
 
@@ -271,8 +231,8 @@ Hardware acceleration is **only applied when explicitly requested** via `options
 #### Zero-Copy GPU Acceleration Pipeline
 The data-flow logic in `src/tasks/TaskWorker.js` propagates `cli_command` and `hwaccel` overrides to the underlying FFmpeg runner. In theory this enables GPU-accelerated pipelines where video frames remain in VRAM. **However, HW-accelerated encoding currently crashes** (see `docs/handover_2026-04-22.md`). Software encoding is the reliable path.
 
-#### Disk-to-Disk Processing Exceptions
-When jobs utilize hardware acceleration and pipeline their outputs directly to disk without loading into software memory Buffers, `Worker.js` accurately forks the `assetCache` flow to ingest directly from `result.filePath` / `result.outputPath` instead. This prevents `length` null reference exceptions from bubbling up whenever in-memory `result.buffer`s are bypassed.
+#### Disk-to-Disk Processing
+When jobs output results directly to disk (via `output_path` or when the worker returns `filePath`/`outputPath` instead of a buffer), `Worker.js` forks the `assetCache` flow to ingest from `result.filePath` / `result.outputPath` instead of `result.buffer`. This prevents null reference exceptions when in-memory buffers are bypassed.
 
 | Platform | Video Decode | Video Encode | GPU Requirement |
 |----------|--------------|--------------|-----------------|
@@ -292,15 +252,6 @@ When jobs utilize hardware acceleration and pipeline their outputs directly to d
 | h264_nvenc | Very Fast | Good | NVIDIA GPU encoding |
 | hevc_nvenc | Very Fast | Good | NVIDIA GPU HEVC encoding |
 | av1_nvenc | Fast | Very Good | NVIDIA RTX 40-series AV1 |
-
-### Recommended Presets
-
-| Preset | Video | Audio | Use Case |
-|--------|-------|-------|----------|
-| webStreaming | libx264 | aac | Universal web playback |
-| archiving | libx265 | flac | Best quality/size ratio |
-| modern | libsvtav1 | libopus | Modern streaming |
-| fastest | h264_nvenc | aac | GPU-accelerated encoding |
 
 ---
 

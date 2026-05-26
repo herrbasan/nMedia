@@ -356,16 +356,12 @@ The following legacy endpoints are still functional but superseded by the unifie
 - `format`: mp3, wav, ogg, m4a, flac, aac, opus
 
 ### Video
-- `mode`: `extract_audio`, `extract_keyframes`, `transcode`, or `cli`
+- `mode`: `extract_audio`, `extract_keyframes`, or `transcode`
 - `fps`: Frame rate for keyframe extraction (1-30)
 - `max_dimension`: Max frame dimension for extracted keyframes
-- `output_format`: Container format (mp4, webm, mkv, mov)
-- `video_codec`: Video codec (libx264, libx265, h264_nvenc, etc.)
-- `audio_codec`: Audio codec (aac, libmp3lame, libopus, copy)
-- `hwaccel`: Hardware acceleration (nvenc, qsv, vaapi)
-- `crf`: Quality factor (0-51, default 23)
-- `preset`: Encoding speed preset (ultrafast to veryslow)
-- `width`, `height`: Optional output dimensions
+- `cli_command`: Raw FFmpeg arguments for transcode mode (e.g. `-c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k`)
+- `format`: Audio format for extract_audio mode (mp3, wav, ogg, m4a, flac, aac, opus)
+- `audio_bitrate`: Audio bitrate in Hz for extract_audio mode (default 128000)
 
 ---
 
