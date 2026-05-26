@@ -94,39 +94,39 @@ function buildVideoOptions(videoCodec, options) {
   if (options.rc) videoOptions.rc = options.rc;
   if (options.tune) videoOptions.tune = options.tune;
 
-    // Apply strict recipe constraints (filter out arbitrary unsupported CLI flags)
-    const filteredOptions = {};
-    let allowedKeys = [];
+  // Apply strict recipe constraints (filter out arbitrary unsupported CLI flags)
+  const filteredOptions = {};
+  let allowedKeys = [];
 
-    if (isNvenc) {
-      allowedKeys = [...CODEC_ALLOWLIST.nvenc_base];
-      if (videoCodec !== 'av1_nvenc') {
-        allowedKeys = [...allowedKeys, ...CODEC_ALLOWLIST.nvenc_advanced];
-      }
-    } else if (isQsv) {
-      allowedKeys = [...CODEC_ALLOWLIST.qsv_base];
-    } else if (isVaapi) {
-      allowedKeys = [...CODEC_ALLOWLIST.vaapi_base];
-    } else if (isVp9) {
-      allowedKeys = [...CODEC_ALLOWLIST.vp9_base];
-    } else if (isVp8) {
-      allowedKeys = [...CODEC_ALLOWLIST.vp8_base];
-    } else if (isSvtAv1) {
-      allowedKeys = [...CODEC_ALLOWLIST.svtav1_base];
-    } else {
-      allowedKeys = [...CODEC_ALLOWLIST.cpu_base];
+  if (isNvenc) {
+    allowedKeys = [...CODEC_ALLOWLIST.nvenc_base];
+    if (videoCodec !== 'av1_nvenc') {
+      allowedKeys = [...allowedKeys, ...CODEC_ALLOWLIST.nvenc_advanced];
     }
-
-    for (const key in videoOptions) {
-      if (allowedKeys.includes(key)) {
-        filteredOptions[key] = String(videoOptions[key]);
-      } else {
-        console.warn(`[VideoProcessor] Dropping incompatible encoder option: ${key}=${videoOptions[key]} for codec ${videoCodec}`);
-      }
-    }
-
-    return filteredOptions;
+  } else if (isQsv) {
+    allowedKeys = [...CODEC_ALLOWLIST.qsv_base];
+  } else if (isVaapi) {
+    allowedKeys = [...CODEC_ALLOWLIST.vaapi_base];
+  } else if (isVp9) {
+    allowedKeys = [...CODEC_ALLOWLIST.vp9_base];
+  } else if (isVp8) {
+    allowedKeys = [...CODEC_ALLOWLIST.vp8_base];
+  } else if (isSvtAv1) {
+    allowedKeys = [...CODEC_ALLOWLIST.svtav1_base];
+  } else {
+    allowedKeys = [...CODEC_ALLOWLIST.cpu_base];
   }
+
+  for (const key in videoOptions) {
+    if (allowedKeys.includes(key)) {
+      filteredOptions[key] = String(videoOptions[key]);
+    } else {
+      console.warn(`[VideoProcessor] Dropping incompatible encoder option: ${key}=${videoOptions[key]} for codec ${videoCodec}`);
+    }
+  }
+
+  return filteredOptions;
+}
 
 /**
  * Build audio encoder options map.

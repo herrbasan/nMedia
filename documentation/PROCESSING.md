@@ -266,8 +266,10 @@ All other flags are passed through as-is to the encoder via `av_opt_set()`.
 
 Hardware acceleration is **only applied when explicitly requested** via `options.hwaccel`. Auto-injection of `hwaccel: 'cuda'` for NVENC codecs was removed to prevent CUDA access violation segfaults. Users must explicitly specify `-hwaccel cuda` in CLI mode or set `hwaccel` in options.
 
+> **⚠️ Warning:** Hardware-accelerated encoding (NVENC, QSV, VAAPI) is **experimental and currently crashes** with `0xC0000005` (access violation). See `docs/handover_2026-04-22.md` for full details. **Software encoding (`libx264`, `libx265`, `libsvtav1`) is reliable and recommended.**
+
 #### Zero-Copy GPU Acceleration Pipeline
-The data-flow logic in `src/tasks/TaskWorker.js` guarantees that `cli_command` and `hwaccel` overrides propagate to the underlying FFmpeg runner. This allows the construction of true 100% GPU-accelerated *zero-copy* pipelines where video frames remain strictly in VRAM for decoding, transforming (e.g., `-vf scale_cuda=format=p010le`), and encoding (e.g., `av1_nvenc`), bypassing the system CPU entirely.
+The data-flow logic in `src/tasks/TaskWorker.js` propagates `cli_command` and `hwaccel` overrides to the underlying FFmpeg runner. In theory this enables GPU-accelerated pipelines where video frames remain in VRAM. **However, HW-accelerated encoding currently crashes** (see `docs/handover_2026-04-22.md`). Software encoding is the reliable path.
 
 #### Disk-to-Disk Processing Exceptions
 When jobs utilize hardware acceleration and pipeline their outputs directly to disk without loading into software memory Buffers, `Worker.js` accurately forks the `assetCache` flow to ingest directly from `result.filePath` / `result.outputPath` instead. This prevents `length` null reference exceptions from bubbling up whenever in-memory `result.buffer`s are bypassed.

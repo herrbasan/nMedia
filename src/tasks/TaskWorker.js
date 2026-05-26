@@ -40,6 +40,56 @@ const AUDIO_CODECS = { mp3: 'libmp3lame', wav: 'pcm_s16le', ogg: 'libvorbis', m4
 const FORMAT_EXTENSIONS = { mp3: 'mp3', wav: 'wav', ogg: 'ogg', m4a: 'm4a', flac: 'flac', aac: 'aac', opus: 'opus' };
 const MIME_TYPES = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', flac: 'audio/flac', aac: 'audio/aac', opus: 'audio/opus' };
 
+// Standalone option validators (mirror Processor.validateOptions)
+function validateImageOptions(options) {
+  const { max_dimension, quality, format, rotate, blur, crop } = options;
+  if (max_dimension !== undefined && (max_dimension < 1 || max_dimension > 10000)) {
+    throw new Error('max_dimension must be between 1 and 10000');
+  }
+  if (quality !== undefined && (quality < 1 || quality > 100)) {
+    throw new Error('quality must be between 1 and 100');
+  }
+  if (format !== undefined && !['jpeg', 'png', 'webp', 'avif', 'gif'].includes(format)) {
+    throw new Error('format must be jpeg, png, webp, avif, or gif');
+  }
+  const parsedRotate = rotate !== undefined && rotate !== null ? parseInt(rotate) : undefined;
+  if (parsedRotate !== undefined && ![90, 180, 270].includes(parsedRotate)) {
+    throw new Error('rotate must be 90, 180, or 270');
+  }
+  if (blur !== undefined && (blur < 0 || blur > 20)) {
+    throw new Error('blur sigma must be between 0 and 20');
+  }
+  if (crop !== undefined) {
+    if (typeof crop !== 'object') throw new Error('crop must be an object');
+    if (!['region', 'center', 'grid'].includes(crop.type)) {
+      throw new Error('crop.type must be "region", "center", or "grid"');
+    }
+  }
+}
+
+function validateAudioOptions(options) {
+  const { sample_rate, channels, format } = options;
+  if (sample_rate !== undefined && sample_rate !== 'source' && ![8000, 16000, 22050, 44100, 48000].includes(sample_rate)) {
+    throw new Error('sample_rate must be 8000, 16000, 22050, 44100, 48000, or "source"');
+  }
+  if (channels !== undefined && channels !== 'source' && ![1, 2].includes(channels)) {
+    throw new Error('channels must be 1 (mono), 2 (stereo), or "source"');
+  }
+  if (format !== undefined && !['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'opus'].includes(format)) {
+    throw new Error('format must be mp3, wav, ogg, m4a, flac, aac, or opus');
+  }
+}
+
+function validateVideoOptions(options) {
+  const { mode, fps } = options;
+  if (mode !== undefined && !['extract_audio', 'extract_keyframes', 'transcode', 'cli'].includes(mode)) {
+    throw new Error('mode must be extract_audio, extract_keyframes, transcode, or cli');
+  }
+  if (fps !== undefined && (fps < 1 || fps > 30)) {
+    throw new Error('fps must be between 1 and 30');
+  }
+}
+
 async function initNImage() {
   if (!nImage) {
     nImage = (await import(nImageUrl)).default;
@@ -500,6 +550,11 @@ messageEmitter.on('message', async (message) => {
   sendMessage({ type: 'progress', percent: 0, message: `TaskWorker started: ${mediaType} / ${mode}` });
 
   try {
+    // Validate options before processing (mirrors PipelineExecutor behavior)
+    if (mediaType === 'image') validateImageOptions(options);
+    else if (mediaType === 'audio') validateAudioOptions(options);
+    else if (mediaType === 'video') validateVideoOptions(options);
+
     let result;
     if (mediaType === 'audio') {
       result = await processAudio(inputSource, options, cacheDir);

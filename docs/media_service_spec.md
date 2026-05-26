@@ -70,7 +70,7 @@ Media Service is a stateless microservice designed to preprocess multimedia file
 #### Audio/Video Processing (nVideo - Native NAPI)
 - Direct FFmpeg C API (`avformat`, `avcodec`, `avfilter`, `swscale`, `swresample`)
 - File-to-file transcoding runs entirely in C++ (no JS involvement during processing)
-- Automatic GPU codec selection based on `config.media.gpu.platform`
+- GPU codec must be explicitly specified in options; no automatic selection occurs
 - Audio filter graphs (`abuffer → aformat → asetnsamples → abuffersink`)
 - Native progress callbacks (percent, speed, bitrate, ETA, frame counts)
 
@@ -161,7 +161,7 @@ All three IDs are tracked in `JobStore`:
 |--------|----------|-------------|
 | `Content-Type` | Yes | `application/octet-stream` |
 | `Content-Length` | Yes | Enables pre-flight disk space check |
-| `X-Original-Filename` | Yes | Used for format detection (sanitized) |
+| `X-Original-Filename` | No | Used for format detection (sanitized). Defaults to 'unknown' |
 | `X-Upload-Id` | No | Idempotency key for retry-safe uploads |
 
 **Response (200):**
@@ -353,10 +353,10 @@ The following legacy endpoints are still functional but superseded by the unifie
 ### Audio
 - `sample_rate`: 8000, 16000, 22050, 44100, 48000 Hz (default 16000)
 - `channels`: 1 (mono) or 2 (stereo), default mono
-- `format`: mp3, wav, ogg, m4a
+- `format`: mp3, wav, ogg, m4a, flac, aac, opus
 
 ### Video
-- `mode`: `extract_audio`, `extract_keyframes`, or `transcode`
+- `mode`: `extract_audio`, `extract_keyframes`, `transcode`, or `cli`
 - `fps`: Frame rate for keyframe extraction (1-30)
 - `max_dimension`: Max frame dimension for extracted keyframes
 - `output_format`: Container format (mp4, webm, mkv, mov)

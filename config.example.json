@@ -4,7 +4,7 @@
     "host": "0.0.0.0"
   },
   "media": {
-    "maxFileSizeMb": 9007199254740991,
+    "maxFileSizeMb": 2048,
     "gpu": {
       "platform": "nvenc",
       "device": 0

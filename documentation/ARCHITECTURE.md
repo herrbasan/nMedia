@@ -104,7 +104,7 @@ Uses nVideo for all video operations.
 | `extract_keyframes` | Extract frames at FPS | `nVideo.thumbnail()` loop |
 | `transcode` | Full video transcode | `nVideo.transcode()` |
 
-**GPU codec selection** based on `config.media.gpu.platform`:
+**GPU codec selection** — codecs must be explicitly specified in options; no auto-injection occurs:
 
 | Platform | Video Decode | Video Encode |
 |----------|--------------|--------------|

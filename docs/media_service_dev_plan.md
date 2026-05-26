@@ -42,7 +42,7 @@ The **Media Processing Service (MPS)** is a standalone microservice built on **N
 - **NVENC**: NVIDIA GPUs (h264_nvenc, hevc_nvenc, h264_cuvid, hevc_cuvid)
 - **VAAPI**: Intel/AMD GPUs (h264_vaapi, hevc_vaapi)
 - **QSV**: Intel Quick Sync Video (h264_qsv, hevc_qsv)
-- **D3D11VA**: Windows DirectX (decode only)
+
 
 Configured via `config.json` (`media.gpu.platform`).
 
@@ -73,7 +73,7 @@ The following endpoints are retained for backward compatibility but are **deprec
 
 Processing runs in configurable modes via `workers.mode`:
 
-**Process Mode** (`"process"` - default and recommended):
+**Process Mode** (`"process"` - recommended):
 - Each task spawns a Node.js `child_process.fork`
 - nVideo runs in child process, main event loop stays free
 - Maximum isolation — native module panics kill only the child process
@@ -208,14 +208,12 @@ The WebSocket server (`/v1/ws`) supports:
 ### Phase 7: Remaining Work 🔄 IN PROGRESS / PLANNED
 
 #### High Priority
-1. **Update E2E test suite** (`tests/e2e.test.js`)
-   - Currently targets legacy multipart endpoints on port 3500
-   - Should test unified transport: `/v1/upload` → `/v1/process` → `/v1/jobs/:id` → `/v1/assets/:id`
-   - Update port to 3501 to match `config.json`
+1. **Update E2E test suite** (`tests/e2e.test.js`) — ✅ **DONE**
+   - Rewritten to test unified transport: `/v1/upload` → `/v1/process` → `/v1/jobs/:id` → `/v1/assets/:id`
+   - Port updated to 3501
 
-2. **Admin UI (`public/admin/`)**
-   - Server route `/admin/*` is live but `public/` directory does not exist
-   - Build a minimal dashboard: processor status, job list, asset stats, upload/process/download flow
+2. **Admin UI (`public/`)** — ✅ **DONE**
+   - Full NUI-based SPA with dashboard, task explorer, job monitor, system tests, cache manager
 
 #### Medium Priority
 3. **Task retry logic**

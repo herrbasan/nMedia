@@ -21,6 +21,22 @@ export async function handleGetAsset(ctx) {
       return;
     }
 
+    // Stream large files; buffer small ones
+    const STREAM_THRESHOLD = 10 * 1024 * 1024; // 10MB
+    const filename = `${asset.id}.${assetCache._getExtension(asset.mimeType)}`;
+
+    if (asset.size > STREAM_THRESHOLD) {
+      const stream = assetCache.getStream(id);
+      if (!stream) {
+        ctx.error(404, `Asset file not found: ${id}`);
+        return;
+      }
+      logger.info('Asset streamed', { id, type: asset.type, size: asset.size, mimeType: asset.mimeType });
+      assetCache.markRetrieved(id);
+      ctx.stream(200, stream, asset.mimeType, asset.size, filename);
+      return;
+    }
+
     const buffer = assetCache.getBuffer(id);
     if (!buffer) {
       ctx.error(404, `Asset file not found: ${id}`);
@@ -28,8 +44,7 @@ export async function handleGetAsset(ctx) {
     }
 
     logger.info('Asset served', { id, type: asset.type, size: asset.size, mimeType: asset.mimeType });
-
-    const filename = `${asset.id}.${assetCache._getExtension(asset.mimeType)}`;
+    assetCache.markRetrieved(id);
     ctx.send(200, buffer, asset.mimeType, filename);
   } catch (error) {
     logger.error('Get asset failed', { error: error.message });
@@ -64,6 +79,7 @@ export async function handleGetAssetMetadata(ctx) {
       size: asset.size,
       createdAt: new Date(asset.createdAt).toISOString(),
       expiresAt: new Date(asset.expiresAt).toISOString(),
+      retrievedAt: asset.retrievedAt ? new Date(asset.retrievedAt).toISOString() : null,
       metadata: asset.metadata,
     });
   } catch (error) {

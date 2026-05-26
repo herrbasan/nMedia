@@ -229,7 +229,7 @@ curl -X POST http://localhost:3500/v1/process/image \
 
 ## Worker Modes
 
-**Queue mode** (`"queue"`, default): Tasks run serialized on the main thread. Lower memory footprint. Currently has a bug where results are undefined — use `thread` or `process` instead.
+**Queue mode** (`"queue"`, default): Tasks run serialized on the main thread. Lower memory footprint. Suitable for image processing; use `process` for audio/video to isolate native crashes.
 
 **Thread mode** (`"thread"`): Each task spawns a `worker_thread`. Native modules run off the main event loop, providing true parallelism.
 
@@ -237,6 +237,6 @@ curl -X POST http://localhost:3500/v1/process/image \
 
 ## Web UI
 
-A web interface for testing is available at `http://localhost:3500/admin/` when the service is running.
+A web interface for testing is available at `http://localhost:3500/` when the service is running.
 
 See `mediaservice-web/README.md` for UI details.

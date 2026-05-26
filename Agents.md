@@ -124,6 +124,8 @@ This project uses git submodules located in `/modules`. These are all **our own 
 | `qsv` | h264_qsv, hevc_qsv | h264_qsv, hevc_qsv, av1_qsv |
 | `cpu` | software | libx264, libx265, libsvtav1 |
 
+> **⚠️ Hardware-Accelerated Encoding Warning:** HW encode (NVENC, QSV, VAAPI) is **experimental and currently crashes** with `0xC0000005` (access violation). See `docs/handover_2026-04-22.md` for details. **Software encoding (`libx264`, `libx265`, `libsvtav1`) is reliable and recommended.**
+
 #### ProgressReporter (`src/pipeline/ProgressReporter.js`)
 - Manages progress connections for real-time updates
 - Supports both **SSE** and **WebSocket** via generic `Sender` interface
@@ -254,7 +256,7 @@ Added `process` mode (child_process.fork) for maximum isolation. Native crashes 
 Hardware acceleration is **only applied when explicitly requested** via `options.hwaccel`. No auto-injection occurs in any processor or worker. Users must explicitly specify `hwaccel` in transcode options to enable GPU acceleration.
 
 ### Zero-Copy GPU Acceleration Pipeline
-The data-flow logic in `src/tasks/TaskWorker.js` has been patched to unconditionally propagate `cli_command` and `hwaccel` overrides to the underlying FFmpeg runner. This allows the construction of true 100% GPU-accelerated *zero-copy* pipelines where frames remain in VRAM for decoding, transforming (e.g., `-vf scale_cuda=format=p010le`), and encoding (e.g., `av1_nvenc`), utilizing virtually zero CPU.
+The data-flow logic in `src/tasks/TaskWorker.js` propagates `cli_command` and `hwaccel` overrides to the underlying FFmpeg runner. In theory this enables GPU-accelerated pipelines where frames remain in VRAM. **However, HW-accelerated encoding currently crashes** (see `docs/handover_2026-04-22.md`). Software encoding is the reliable path.
 
 ### Disk-to-Disk Processing Exceptions
 Fixed a crash in `src/tasks/Worker.js` that occurred when jobs utilized hardware acceleration and outputted results directly to disk without passing through software memory. The worker was erroneously querying `result.buffer.length` on disk-only resolutions, throwing a `Cannot read properties of undefined (reading 'length')` error that bubbled up to the UI. The caching flow now properly forks between memory buffers (`result.buffer`) and disk outputs (`result.filePath` / `result.outputPath`).

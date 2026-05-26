@@ -144,6 +144,35 @@ export class Context {
   }
 
   /**
+   * Stream a readable response (file download).
+   * @param {number} statusCode - HTTP status code
+   * @param {import('fs').ReadStream} stream - Readable stream
+   * @param {string} mimeType - Content-Type
+   * @param {number} size - Content-Length
+   * @param {string} [filename] - Optional Content-Disposition filename
+   */
+  stream(statusCode, stream, mimeType, size, filename) {
+    if (this.#res.headersSent) return;
+    const headers = {
+      'Content-Type': mimeType,
+      'Content-Length': size,
+      'X-Powered-By': 'MediaService',
+      'Access-Control-Allow-Origin': '*',
+    };
+    if (filename) {
+      headers['Content-Disposition'] = `attachment; filename="${filename}"`;
+    }
+    this.#res.writeHead(statusCode, headers);
+    stream.pipe(this.#res);
+    stream.on('error', (err) => {
+      logger.error('Stream error', { error: err.message });
+      if (!this.#res.headersSent) {
+        this.#res.destroy();
+      }
+    });
+  }
+
+  /**
    * Create SSE job for progress reporting.
    * @returns {string} - Job ID
    */
