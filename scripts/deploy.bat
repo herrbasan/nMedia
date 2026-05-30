@@ -85,9 +85,43 @@ if exist "%SOURCE_CONFIG%" (
     echo Source config.json not found. Make sure config.json exists.
 )
 
+:: Copy native module binaries (dist folders are build artifacts, not tracked in git)
+echo.
+echo [4/5] Copying native module binaries...
+set "SOURCE_NVIDEO=modules\nVideo\dist"
+set "TARGET_NVIDEO=%TARGET%\modules\nVideo\dist"
+if exist "%SOURCE_NVIDEO%" (
+    if not exist "%TARGET_NVIDEO%" mkdir "%TARGET_NVIDEO%"
+    echo   nVideo dist...
+    robocopy "%SOURCE_NVIDEO%" "%TARGET_NVIDEO%" /E /NFL /NDL /NJH /NJS
+) else (
+    echo   WARNING: Source modules\nVideo\dist not found. nVideo may need to be built on target.
+)
+
+set "SOURCE_NIMAGE=modules\nImage\dist"
+set "TARGET_NIMAGE=%TARGET%\modules\nImage\dist"
+if exist "%SOURCE_NIMAGE%" (
+    if not exist "%TARGET_NIMAGE%" mkdir "%TARGET_NIMAGE%"
+    echo   nImage dist...
+    robocopy "%SOURCE_NIMAGE%" "%TARGET_NIMAGE%" /E /NFL /NDL /NJH /NJS
+) else (
+    echo   WARNING: Source modules\nImage\dist not found. nImage may need to be built on target.
+)
+
+:: Copy nVideo FFmpeg binaries (deps/win/bin — not tracked in git, downloaded by npm run setup)
+set "SOURCE_FFMPEG=modules\nVideo\deps\win\bin"
+set "TARGET_FFMPEG=%TARGET%\modules\nVideo\deps\win\bin"
+if exist "%SOURCE_FFMPEG%" (
+    if not exist "%TARGET_FFMPEG%" mkdir "%TARGET_FFMPEG%"
+    echo   nVideo FFmpeg binaries...
+    robocopy "%SOURCE_FFMPEG%" "%TARGET_FFMPEG%" /E /NFL /NDL /NJH /NJS
+) else (
+    echo   WARNING: Source modules\nVideo\deps\win\bin not found. Run 'npm run setup' in modules\nVideo first.
+)
+
 :: Run npm install
 echo.
-echo [4/4] Installing dependencies...
+echo [5/5] Installing dependencies...
 cd /d "%TARGET%"
 call npm install
 if errorlevel 1 (
@@ -103,10 +137,7 @@ echo ==========================================
 echo.
 echo Next steps:
 echo   1. Review config.json on the target machine
-echo   2. Ensure native module binaries are built:
-echo      cd modules\nVideo ^&^& npm run build
-echo      cd modules\nImage ^&^& npm run build
-echo   3. Start the service: npm start
+echo   2. Start the service: npm start
 echo.
 
 endlocal
