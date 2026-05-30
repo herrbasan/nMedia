@@ -38,15 +38,17 @@ if not exist "%TARGET%" (
 if exist "%TARGET%\.git" (
     echo.
     echo [1/4] Target exists. Pulling latest changes...
-    cd /d "%TARGET%"
+    pushd "%TARGET%"
     git fetch origin
     if errorlevel 1 (
         echo ERROR: git fetch failed
+        popd
         exit /b 1
     )
     git reset --hard origin/master
     if errorlevel 1 (
         echo ERROR: git reset failed
+        popd
         exit /b 1
     )
 ) else (
@@ -57,7 +59,7 @@ if exist "%TARGET%\.git" (
         echo ERROR: git clone failed
         exit /b 1
     )
-    cd /d "%TARGET%"
+    pushd "%TARGET%"
 )
 
 :: Update submodules
@@ -66,6 +68,7 @@ echo [2/4] Updating submodules...
 git submodule update --init --recursive
 if errorlevel 1 (
     echo ERROR: Submodule update failed
+    popd
     exit /b 1
 )
 
@@ -145,10 +148,10 @@ if exist "%SOURCE_NVIDEO_BUILD%" (
 :: Run npm install (postinstall will rebuild submodules, but binaries are already in place)
 echo.
 echo [5/6] Installing dependencies...
-cd /d "%TARGET%"
 call npm install
 if errorlevel 1 (
     echo ERROR: npm install failed
+    popd
     exit /b 1
 )
 
@@ -176,6 +179,8 @@ if exist "%SOURCE_NVIDEO_BUILD%" (
     echo   nVideo build artifacts restore...
     robocopy "%SOURCE_NVIDEO_BUILD%" "%TARGET_NVIDEO_BUILD%" /E /NFL /NDL /NJH /NJS
 )
+
+popd
 
 echo.
 echo ==========================================
