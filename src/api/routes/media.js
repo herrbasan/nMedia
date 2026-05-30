@@ -113,8 +113,11 @@ export async function handleThumbnail(ctx) {
     } else if (mediaType === 'video') {
       thumbnailBuffer = await _thumbnailVideo(inputPath, width);
     } else if (mediaType === 'audio') {
-      ctx.error(415, 'Audio files do not support thumbnails');
-      return;
+      thumbnailBuffer = await _thumbnailAudio(inputPath, width);
+      if (!thumbnailBuffer) {
+        ctx.error(415, 'Audio file has no embedded cover art');
+        return;
+      }
     } else {
       ctx.error(415, 'Unsupported file type for thumbnail');
       return;
@@ -153,6 +156,55 @@ async function _thumbnailVideo(inputPath, width) {
     channels: 3,
   }).jpeg({ quality: 85 }).toBuffer();
   return jpegBuffer;
+}
+
+async function _thumbnailAudio(inputPath, width) {
+  // Try to extract embedded cover art using FFmpeg CLI
+  const ffmpegPath = path.join(__dirname, '../../../modules/nVideo/deps/win/bin/ffmpeg.exe');
+  const ffmpegExe = process.platform === 'win32' ? ffmpegPath : 'ffmpeg';
+
+  return new Promise((resolve, reject) => {
+    const { spawn } = require('child_process');
+    // Extract first video stream (attached pic) from audio file
+    const args = ['-y', '-i', inputPath, '-map', '0:v:0', '-c', 'copy', '-f', 'image2pipe', 'pipe:1'];
+    const child = spawn(ffmpegExe, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+
+    let data = Buffer.alloc(0);
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => {
+      data = Buffer.concat([data, chunk]);
+    });
+
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('close', async (code) => {
+      // Exit code 0 = success, 1 = no video stream found (expected for audio without cover)
+      if (data.length === 0) {
+        resolve(null);
+        return;
+      }
+
+      try {
+        // Resize cover art to thumbnail width
+        const jpegBuffer = await nImage(data)
+          .resize(width, null, { withoutEnlargement: true })
+          .jpeg({ quality: 85 })
+          .toBuffer();
+        resolve(jpegBuffer);
+      } catch (err) {
+        logger.error('Cover art resize failed', { error: err.message });
+        resolve(null);
+      }
+    });
+
+    child.on('error', (err) => {
+      logger.error('Cover art extraction spawn failed', { error: err.message });
+      resolve(null);
+    });
+  });
 }
 
 // --------------------------------------------------------------------------
