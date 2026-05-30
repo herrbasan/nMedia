@@ -360,6 +360,64 @@ Processors map native progress to the pipeline's 0-100% scale:
 
 ---
 
+## Media Utility Endpoints
+
+Synchronous endpoints that bypass the task queue for immediate media inspection.
+
+### Thumbnail Generation (`GET /v1/thumbnail/*`)
+
+Best-effort thumbnail for any media file. Returns JPEG.
+
+| Media Type | Method | Details |
+|-----------|--------|---------|
+| Image | nImage resize | Standard resize pipeline, width constrained |
+| Video | nVideo.thumbnail() | Frame extracted at 1 second, RGB24 → JPEG via nImage |
+| Audio | FFmpeg `-map 0:v:0` | Extracts embedded cover art, resized via nImage |
+
+**Query parameter:** `width` (default 256)
+
+**Error cases:**
+- Audio without cover art → 415
+- Unknown file type → 415
+
+### Info Extraction (`GET /v1/info/*`)
+
+Detailed metadata for any media file. Returns JSON.
+
+| Media Type | Source | Fields |
+|-----------|--------|--------|
+| Image | nImage metadata | format, dimensions, channels, depth, density, hasAlpha, isProgressive, chromaSubsampling, hasProfile, hasExif, hasIcc, hasIptc |
+| Video/Audio | nVideo.probe + ffprobe | duration, bitrate, format, tags, hasCoverArt, video/audio stream details |
+
+**Tag normalization:** Common ID3/metadata tags (title, artist, album, genre, track, disc, date, composer, etc.) are extracted and normalized. Raw tags are included under `tags.raw`.
+
+**Example audio response:**
+```json
+{
+  "path": "D:/Media/song.mp3",
+  "mediaType": "audio",
+  "duration": 256.5,
+  "bitrate": 185436,
+  "format": "mp3",
+  "tags": {
+    "title": "My Ship",
+    "artist": "André Previn",
+    "album": "Alone",
+    "genre": "Jazz",
+    "coverArt": true,
+    "raw": { "TPE1": "André Previn", "TIT2": "My Ship", ... }
+  },
+  "hasCoverArt": true,
+  "video": null,
+  "audio": { "codec": "mp3", "sampleRate": 44100, "channels": 2, "bitrate": 185345 },
+  "streams": [{ "type": "audio", "codec": "mp3", "index": 0 }],
+  "size": 1390770,
+  "modifiedAt": "2026-05-30T08:00:00.000Z"
+}
+```
+
+---
+
 ## See Also
 
 - [README.md](README.md) - Main API documentation

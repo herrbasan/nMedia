@@ -150,7 +150,7 @@ All three IDs are tracked in `JobStore`:
 | `POST` | `/v1/process` | Start processing from `fileId` or `input_path`. Returns `jobId` |
 | `GET` | `/v1/jobs/:jobId/progress` | SSE progress stream (start, progress, complete, error) |
 | `GET` | `/v1/jobs/:jobId` | Poll job status and current progress |
-| `DELETE` | `/v1/jobs/:jobId` | Cancel a queued job |
+| `DELETE` | `/v1/jobs/:jobId` | Cancel a queued or processing job |
 | `GET` | `/v1/capabilities` | Query nVideo/nImage codecs, filters, formats, hwaccels |
 | `WS` | `/v1/ws` | WebSocket for progress, binary upload, and binary download |
 
@@ -312,7 +312,115 @@ data: {"event":"complete","jobId":"job-def-456","assetId":"asset-ghi-789","metad
 }
 ```
 
-### 4.2 Asset Cache Endpoints
+### 4.2 Media Utility Endpoints
+
+Synchronous endpoints for quick media inspection and thumbnail generation. No job queue — responses return immediately.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/v1/thumbnail/*` | Best-effort thumbnail (image resize, video frame, audio cover art) |
+| `GET` | `/v1/info/*` | Detailed media metadata (EXIF, probe, tags, streams) |
+
+#### GET /v1/thumbnail/*
+
+Returns a JPEG thumbnail for any supported media file. The file path is captured as a wildcard (e.g., `/v1/thumbnail/D:/Media/video.mp4`).
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `width` | number | 256 | Max thumbnail width in pixels |
+
+**Behavior by media type:**
+
+| Type | Thumbnail Source |
+|------|-----------------|
+| Image | Resized via nImage |
+| Video | Frame extracted at 1 second via nVideo.thumbnail() |
+| Audio | Embedded cover art via FFmpeg `-map 0:v:0` (if present) |
+
+**Response (200):** JPEG binary
+
+**Response (415):** `Audio file has no embedded cover art` or `Unsupported file type`
+
+**Example:**
+```bash
+curl -o thumb.jpg "http://localhost:3501/v1/thumbnail/D:/Media/photo.jpg?width=512"
+```
+
+#### GET /v1/info/*
+
+Returns detailed metadata for any supported media file. The file path is captured as a wildcard.
+
+**Image Response:**
+```json
+{
+  "path": "D:/Media/photo.jpg",
+  "mediaType": "image",
+  "format": "jpeg",
+  "width": 3648,
+  "height": 2736,
+  "channels": 3,
+  "depth": "uchar",
+  "density": 240,
+  "hasAlpha": false,
+  "isProgressive": false,
+  "chromaSubsampling": "4:4:4",
+  "hasProfile": true,
+  "hasExif": true,
+  "hasIcc": true,
+  "hasIptc": true,
+  "size": 3098183,
+  "modifiedAt": "2026-05-30T08:00:00.000Z"
+}
+```
+
+**Video/Audio Response:**
+```json
+{
+  "path": "D:/Media/song.mp3",
+  "mediaType": "audio",
+  "duration": 256.5,
+  "bitrate": 185436,
+  "format": "mp3",
+  "tags": {
+    "title": "My Ship",
+    "artist": "André Previn",
+    "album": "Alone",
+    "genre": "Jazz",
+    "composer": "George Gershwin",
+    "track": "9",
+    "disc": "1",
+    "date": "2007",
+    "coverArt": true,
+    "raw": { ... }
+  },
+  "hasCoverArt": true,
+  "video": null,
+  "audio": {
+    "codec": "mp3",
+    "sampleRate": 44100,
+    "channels": 2,
+    "bitrate": 185345
+  },
+  "streams": [
+    { "type": "audio", "codec": "mp3", "index": 0 }
+  ],
+  "size": 1390770,
+  "modifiedAt": "2026-05-30T08:00:00.000Z"
+}
+```
+
+**Tag fields extracted (when present):** title, artist, album, album_artist, composer, genre, date, year, track, disc, comment, description, synopsis, copyright, publisher, encoder.
+
+**Example:**
+```bash
+curl "http://localhost:3501/v1/info/D:/Media/song.mp3"
+```
+
+---
+
+### 4.3 Asset Cache Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -322,7 +430,7 @@ data: {"event":"complete","jobId":"job-def-456","assetId":"asset-ghi-789","metad
 | `DELETE` | `/v1/assets/:id` | Delete specific asset |
 | `DELETE` | `/v1/assets` | Clear all assets |
 
-### 4.3 Legacy Endpoints
+### 4.4 Legacy Endpoints
 
 The following legacy endpoints are still functional but superseded by the unified transport:
 
@@ -334,7 +442,7 @@ The following legacy endpoints are still functional but superseded by the unifie
 | `POST` | `/v1/process/video` | Video processing (multipart or base64) |
 | `POST` | `/v1/audio/probe` | Probe audio metadata |
 
-### 4.4 System Endpoints
+### 4.5 System Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|

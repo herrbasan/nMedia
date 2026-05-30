@@ -13,6 +13,7 @@
   - [Job Management](#job-management)
   - [Progress Tracking](#progress-tracking)
   - [Asset Retrieval](#asset-retrieval)
+  - [Media Utilities](#media-utilities)
   - [Capabilities](#capabilities)
   - [WebSocket](#websocket)
 - [Processing Options](#processing-options)
@@ -310,7 +311,7 @@ Get job status and current progress.
 
 #### `DELETE /v1/jobs/:jobId`
 
-Cancel a queued job.
+Cancel a queued or processing job.
 
 **Response (200):**
 
@@ -319,6 +320,113 @@ Cancel a queued job.
   "jobId": "job-def-456",
   "status": "cancelled"
 }
+```
+
+---
+
+### Media Utilities
+
+Synchronous endpoints for quick media inspection and thumbnail generation. No job queue — responses return immediately.
+
+#### `GET /v1/thumbnail/*`
+
+Best-effort thumbnail generation for any media file. Returns a JPEG image.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `width` | number | 256 | Max thumbnail width in pixels |
+
+**Path:** The file path is captured as a wildcard (e.g., `/v1/thumbnail/D:/Media/video.mp4`).
+
+**Behavior by media type:**
+
+| Type | Thumbnail Source |
+|------|-----------------|
+| Image | Resized via nImage |
+| Video | Frame extracted at 1 second via nVideo |
+| Audio | Embedded cover art via FFmpeg (if present) |
+
+**Response (200):** JPEG binary
+
+**Response (415):** `Audio file has no embedded cover art` or `Unsupported file type`
+
+**Example:**
+```bash
+curl -o thumb.jpg "http://localhost:3501/v1/thumbnail/D:/Media/photo.jpg?width=512"
+```
+
+#### `GET /v1/info/*`
+
+Detailed metadata for any media file. Returns JSON with type-specific fields.
+
+**Path:** The file path is captured as a wildcard (e.g., `/v1/info/D:/Media/song.mp3`).
+
+**Image Response:**
+```json
+{
+  "path": "D:/Media/photo.jpg",
+  "mediaType": "image",
+  "format": "jpeg",
+  "width": 3648,
+  "height": 2736,
+  "channels": 3,
+  "depth": "uchar",
+  "density": 240,
+  "hasAlpha": false,
+  "isProgressive": false,
+  "chromaSubsampling": "4:4:4",
+  "hasProfile": true,
+  "hasExif": true,
+  "hasIcc": true,
+  "hasIptc": true,
+  "size": 3098183,
+  "modifiedAt": "2026-05-30T08:00:00.000Z"
+}
+```
+
+**Video/Audio Response:**
+```json
+{
+  "path": "D:/Media/song.mp3",
+  "mediaType": "audio",
+  "duration": 256.5,
+  "bitrate": 185436,
+  "format": "mp3",
+  "tags": {
+    "title": "My Ship",
+    "artist": "André Previn",
+    "album": "Alone",
+    "genre": "Jazz",
+    "composer": "George Gershwin",
+    "track": "9",
+    "disc": "1",
+    "date": "2007",
+    "coverArt": true,
+    "raw": { ... }
+  },
+  "hasCoverArt": true,
+  "video": null,
+  "audio": {
+    "codec": "mp3",
+    "sampleRate": 44100,
+    "channels": 2,
+    "bitrate": 185345
+  },
+  "streams": [
+    { "type": "audio", "codec": "mp3", "index": 0 }
+  ],
+  "size": 1390770,
+  "modifiedAt": "2026-05-30T08:00:00.000Z"
+}
+```
+
+**Tag fields extracted (when present):** title, artist, album, album_artist, composer, genre, date, year, track, disc, comment, description, synopsis, copyright, publisher, encoder.
+
+**Example:**
+```bash
+curl "http://localhost:3501/v1/info/D:/Media/song.mp3"
 ```
 
 ---
