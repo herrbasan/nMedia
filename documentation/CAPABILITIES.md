@@ -1,6 +1,6 @@
 # Capabilities Endpoint
 
-Query runtime capabilities from the Media Service. This includes the service's HTTP API surface, processing features, configuration, and native module capabilities (nVideo and nImage). Clients use this to discover available endpoints, codecs, formats, filters, and hardware acceleration at runtime.
+Query runtime capabilities from nMedia. This includes the service's HTTP API surface, processing features, configuration, and native module capabilities (nVideo and nImage). Clients use this to discover available endpoints, codecs, formats, filters, and hardware acceleration at runtime.
 
 ## Endpoint
 

@@ -1,6 +1,6 @@
-# Media Service API Documentation
+# nMedia API Documentation
 
-**Media Service** is a stateless microservice that preprocesses multimedia files for Large Language Model (LLM) consumption. It receives large files and returns downscaled, compressed, LLM-friendly versions via GPU-accelerated processing (NVENC, VAAPI, QSV).
+**nMedia** is a stateless microservice that preprocesses multimedia files for Large Language Model (LLM) consumption. It receives large files and returns downscaled, compressed, LLM-friendly versions via GPU-accelerated processing (NVENC, VAAPI, QSV).
 
 ## Table of Contents
 
@@ -510,7 +510,7 @@ Clear all assets.
 
 #### `GET /v1/capabilities`
 
-Query runtime capabilities from the Media Service. Returns the service's HTTP API surface, processing features, configuration, and native module capabilities (nVideo and nImage).
+Query runtime capabilities from nMedia. Returns the service's HTTP API surface, processing features, configuration, and native module capabilities (nVideo and nImage).
 
 **Query Parameters:**
 

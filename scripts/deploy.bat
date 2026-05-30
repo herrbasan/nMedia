@@ -1,18 +1,18 @@
 @echo off
 setlocal EnableDelayedExpansion
 
-:: Media Service Deploy Script
+:: nMedia Deploy Script
 :: Deploys the project to \\BADKID\Stuff\SRV\MediaService
 :: Performs: git clone/pull, submodule update, npm install
 ::
 :: Usage: scripts\deploy.bat
 
 set "TARGET=\\BADKID\Stuff\SRV\MediaService"
-set "REPO=https://github.com/herrbasan/MediaService.git"
+set "REPO=https://github.com/herrbasan/nMedia.git"
 set "SOURCE_CONFIG=config.json"
 
 echo ==========================================
-echo  Media Service Deploy
+echo  nMedia Deploy
 echo  Target: %TARGET%
 echo ==========================================
 echo.

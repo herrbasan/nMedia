@@ -1,6 +1,6 @@
-# Media Service - Development Plan
+# nMedia - Development Plan
 
-The **Media Processing Service (MPS)** is a standalone microservice built on **Node.js** as the orchestration platform. Its purpose is to receive multimodal payloads (images, audio, video), process them efficiently using native N-API bindings (nImage for images, nVideo for audio/video), and return optimized outputs. GPU acceleration is utilized when available.
+The **nMedia** is a standalone microservice built on **Node.js** as the orchestration platform. Its purpose is to receive multimodal payloads (images, audio, video), process them efficiently using native N-API bindings (nImage for images, nVideo for audio/video), and return optimized outputs. GPU acceleration is utilized when available.
 
 ---
 
@@ -196,7 +196,7 @@ The WebSocket server (`/v1/ws`) supports:
 3. ProgressReporter WS support → **DONE**
 4. WS binary upload handling (`src/api/routes/websocket.js`) → **DONE**
 5. WS binary download handling → **DONE**
-6. Transport Tests UI integration (`mediaservice-web`) → **DONE**
+6. Transport Tests UI integration (`nmedia-web`) → **DONE**
 
 ### Phase 6: Stabilization & Fixes ✅ COMPLETE
 1. Fix upload handler `end`/`close` race condition → **DONE**

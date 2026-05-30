@@ -1,5 +1,5 @@
 {
-  "name": "media-service",
+  "name": "nmedia",
   "version": "1.0.0",
   "description": "Media processing service for images, video, and audio",
   "type": "module",

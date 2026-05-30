@@ -153,7 +153,7 @@ server.on('upgrade', (req, socket, head) => {
 
 // Start server
 server.listen(config.port, () => {
-  logger.info(`Media Service started on port ${config.port}`, {}, 'System', { console: true });
+  logger.info(`nMedia started on port ${config.port}`, {}, 'System', { console: true });
   logger.info(`Max file size: ${config.maxFileSizeMb}MB`, {}, 'System', { console: true });
   logger.info(`Log level: ${config.logLevel}`, {}, 'System', { console: true });
   logger.info(`Web UI available at http://localhost:${config.port}/`, {}, 'System', { console: true });
@@ -187,7 +187,7 @@ async function gracefulShutdown(signal) {
   assetCache.shutdown();
   jobStore.shutdown();
 
-  logger.info('Media Service shut down', {}, 'System', { console: true });
+  logger.info('nMedia shut down', {}, 'System', { console: true });
   process.exit(0);
 }
 

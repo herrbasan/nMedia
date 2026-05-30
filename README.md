@@ -1,10 +1,10 @@
-# Media Service
+# nMedia
 
 A stateless Node.js microservice for optimizing images, audio, and video for LLM consumption.
 
 ## Overview
 
-Media Service receives large multimodal payloads, aggressively compresses/downscales them, and returns LLM-friendly formats. It uses native N-API modules for zero-process-spawning media processing.
+nMedia receives large multimodal payloads, aggressively compresses/downscales them, and returns LLM-friendly formats. It uses native N-API modules for zero-process-spawning media processing.
 
 ## Tech Stack
 
@@ -239,4 +239,4 @@ curl -X POST http://localhost:3500/v1/process/image \
 
 A web interface for testing is available at `http://localhost:3500/` when the service is running.
 
-See `mediaservice-web/README.md` for UI details.
+See `nmedia-web/README.md` for UI details.

@@ -115,7 +115,7 @@ export class Context {
     this.#res.writeHead(statusCode, {
       'Content-Type': 'application/json; charset=utf-8',
       'Content-Length': Buffer.byteLength(body),
-      'X-Powered-By': 'MediaService',
+      'X-Powered-By': 'nMedia',
       'Access-Control-Allow-Origin': '*',
     });
     this.#res.end(body);
@@ -133,7 +133,7 @@ export class Context {
     const headers = {
       'Content-Type': mimeType,
       'Content-Length': buffer.length,
-      'X-Powered-By': 'MediaService',
+      'X-Powered-By': 'nMedia',
       'Access-Control-Allow-Origin': '*',
     };
     if (filename) {
@@ -156,7 +156,7 @@ export class Context {
     const headers = {
       'Content-Type': mimeType,
       'Content-Length': size,
-      'X-Powered-By': 'MediaService',
+      'X-Powered-By': 'nMedia',
       'Access-Control-Allow-Origin': '*',
     };
     if (filename) {

@@ -1,10 +1,10 @@
 # Processing Workflows
 
-Detailed documentation of how media files are processed through the Media Service pipeline.
+Detailed documentation of how media files are processed through the nMedia pipeline.
 
 ## Overview
 
-Media Service uses two native modules for processing:
+nMedia uses two native modules for processing:
 
 | Module | Purpose | Technology |
 |--------|---------|------------|

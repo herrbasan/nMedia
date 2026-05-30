@@ -71,7 +71,7 @@ export class StaticFileServer {
       res.writeHead(200, {
         'Content-Type': mimeType,
         'Content-Length': stats.size,
-        'X-Powered-By': 'MediaService',
+        'X-Powered-By': 'nMedia',
         'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=3600',
       });
 

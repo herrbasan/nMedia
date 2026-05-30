@@ -1,5 +1,5 @@
 /**
- * Shared API client for Media Service
+ * Shared API client for nMedia
  *
  * Auto-detects the API base URL. When the web UI is served from the Node
  * server (same origin), relative URLs are used. When served from an external

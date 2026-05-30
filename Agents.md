@@ -1,8 +1,8 @@
-# Media Service - Agent Overview
+# nMedia - Agent Overview
 
 ## Purpose
 
-Media Service is a stateless microservice designed to preprocess multimedia files for Large Language Model (LLM) consumption. It acts as an optimization sidecar service that receives large files and returns downscaled, compressed, LLM-friendly versions. Utilizes GPU acceleration when available (NVENC, VAAPI, QSV).
+nMedia is a stateless microservice designed to preprocess multimedia files for Large Language Model (LLM) consumption. It acts as an optimization sidecar service that receives large files and returns downscaled, compressed, LLM-friendly versions. Utilizes GPU acceleration when available (NVENC, VAAPI, QSV).
 
 ## Documentation
 
@@ -13,8 +13,8 @@ Internal working documents for planning and specification.
 | Document | Location | Purpose |
 |----------|----------|---------|
 | Configuration | `config.json` | All configuration settings (server, media, logging, cache, workers) |
-| Specification | `docs/media_service_spec.md` | Detailed technical specification, API design, architecture |
-| Development Plan | `docs/media_service_dev_plan.md` | Implementation roadmap, technology choices, development phases |
+| Specification | `docs/nMedia_Spec.md` | Detailed technical specification, API design, architecture |
+| Development Plan | `docs/nMedia_Dev_plan.md` | Implementation roadmap, technology choices, development phases |
 
 ### Project Documentation (`/documentation`)
 
@@ -73,7 +73,7 @@ Test assets are located in `/tests/assets/`:
 - **Collaborative Development:** The human user is a partner, not just a reviewer. When facing architectural decisions, trade-offs, or uncertain paths, pause and ask for input. Explain the options clearly. The user's domain knowledge and preferences are valuable — include them in the loop. Avoid long silent stretches of trial-and-error; converse, don't just execute.
 
 ## Service Management
-- **Do Not Start/Restart Service:** Never start, restart, or stop the Media Service on your own. If the service needs to be started or restarted, ask the user to do it.
+- **Do Not Start/Restart Service:** Never start, restart, or stop nMedia on your own. If the service needs to be started or restarted, ask the user to do it.
 
 ## Development Environment
 - **FiveServer Live Reload:** The health check endpoint (`/health`) writes to `/logs` on every call. FiveServer's file watcher detects these log writes and triggers constant page reloads. This is resolved by `fiveserver.config.cjs` which ignores `/logs/` and `/cache/` directories. If live reload loops occur, verify the config exists and restart FiveServer.
@@ -305,7 +305,7 @@ The web frontend (`public/`) is a unified NUI-based application that combines se
 - **NUI Web Components**: Built on `modules/nui_wc2` — native custom elements, no framework
 - **Fragment Router**: SPA routing via `nui.setupRouter()`, pages are HTML fragments cached after first load
 - **Page Scripts**: Each page uses `<script type="nui/page">` with `init(element, params, nui)` — runs once per page, scoped to page wrapper
-- **Shared API Client**: `js/api-client.js` wraps all Media Service endpoints, exposes `window.api` globally
+- **Shared API Client**: `js/api-client.js` wraps all nMedia endpoints, exposes `window.api` globally
 - **WebSocket**: Auto-connects on app load, reconnects on disconnect, broadcasts messages via `window.dispatchEvent(new CustomEvent('ws-message', { detail: msg }))`
 
 ### Key Files

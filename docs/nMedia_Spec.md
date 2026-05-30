@@ -1,8 +1,8 @@
-# Media Service - Specification
+# nMedia - Specification
 
 ## 1. Overview
 
-Media Service is a stateless microservice designed to preprocess multimedia files for Large Language Model (LLM) consumption. It receives large files and returns downscaled, compressed, LLM-friendly versions. GPU acceleration is utilized when available (NVENC, VAAPI, QSV).
+nMedia is a stateless microservice designed to preprocess multimedia files for Large Language Model (LLM) consumption. It receives large files and returns downscaled, compressed, LLM-friendly versions. GPU acceleration is utilized when available (NVENC, VAAPI, QSV).
 
 ### Platform Decisions
 
@@ -28,7 +28,7 @@ Media Service is a stateless microservice designed to preprocess multimedia file
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Media Service                             │
+│                        nMedia                             │
 │                        (Node.js)                                │
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
@@ -249,7 +249,7 @@ data: {"event":"complete","jobId":"job-def-456","assetId":"asset-ghi-789","metad
 
 ### 4.1.1 Capabilities Endpoint
 
-`GET /v1/capabilities` returns runtime capabilities from the Media Service. This includes the service's HTTP API surface, processing features, configuration, and native module capabilities (nVideo and nImage).
+`GET /v1/capabilities` returns runtime capabilities from nMedia. This includes the service's HTTP API surface, processing features, configuration, and native module capabilities (nVideo and nImage).
 
 **Query Parameters:**
 

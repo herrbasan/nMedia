@@ -1,14 +1,14 @@
-# Media Service Architecture
+# nMedia Architecture
 
 ## Overview
 
-Media Service is a Node.js microservice that preprocesses multimedia files for LLM consumption. It uses native NAPI modules (nImage, nVideo) for GPU-accelerated image, audio, and video processing.
+nMedia is a Node.js microservice that preprocesses multimedia files for LLM consumption. It uses native NAPI modules (nImage, nVideo) for GPU-accelerated image, audio, and video processing.
 
 ## Component Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Media Service                             │
+│                        nMedia                             │
 │                        (Node.js)                                │
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
