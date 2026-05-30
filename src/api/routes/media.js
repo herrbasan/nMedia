@@ -258,12 +258,35 @@ export async function handleInfo(ctx) {
 async function _infoImage(inputPath) {
   const stats = fs.statSync(inputPath);
   const result = await nImage(inputPath).metadata();
+
+  // Extract useful EXIF fields if present
+  let exif = null;
+  if (result.exif) {
+    try {
+      // nImage returns EXIF as Buffer — we can't parse it easily without a library
+      // Just report that EXIF data exists
+      exif = { present: true, size: result.exif.length };
+    } catch {
+      exif = { present: true };
+    }
+  }
+
   return {
     format: result.format,
     width: result.width,
     height: result.height,
     channels: result.channels,
+    depth: result.depth,
+    density: result.density,
     hasAlpha: result.hasAlpha,
+    isProgressive: result.isProgressive,
+    resolutionUnit: result.resolutionUnit,
+    chromaSubsampling: result.chromaSubsampling,
+    hasProfile: result.hasProfile,
+    hasExif: !!result.exif,
+    hasIcc: !!result.icc,
+    hasIptc: !!result.iptc,
+    exif,
     size: stats.size,
     modifiedAt: stats.mtime.toISOString(),
   };
@@ -272,6 +295,7 @@ async function _infoImage(inputPath) {
 async function _infoVideoAudio(inputPath) {
   const probe = nVideo.probe(inputPath);
   const stats = fs.statSync(inputPath);
+  const tags = await _extractTags(inputPath);
 
   const videoStream = probe.streams.find(s => s.type === 'video');
   const audioStream = probe.streams.find(s => s.type === 'audio');
@@ -282,6 +306,8 @@ async function _infoVideoAudio(inputPath) {
     format: probe.format.format_name,
     size: stats.size,
     modifiedAt: stats.mtime.toISOString(),
+    tags,
+    hasCoverArt: tags.coverArt === true,
     video: videoStream ? {
       codec: videoStream.codec,
       width: videoStream.width,
@@ -302,4 +328,77 @@ async function _infoVideoAudio(inputPath) {
       index: s.index,
     })),
   };
+}
+
+// Extract metadata tags using ffprobe
+async function _extractTags(inputPath) {
+  return new Promise((resolve) => {
+    const { spawn } = require('child_process');
+    const ffprobePath = process.platform === 'win32'
+      ? path.join(__dirname, '../../../modules/nVideo/deps/win/bin/ffprobe.exe')
+      : 'ffprobe';
+
+    const args = [
+      '-show_format',
+      '-show_streams',
+      '-print_format', 'json',
+      inputPath
+    ];
+
+    const child = spawn(ffprobePath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let data = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => { data += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+
+    child.on('close', () => {
+      try {
+        const result = JSON.parse(data);
+        const formatTags = result.format?.tags || {};
+        const streams = result.streams || [];
+
+        // Check for attached picture (cover art) stream
+        const hasCoverArt = streams.some(s =>
+          s.codec_type === 'video' && (s.disposition?.attached_pic === 1 || s.tags?.comment === 'Cover (front)')
+        );
+
+        // Collect stream-level tags
+        const streamTags = {};
+        for (const stream of streams) {
+          if (stream.tags) {
+            const type = stream.codec_type;
+            if (!streamTags[type]) streamTags[type] = {};
+            Object.assign(streamTags[type], stream.tags);
+          }
+        }
+
+        // Common tag fields
+        const commonFields = [
+          'title', 'artist', 'album', 'album_artist', 'composer',
+          'genre', 'date', 'year', 'track', 'disc',
+          'comment', 'description', 'synopsis',
+          'copyright', 'publisher', 'encoder',
+        ];
+
+        const normalized = {};
+        for (const field of commonFields) {
+          const val = formatTags[field] || formatTags[field.toUpperCase()] || streamTags.audio?.[field] || streamTags.audio?.[field.toUpperCase()];
+          if (val) normalized[field] = val;
+        }
+
+        resolve({
+          ...normalized,
+          raw: formatTags,
+          coverArt: hasCoverArt,
+        });
+      } catch {
+        resolve({ raw: {}, coverArt: false });
+      }
+    });
+
+    child.on('error', () => {
+      resolve({ raw: {}, coverArt: false });
+    });
+  });
 }
