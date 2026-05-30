@@ -108,9 +108,17 @@ export async function handleImageCrop(ctx) {
 
     const result = await PipelineExecutor.execute('image', inputBuffer, options, ProgressReporter);
 
+    // Attach base64 data to each crop so clients can actually use the cropped images
+    const buffers = [result.buffer, ...(result.extraBuffers || [])];
+    const cropsWithBase64 = result.metadata.crops.map((crop, i) => ({
+      ...crop,
+      base64: buffers[i]?.toString('base64') || '',
+    }));
+
     ctx.json(200, {
       original_size_bytes: originalSize,
       ...result.metadata,
+      crops: cropsWithBase64,
     });
   } catch (error) {
     logger.error('Image crop failed', { error: error.message });
