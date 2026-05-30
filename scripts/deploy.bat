@@ -145,12 +145,38 @@ if exist "%SOURCE_NVIDEO_BUILD%" (
     echo   WARNING: Source modules\nVideo\build\Release not found. nVideo may need to be built on target.
 )
 
-:: Run npm install (postinstall will rebuild submodules, but binaries are already in place)
+:: Run npm install. Skip submodule postinstall scripts since native binaries are pre-copied.
+:: The root postinstall runs: npm install --prefix modules/nImage && npm install --prefix modules/nVideo && npm install --prefix modules/nLogger
+:: We replicate that but with --ignore-scripts on each submodule to prevent node-gyp rebuilds.
 echo.
 echo [5/6] Installing dependencies...
-call npm install
+call npm install --ignore-scripts
 if errorlevel 1 (
-    echo ERROR: npm install failed
+    echo ERROR: Root npm install failed
+    popd
+    exit /b 1
+)
+
+echo   Installing nImage JS deps (skipping rebuild)...
+call npm install --prefix modules\nImage --ignore-scripts
+if errorlevel 1 (
+    echo ERROR: nImage npm install failed
+    popd
+    exit /b 1
+)
+
+echo   Installing nVideo JS deps (skipping rebuild)...
+call npm install --prefix modules\nVideo --ignore-scripts
+if errorlevel 1 (
+    echo ERROR: nVideo npm install failed
+    popd
+    exit /b 1
+)
+
+echo   Installing nLogger JS deps...
+call npm install --prefix modules\nLogger --ignore-scripts
+if errorlevel 1 (
+    echo ERROR: nLogger npm install failed
     popd
     exit /b 1
 )
