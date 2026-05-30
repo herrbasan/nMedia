@@ -249,14 +249,18 @@ data: {"event":"complete","jobId":"job-def-456","assetId":"asset-ghi-789","metad
 
 ### 4.1.1 Capabilities Endpoint
 
-`GET /v1/capabilities` returns runtime capabilities from the native modules (nVideo and nImage). This allows clients to discover available codecs, formats, filters, and hardware acceleration at runtime.
+`GET /v1/capabilities` returns runtime capabilities from the Media Service. This includes the service's HTTP API surface, processing features, configuration, and native module capabilities (nVideo and nImage).
 
 **Query Parameters:**
 
 | Parameter | Values | Description |
 |-----------|--------|-------------|
-| `module` | `nvideo`, `nimage` | Filter to specific module. Omit for both. |
+| `module` | `nvideo`, `nimage`, `service` | Filter to specific module. Omit for all. |
 | `section` | See below | Filter to specific capability section |
+
+**Service sections:**
+- `endpoints` - All HTTP and WebSocket endpoints
+- `features` - Processing features, utilities, transports, worker modes
 
 **nVideo sections:**
 - `build` - FFmpeg version, configuration, protocols, hwaccels
@@ -273,41 +277,51 @@ data: {"event":"complete","jobId":"job-def-456","assetId":"asset-ghi-789","metad
 - `heic` - HEIC/AVIF format list (LibHeif)
 - `imagemagick` - ImageMagick fallback format list
 
-**Response (200):**
+**Response (200) — Full response (no module filter):**
 ```json
 {
   "success": true,
   "data": {
-    "nVideo": {
-      "buildInfo": { "version": "7.1", "hwaccels": ["nvenc", "qsv"], ... },
-      "commonCodecs": {
-        "encoders": { "video": { "cpu": [...], "nvidia": [...] }, "audio": [...] },
-        "decoders": { "video": [...], "audio": [...] },
-        "videoEncodersByHwaccel": { "cpu": [...], "nvidia": [...] },
-        "recommended": { "webStreaming": {...}, "archiving": {...} }
+    "service": {
+      "version": "1.0.0",
+      "endpoints": [
+        { "method": "GET", "path": "/health", "description": "Health check" },
+        { "method": "POST", "path": "/v1/upload", "description": "Binary upload" },
+        { "method": "POST", "path": "/v1/process", "description": "Start processing" },
+        { "method": "GET", "path": "/v1/jobs/:jobId", "description": "Job status" },
+        { "method": "GET", "path": "/v1/jobs/:jobId/progress", "description": "SSE progress" },
+        { "method": "DELETE", "path": "/v1/jobs/:jobId", "description": "Cancel job" },
+        { "method": "GET", "path": "/v1/assets/:id", "description": "Download asset" },
+        { "method": "GET", "path": "/v1/thumbnail/*", "description": "Thumbnail generation" },
+        { "method": "GET", "path": "/v1/info/*", "description": "Media metadata" },
+        { "method": "GET", "path": "/v1/capabilities", "description": "Capabilities" },
+        { "method": "WS", "path": "/v1/ws", "description": "WebSocket" }
+      ],
+      "features": {
+        "processors": [
+          { "name": "image", "operations": ["resize", "crop", "format conversion", ...], "formats": ["jpeg", "png", "webp", "avif", "gif", "tiff"] },
+          { "name": "audio", "operations": ["transcode", "resample", "channel conversion"], "formats": ["mp3", "wav", "ogg", "m4a", "flac", "aac", "opus"] },
+          { "name": "video", "operations": ["extract_audio", "extract_keyframes", "transcode", "cli_passthrough"], "formats": ["mp4", "webm", "mkv", "mov", ...] }
+        ],
+        "utilities": [
+          { "name": "thumbnail", "description": "Best-effort thumbnail generation", "synchronous": true },
+          { "name": "info", "description": "Detailed metadata extraction", "synchronous": true }
+        ],
+        "transports": ["http", "sse", "websocket"],
+        "workerModes": ["queue", "thread", "process"]
       },
-      "filters": [...],
-      "formats": [...]
+      "config": {
+        "maxFileSizeMb": 512,
+        "gpuPlatform": "cpu",
+        "workersMode": "process",
+        "maxConcurrentTasks": 4,
+        "cacheTtl": 3600,
+        "cacheMaxSize": 10737418240
+      }
     },
-    "nImage": {
-      "version": { "major": 0, "minor": 1, "patch": 0 },
-      "decoders": {
-        "raw": { "library": "libraw", "formats": [...], "features": [...] },
-        "heic": { "library": "libheif", "formats": [...], "features": [...] },
-        "sharp": { "library": "sharp/libvips", "formats": [...], "features": [...] },
-        "magick": { "library": "imagemagick", "formats": [...], "features": [...] }
-      },
-      "encoders": ["jpeg", "png", "webp", "avif", "tiff"]
-    },
-    "nImageState": {
-      "isLoaded": true,
-      "hasSharp": true,
-      "version": { "major": 0, "minor": 1, "patch": 0 },
-      "supportedFormats": [...],
-      "rawFormats": [...],
-      "heicFormats": [...],
-      "imagemagickFormats": [...]
-    }
+    "nVideo": { ... },
+    "nImage": { ... },
+    "nImageState": { ... }
   }
 }
 ```

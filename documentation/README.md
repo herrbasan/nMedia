@@ -510,14 +510,21 @@ Clear all assets.
 
 #### `GET /v1/capabilities`
 
-Query runtime capabilities from native modules (nVideo and nImage). Allows clients to discover available codecs, formats, filters, and hardware acceleration.
+Query runtime capabilities from the Media Service. Returns the service's HTTP API surface, processing features, configuration, and native module capabilities (nVideo and nImage).
 
 **Query Parameters:**
 
 | Parameter | Values | Description |
 |-----------|--------|-------------|
-| `module` | `nvideo`, `nimage` | Filter to specific module. Omit for both. |
+| `module` | `nvideo`, `nimage`, `service` | Filter to specific module. Omit for all. |
 | `section` | See below | Filter to specific capability section |
+
+**Service sections:**
+
+| Section | Description |
+|---------|-------------|
+| `endpoints` | All HTTP and WebSocket endpoints |
+| `features` | Processing features, utilities, transports, worker modes |
 
 **nVideo sections:**
 
@@ -546,44 +553,46 @@ Query runtime capabilities from native modules (nVideo and nImage). Allows clien
 {
   "success": true,
   "data": {
-    "nVideo": {
-      "buildInfo": { "version": "7.1", "hwaccels": ["nvenc", "qsv"], "protocols": [...] },
-      "commonCodecs": {
-        "encoders": {
-          "video": { "cpu": ["libx264", "libx265"], "nvidia": ["h264_nvenc", "hevc_nvenc"] },
-          "audio": ["aac", "libmp3lame", "libopus", "flac"]
-        },
-        "decoders": { "video": [...], "audio": [...] },
-        "videoEncodersByHwaccel": { "cpu": [...], "nvidia": [...], "qsv": [...] },
-        "recommended": {
-          "webStreaming": { "video": "libx264", "audio": "aac" },
-          "archiving": { "video": "libx265", "audio": "flac" },
-          "modern": { "video": "libsvtav1", "audio": "libopus" },
-          "fastest": { "video": "h264_nvenc", "audio": "aac" }
-        }
+    "service": {
+      "version": "1.0.0",
+      "endpoints": [
+        { "method": "GET", "path": "/health", "description": "Health check" },
+        { "method": "POST", "path": "/v1/upload", "description": "Binary upload" },
+        { "method": "POST", "path": "/v1/process", "description": "Start processing" },
+        { "method": "GET", "path": "/v1/jobs/:jobId", "description": "Job status" },
+        { "method": "GET", "path": "/v1/jobs/:jobId/progress", "description": "SSE progress" },
+        { "method": "DELETE", "path": "/v1/jobs/:jobId", "description": "Cancel job" },
+        { "method": "GET", "path": "/v1/assets/:id", "description": "Download asset" },
+        { "method": "GET", "path": "/v1/thumbnail/*", "description": "Thumbnail generation" },
+        { "method": "GET", "path": "/v1/info/*", "description": "Media metadata" },
+        { "method": "GET", "path": "/v1/capabilities", "description": "Capabilities" },
+        { "method": "WS", "path": "/v1/ws", "description": "WebSocket" }
+      ],
+      "features": {
+        "processors": [
+          { "name": "image", "operations": ["resize", "crop", "format conversion", "EXIF stripping", "rotate", "flip", "flop", "grayscale", "normalize", "blur"], "formats": ["jpeg", "png", "webp", "avif", "gif", "tiff"] },
+          { "name": "audio", "operations": ["transcode", "resample", "channel conversion"], "formats": ["mp3", "wav", "ogg", "m4a", "flac", "aac", "opus"] },
+          { "name": "video", "operations": ["extract_audio", "extract_keyframes", "transcode", "cli_passthrough"], "formats": ["mp4", "webm", "mkv", "mov", "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus"] }
+        ],
+        "utilities": [
+          { "name": "thumbnail", "description": "Best-effort thumbnail generation", "synchronous": true },
+          { "name": "info", "description": "Detailed metadata extraction", "synchronous": true }
+        ],
+        "transports": ["http", "sse", "websocket"],
+        "workerModes": ["queue", "thread", "process"]
       },
-      "filters": [...],
-      "formats": [...]
+      "config": {
+        "maxFileSizeMb": 512,
+        "gpuPlatform": "cpu",
+        "workersMode": "process",
+        "maxConcurrentTasks": 4,
+        "cacheTtl": 3600,
+        "cacheMaxSize": 10737418240
+      }
     },
-    "nImage": {
-      "version": { "major": 0, "minor": 1, "patch": 0 },
-      "decoders": {
-        "raw": { "library": "libraw", "formats": ["cr2", "nef", "arw", ...], "features": [...] },
-        "heic": { "library": "libheif", "formats": ["heic", "heif", "avif"], "features": [...] },
-        "sharp": { "library": "sharp/libvips", "formats": ["jpeg", "png", "webp", ...], "features": [...] },
-        "magick": { "library": "imagemagick", "formats": [...], "features": [...] }
-      },
-      "encoders": ["jpeg", "png", "webp", "avif", "tiff"]
-    },
-    "nImageState": {
-      "isLoaded": true,
-      "hasSharp": true,
-      "version": { "major": 0, "minor": 1, "patch": 0 },
-      "supportedFormats": [...],
-      "rawFormats": [...],
-      "heicFormats": [...],
-      "imagemagickFormats": [...]
-    }
+    "nVideo": { ... },
+    "nImage": { ... },
+    "nImageState": { ... }
   }
 }
 ```
@@ -591,6 +600,10 @@ Query runtime capabilities from native modules (nVideo and nImage). Allows clien
 **Example:**
 
 ```javascript
+// Get service endpoints
+const { data } = await fetch('/v1/capabilities?module=service&section=endpoints').then(r => r.json());
+console.log(data); // Array of { method, path, description }
+
 // Get only video codecs
 const { data } = await fetch('/v1/capabilities?module=nvideo&section=common').then(r => r.json());
 console.log(data.commonCodecs.encoders.video.cpu);

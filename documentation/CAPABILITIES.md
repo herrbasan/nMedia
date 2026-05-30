@@ -1,6 +1,6 @@
 # Capabilities Endpoint
 
-Query runtime capabilities from the native modules (nVideo and nImage). This allows clients to discover available codecs, formats, filters, and hardware acceleration at runtime.
+Query runtime capabilities from the Media Service. This includes the service's HTTP API surface, processing features, configuration, and native module capabilities (nVideo and nImage). Clients use this to discover available endpoints, codecs, formats, filters, and hardware acceleration at runtime.
 
 ## Endpoint
 
@@ -12,8 +12,105 @@ GET /v1/capabilities
 
 | Parameter | Values | Description |
 |-----------|--------|-------------|
-| `module` | `nvideo`, `nimage` | Filter to specific module. Omit for both. |
+| `module` | `nvideo`, `nimage`, `service` | Filter to specific module. Omit for all. |
 | `section` | See below | Filter to specific capability section |
+
+## Service Capabilities
+
+### Sections
+
+| Section | Description |
+|---------|-------------|
+| `endpoints` | All HTTP and WebSocket endpoints |
+| `features` | Processing features, utilities, transports, worker modes |
+
+### Full Service Response (`?module=service`)
+
+```json
+{
+  "success": true,
+  "data": {
+    "version": "1.0.0",
+    "endpoints": [
+      { "method": "GET", "path": "/health", "description": "Health check with processor readiness" },
+      { "method": "POST", "path": "/v1/upload", "description": "Stream raw binary upload. Returns fileId" },
+      { "method": "POST", "path": "/v1/process", "description": "Start processing from fileId or input_path. Returns jobId" },
+      { "method": "GET", "path": "/v1/jobs", "description": "List all jobs" },
+      { "method": "GET", "path": "/v1/jobs/active", "description": "List active (queued/processing) jobs" },
+      { "method": "GET", "path": "/v1/jobs/:jobId", "description": "Get job status and progress" },
+      { "method": "GET", "path": "/v1/jobs/:jobId/progress", "description": "SSE progress stream" },
+      { "method": "DELETE", "path": "/v1/jobs/:jobId", "description": "Cancel a queued or processing job" },
+      { "method": "GET", "path": "/v1/assets", "description": "List cached assets" },
+      { "method": "GET", "path": "/v1/assets/:id", "description": "Download asset file" },
+      { "method": "GET", "path": "/v1/assets/:id/metadata", "description": "Get asset metadata" },
+      { "method": "DELETE", "path": "/v1/assets/:id", "description": "Delete specific asset" },
+      { "method": "DELETE", "path": "/v1/assets", "description": "Clear all assets" },
+      { "method": "GET", "path": "/v1/thumbnail/*", "description": "Best-effort thumbnail for any media file" },
+      { "method": "GET", "path": "/v1/info/*", "description": "Detailed metadata for any media file" },
+      { "method": "GET", "path": "/v1/capabilities", "description": "Query service and native module capabilities" },
+      { "method": "WS", "path": "/v1/ws", "description": "WebSocket for progress, binary upload, and binary download" }
+    ],
+    "features": {
+      "processors": [
+        { "name": "image", "operations": ["resize", "crop", "format conversion", "EXIF stripping", "rotate", "flip", "flop", "grayscale", "normalize", "blur"], "formats": ["jpeg", "png", "webp", "avif", "gif", "tiff"] },
+        { "name": "audio", "operations": ["transcode", "resample", "channel conversion"], "formats": ["mp3", "wav", "ogg", "m4a", "flac", "aac", "opus"] },
+        { "name": "video", "operations": ["extract_audio", "extract_keyframes", "transcode", "cli_passthrough"], "formats": ["mp4", "webm", "mkv", "mov", "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus"] }
+      ],
+      "utilities": [
+        { "name": "thumbnail", "description": "Best-effort thumbnail generation for images, videos, and audio with cover art", "synchronous": true },
+        { "name": "info", "description": "Detailed metadata extraction (EXIF, probe, tags, streams)", "synchronous": true }
+      ],
+      "transports": ["http", "sse", "websocket"],
+      "workerModes": ["queue", "thread", "process"]
+    },
+    "config": {
+      "maxFileSizeMb": 512,
+      "maxFileSizeBytes": 536870912,
+      "gpuPlatform": "cpu",
+      "workersMode": "process",
+      "maxConcurrentTasks": 4,
+      "maxConcurrentUploads": 4,
+      "cacheTtl": 3600,
+      "cacheMaxSize": 10737418240,
+      "messageTransport": "sse",
+      "allowedInputPaths": ["D:/Media"],
+      "allowedOutputPaths": [],
+      "allowUncPaths": false
+    }
+  }
+}
+```
+
+### Endpoints (`?module=service&section=endpoints`)
+
+```json
+{
+  "success": true,
+  "data": [
+    { "method": "GET", "path": "/health", "description": "Health check with processor readiness" },
+    { "method": "POST", "path": "/v1/upload", "description": "Stream raw binary upload. Returns fileId" },
+    ...
+  ]
+}
+```
+
+### Features (`?module=service&section=features`)
+
+```json
+{
+  "success": true,
+  "data": {
+    "processors": [...],
+    "utilities": [...],
+    "transports": ["http", "sse", "websocket"],
+    "workerModes": ["queue", "thread", "process"]
+  }
+}
+```
+
+---
+
+## nVideo Capabilities
 
 ## nVideo Capabilities
 
@@ -275,6 +372,24 @@ if (!data.hasSharp) {
 | Live query (`getCodecs()`, etc.) | Moderate | Dynamic checks, runtime validation |
 
 The capabilities endpoint uses pre-generated JSON files for fast responses. Live queries to the FFmpeg binary are only needed for dynamic validation.
+
+---
+
+## Combined Response (No Module Filter)
+
+When no `module` parameter is specified, service, nVideo, and nImage capabilities are all returned:
+
+```json
+{
+  "success": true,
+  "data": {
+    "service": { ... },
+    "nVideo": { ... },
+    "nImage": { ... },
+    "nImageState": { ... }
+  }
+}
+```
 
 ---
 
