@@ -29,6 +29,7 @@ import {
   handleClearAssets,
   handleListAssets,
 } from './api/routes/assets.js';
+import { handleThumbnail, handleInfo } from './api/routes/media.js';
 import { handleUpload } from './api/routes/upload.js';
 import { handleProcess } from './api/routes/process.js';
 import { handleCapabilities } from './api/routes/capabilities.js';
@@ -97,6 +98,10 @@ router.addRoute('DELETE', '/v1/assets', handleClearAssets);
 
 // Capabilities endpoint
 router.addRoute('GET', '/v1/capabilities', handleCapabilities);
+
+// Media utility endpoints
+router.addRoute('GET', '/v1/thumbnail/*', handleThumbnail);
+router.addRoute('GET', '/v1/info/*', handleInfo);
 
 // Static file serving for Web UI
 const publicDir = path.join(__dirname, '../public');
