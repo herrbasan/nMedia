@@ -85,9 +85,10 @@ if exist "%SOURCE_CONFIG%" (
     echo Source config.json not found. Make sure config.json exists.
 )
 
-:: Copy native module binaries (dist folders are build artifacts, not tracked in git)
+:: Pre-copy native build artifacts so submodule postinstall rebuilds are no-ops.
+:: This must happen BEFORE npm install so the built binaries already exist.
 echo.
-echo [4/5] Copying native module binaries...
+echo [4/6] Copying native module binaries...
 set "SOURCE_NVIDEO=modules\nVideo\dist"
 set "TARGET_NVIDEO=%TARGET%\modules\nVideo\dist"
 if exist "%SOURCE_NVIDEO%" (
@@ -119,14 +120,61 @@ if exist "%SOURCE_FFMPEG%" (
     echo   WARNING: Source modules\nVideo\deps\win\bin not found. Run 'npm run setup' in modules\nVideo first.
 )
 
-:: Run npm install
+:: Copy nImage vcpkg DLLs (required for runtime, not tracked in git)
+set "SOURCE_NIMAGE_DLLS=modules\nImage\build\Release"
+set "TARGET_NIMAGE_DLLS=%TARGET%\modules\nImage\build\Release"
+if exist "%SOURCE_NIMAGE_DLLS%" (
+    if not exist "%TARGET_NIMAGE_DLLS%" mkdir "%TARGET_NIMAGE_DLLS%"
+    echo   nImage build DLLs...
+    robocopy "%SOURCE_NIMAGE_DLLS%" "%TARGET_NIMAGE_DLLS%" /E /NFL /NDL /NJH /NJS
+) else (
+    echo   WARNING: Source modules\nImage\build\Release not found. nImage may need to be built on target.
+)
+
+:: Copy nVideo build artifacts (required for runtime, not tracked in git)
+set "SOURCE_NVIDEO_BUILD=modules\nVideo\build\Release"
+set "TARGET_NVIDEO_BUILD=%TARGET%\modules\nVideo\build\Release"
+if exist "%SOURCE_NVIDEO_BUILD%" (
+    if not exist "%TARGET_NVIDEO_BUILD%" mkdir "%TARGET_NVIDEO_BUILD%"
+    echo   nVideo build artifacts...
+    robocopy "%SOURCE_NVIDEO_BUILD%" "%TARGET_NVIDEO_BUILD%" /E /NFL /NDL /NJH /NJS
+) else (
+    echo   WARNING: Source modules\nVideo\build\Release not found. nVideo may need to be built on target.
+)
+
+:: Run npm install (postinstall will rebuild submodules, but binaries are already in place)
 echo.
-echo [5/5] Installing dependencies...
+echo [5/6] Installing dependencies...
 cd /d "%TARGET%"
-call npm install --ignore-scripts
+call npm install
 if errorlevel 1 (
     echo ERROR: npm install failed
     exit /b 1
+)
+
+:: Copy built binaries AGAIN to overwrite anything npm install / node-gyp stomped on.
+:: node-gyp rebuild may produce stub/dummy outputs when deps are missing.
+echo.
+echo [6/6] Restoring native binaries after install...
+if exist "%SOURCE_NVIDEO%" (
+    echo   nVideo dist restore...
+    robocopy "%SOURCE_NVIDEO%" "%TARGET_NVIDEO%" /E /NFL /NDL /NJH /NJS
+)
+if exist "%SOURCE_NIMAGE%" (
+    echo   nImage dist restore...
+    robocopy "%SOURCE_NIMAGE%" "%TARGET_NIMAGE%" /E /NFL /NDL /NJH /NJS
+)
+if exist "%SOURCE_FFMPEG%" (
+    echo   nVideo FFmpeg restore...
+    robocopy "%SOURCE_FFMPEG%" "%TARGET_FFMPEG%" /E /NFL /NDL /NJH /NJS
+)
+if exist "%SOURCE_NIMAGE_DLLS%" (
+    echo   nImage build DLLs restore...
+    robocopy "%SOURCE_NIMAGE_DLLS%" "%TARGET_NIMAGE_DLLS%" /E /NFL /NDL /NJH /NJS
+)
+if exist "%SOURCE_NVIDEO_BUILD%" (
+    echo   nVideo build artifacts restore...
+    robocopy "%SOURCE_NVIDEO_BUILD%" "%TARGET_NVIDEO_BUILD%" /E /NFL /NDL /NJH /NJS
 )
 
 echo.
