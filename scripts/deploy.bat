@@ -123,7 +123,7 @@ if exist "%SOURCE_FFMPEG%" (
 echo.
 echo [5/5] Installing dependencies...
 cd /d "%TARGET%"
-call npm install
+call npm install --ignore-scripts
 if errorlevel 1 (
     echo ERROR: npm install failed
     exit /b 1
