@@ -108,6 +108,17 @@ if exist "%SOURCE_NIMAGE%" (
     echo   WARNING: Source modules\nImage\dist not found. nImage may need to be built on target.
 )
 
+:: Copy nVideo FFmpeg binaries (deps/win/bin — not tracked in git, downloaded by npm run setup)
+set "SOURCE_FFMPEG=modules\nVideo\deps\win\bin"
+set "TARGET_FFMPEG=%TARGET%\modules\nVideo\deps\win\bin"
+if exist "%SOURCE_FFMPEG%" (
+    if not exist "%TARGET_FFMPEG%" mkdir "%TARGET_FFMPEG%"
+    echo   nVideo FFmpeg binaries...
+    robocopy "%SOURCE_FFMPEG%" "%TARGET_FFMPEG%" /E /NFL /NDL /NJH /NJS
+) else (
+    echo   WARNING: Source modules\nVideo\deps\win\bin not found. Run 'npm run setup' in modules\nVideo first.
+)
+
 :: Run npm install
 echo.
 echo [5/5] Installing dependencies...
