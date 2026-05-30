@@ -2,12 +2,12 @@
 setlocal EnableDelayedExpansion
 
 :: nMedia Deploy Script
-:: Deploys the project to \\BADKID\Stuff\SRV\MediaService
+:: Deploys the project to \\BADKID\Stuff\SRV\nMedia
 :: Performs: git clone/pull, submodule update, npm install
 ::
 :: Usage: scripts\deploy.bat
 
-set "TARGET=\\BADKID\Stuff\SRV\MediaService"
+set "TARGET=\\BADKID\Stuff\SRV\nMedia"
 set "REPO=https://github.com/herrbasan/nMedia.git"
 set "SOURCE_CONFIG=config.json"
 
