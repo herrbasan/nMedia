@@ -64,6 +64,29 @@ test('a finishing task frees its worker before the next task is dispatched', asy
   }
 });
 
+test('enqueue resolves on acceptance, not when a worker starts the task', async () => {
+  const queue = new TaskQueue(1);
+  let release;
+  queue.setProcessor(async (task) => {
+    await new Promise((resolve) => { release = resolve; });
+    task.fail(new Error('released'));
+  });
+
+  const running = new Task('task-running', 'image', Buffer.from('r'), {}, ProgressReporter);
+  const queued = new Task('task-queued', 'image', Buffer.from('q'), {}, ProgressReporter);
+
+  const started = Date.now();
+  await queue.enqueue(running);
+  await queue.enqueue(queued);
+  const elapsed = Date.now() - started;
+
+  assert.ok(elapsed < 1000, `enqueue blocked for ${elapsed}ms`);
+  assert.equal(queue.getRunningCount(), 1);
+  assert.equal(queue.getQueueLength(), 1);
+
+  release();
+});
+
 test('a processor that throws releases its queue slot', async () => {
   const queue = new TaskQueue(1);
   queue.setProcessor(async () => {

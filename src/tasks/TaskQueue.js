@@ -13,8 +13,6 @@ export class TaskQueue {
     this.queue = [];
     /** @type {Set<string>} */
     this.running = new Set();
-    /** @type {Map<string, Function>} */
-    this.waiters = new Map();
     /** @type {Function|null} */
     this.processor = null;
   }
@@ -28,23 +26,20 @@ export class TaskQueue {
   }
 
   /**
-   * Enqueue a task
+   * Enqueue a task. Resolves on acceptance, not on start: POST /v1/process
+   * returns the job id immediately, and the job record carries its own queue
+   * position. Waiting for a worker slot made submissions block for seconds
+   * under a burst.
    * @param {import('./Task.js').Task} task
    * @returns {Promise<void>}
    */
   async enqueue(task) {
-    return new Promise((resolve, reject) => {
-      // Check if we can run immediately
-      if (this.running.size < this.maxConcurrent) {
-        this._startTask(task, resolve, reject);
-      } else {
-        // Add to queue
-        this.queue.push(task);
-        // Store resolver for when task starts
-        this.waiters.set(task.id, { resolve, reject });
-        logger.info('Task queued', { taskId: task.id, queueLength: this.queue.length, maxConcurrent: this.maxConcurrent, running: this.running.size });
-      }
-    });
+    if (this.running.size < this.maxConcurrent) {
+      this._startTask(task);
+      return;
+    }
+    this.queue.push(task);
+    logger.info('Task queued', { taskId: task.id, queueLength: this.queue.length, maxConcurrent: this.maxConcurrent, running: this.running.size });
   }
 
   /**
@@ -58,12 +53,6 @@ export class TaskQueue {
     if (queueIndex !== -1) {
       const task = this.queue.splice(queueIndex, 1)[0];
       task.cancel();
-      // Reject the pending promise
-      const waiter = this.waiters.get(taskId);
-      if (waiter) {
-        waiter.reject(new Error('Task cancelled'));
-        this.waiters.delete(taskId);
-      }
       return true;
     }
     return false;
@@ -96,15 +85,10 @@ export class TaskQueue {
   /**
    * Start a task (internal)
    * @param {import('./Task.js').Task} task
-   * @param {Function} resolve - Resolves immediately when task starts processing
-   * @param {Function} reject
    * @private
    */
-  _startTask(task, resolve, reject) {
+  _startTask(task) {
     this.running.add(task.id);
-
-    // Resolve immediately so caller knows task has started
-    resolve();
 
     // Cleanup after task completes. Idempotent: the queue also calls it when
     // the processor rejects before a worker could settle the task.
@@ -141,13 +125,7 @@ export class TaskQueue {
    */
   _processNext() {
     if (this.queue.length > 0 && this.running.size < this.maxConcurrent) {
-      const next = this.queue.shift();
-      const waiter = this.waiters.get(next.id);
-
-      if (waiter) {
-        this.waiters.delete(next.id);
-        this._startTask(next, waiter.resolve, waiter.reject);
-      }
+      this._startTask(this.queue.shift());
     }
   }
 
@@ -159,11 +137,6 @@ export class TaskQueue {
     const cleared = this.queue.length;
     for (const task of this.queue) {
       task.cancel();
-      const waiter = this.waiters.get(task.id);
-      if (waiter) {
-        waiter.reject(new Error('Queue cleared'));
-        this.waiters.delete(task.id);
-      }
     }
     this.queue = [];
     return cleared;

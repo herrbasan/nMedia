@@ -215,6 +215,8 @@ Queue slot accounting: a task's slot is released from the worker's `finally` blo
 look for an idle worker while the finishing worker was still marked busy — that failed the
 queued task, stranded its job record and permanently shrank the pool (issue #1).
 `TaskQueue` also releases the slot when a processor rejects before a worker settles.
+`enqueue()` resolves when the task is accepted (started or queued), not when it starts, so
+a saturated queue does not delay the `POST /v1/process` response.
 
 ## Logging
 

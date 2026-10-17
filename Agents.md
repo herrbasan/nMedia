@@ -213,7 +213,9 @@ A queue slot is released from the worker's `finally` block, *after* `activeTask`
 cleared. Dispatching the next queued task from the completion path looked for an idle
 worker while the finishing worker was still marked busy, which failed the queued task and
 leaked its slot (issue #1). `TaskQueue` also releases the slot if the processor rejects
-before a worker settles the task.
+before a worker settles the task. `enqueue()` resolves on **acceptance**, not on start:
+the job record carries its own queue position, so a full queue never delays
+`POST /v1/process`.
 
 ### Worker Execution Modes
 
