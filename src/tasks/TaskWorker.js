@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import fs from 'fs';
 import crypto from 'crypto';
 import { createRequire } from 'module';
+import ImageProcessor from '../processors/image/ImageProcessor.js';
 
 const isThreadWorker = !!parentPort;
 const isProcessWorker = !!process.send;
@@ -30,7 +31,10 @@ const require = createRequire(import.meta.url);
 const nVideoPath = path.join(__dirname, '../../modules/nVideo/lib/index.js');
 const nVideo = require(nVideoPath);
 
-// Load nImage for image processing
+// Image processor handles validation, SVG options, raster sizing, and encoding
+const imageProcessor = new ImageProcessor();
+
+// Load nImage for video keyframe extraction
 const nImagePath = path.join(__dirname, '../../modules/nImage/lib/index.js');
 const nImageUrl = pathToFileURL(nImagePath).href;
 let nImage;
@@ -42,29 +46,7 @@ const MIME_TYPES = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a:
 
 // Standalone option validators (mirror Processor.validateOptions)
 function validateImageOptions(options) {
-  const { max_dimension, quality, format, rotate, blur, crop } = options;
-  if (max_dimension !== undefined && (max_dimension < 1 || max_dimension > 10000)) {
-    throw new Error('max_dimension must be between 1 and 10000');
-  }
-  if (quality !== undefined && (quality < 1 || quality > 100)) {
-    throw new Error('quality must be between 1 and 100');
-  }
-  if (format !== undefined && !['jpeg', 'png', 'webp', 'avif', 'gif'].includes(format)) {
-    throw new Error('format must be jpeg, png, webp, avif, or gif');
-  }
-  const parsedRotate = rotate !== undefined && rotate !== null ? parseInt(rotate) : undefined;
-  if (parsedRotate !== undefined && ![90, 180, 270].includes(parsedRotate)) {
-    throw new Error('rotate must be 90, 180, or 270');
-  }
-  if (blur !== undefined && (blur < 0 || blur > 20)) {
-    throw new Error('blur sigma must be between 0 and 20');
-  }
-  if (crop !== undefined) {
-    if (typeof crop !== 'object') throw new Error('crop must be an object');
-    if (!['region', 'center', 'grid'].includes(crop.type)) {
-      throw new Error('crop.type must be "region", "center", or "grid"');
-    }
-  }
+  imageProcessor.validateOptions(options);
 }
 
 function validateAudioOptions(options) {
@@ -264,189 +246,14 @@ function runFfmpeg(inputPath, outputPath, cliCommand) {
 }
 
 async function processImage(inputSource, options) {
-  let inputBuffer;
-  if (inputSource.type === 'path') {
-    inputBuffer = fs.readFileSync(inputSource.value);
-  } else {
-    inputBuffer = inputSource.value;
-  }
-
-  const {
-    max_dimension = 1024,
-    quality = 85,
-    format = 'jpeg',
-    strip_exif = true,
-    crop = null,
-    rotate = null,
-    flip = false,
-    flop = false,
-    grayscale = false,
-    normalize = false,
-    blur = 0,
-  } = options;
-
-  const parsedRotate = rotate ? parseInt(rotate) : null;
-
-  const img = await initNImage();
-
-  const meta = await img(inputBuffer).metadata();
-  sendMessage({ type: 'progress', percent: 15, message: `Detected: ${meta.format || 'unknown'}, ${meta.width}x${meta.height}` });
-
-  if (crop) {
-    return processImageCrop(img, inputBuffer, meta, crop, format, quality);
-  }
-
-  let pipeline = img(inputBuffer);
-
-  if (parsedRotate) {
-    sendMessage({ type: 'progress', percent: 20, message: `Rotating ${parsedRotate}°` });
-    pipeline = pipeline.rotate(parsedRotate);
-  }
-
-  if (flip) {
-    sendMessage({ type: 'progress', percent: 22, message: 'Flipping vertically' });
-    pipeline = pipeline.flip();
-  }
-
-  if (flop) {
-    sendMessage({ type: 'progress', percent: 24, message: 'Flopping horizontally' });
-    pipeline = pipeline.flop();
-  }
-
-  let width = meta.width;
-  let height = meta.height;
-
-  if (max_dimension && (width > max_dimension || height > max_dimension)) {
-    if (width > height) {
-      height = Math.round((height / width) * max_dimension);
-      width = max_dimension;
-    } else {
-      width = Math.round((width / height) * max_dimension);
-      height = max_dimension;
+  const input = inputSource.type === 'path' ? inputSource.value : inputSource.value;
+  return imageProcessor.process(
+    input,
+    { ...options, _inputSource: inputSource.type },
+    (percent, message) => {
+      sendMessage({ type: 'progress', percent, message });
     }
-    sendMessage({ type: 'progress', percent: 30, message: `Resizing to ${width}x${height}` });
-    pipeline = pipeline.resize(width, height, { fit: 'inside' });
-  }
-
-  if (grayscale) {
-    sendMessage({ type: 'progress', percent: 40, message: 'Converting to grayscale' });
-    pipeline = pipeline.grayscale();
-  }
-
-  if (normalize) {
-    sendMessage({ type: 'progress', percent: 45, message: 'Normalizing contrast' });
-    pipeline = pipeline.normalize();
-  }
-
-  if (blur > 0) {
-    sendMessage({ type: 'progress', percent: 48, message: `Applying blur (sigma: ${blur})` });
-    pipeline = pipeline.blur(blur);
-  }
-
-  sendMessage({ type: 'progress', percent: 70, message: `Converting to ${format}` });
-
-  if (format === 'jpeg') pipeline = pipeline.jpeg({ quality });
-  else if (format === 'png') pipeline = pipeline.png({ quality });
-  else if (format === 'webp') pipeline = pipeline.webp({ quality });
-  else if (format === 'avif') pipeline = pipeline.avif({ quality });
-  else if (format === 'gif') pipeline = pipeline.png({ quality });
-
-  sendMessage({ type: 'progress', percent: 85, message: 'Encoding output' });
-  const outputBuffer = await pipeline.toBuffer();
-  const outputMeta = await img(outputBuffer).metadata();
-
-  return {
-    buffer: outputBuffer,
-    metadata: { outputSize: outputBuffer.length, width: outputMeta.width, height: outputMeta.height, format, mimeType: `image/${format === 'jpeg' ? 'jpeg' : format}` },
-  };
-}
-
-async function processImageCrop(img, inputBuffer, meta, cropOptions, format, quality) {
-  const { type, left, top, right, bottom, width: widthPercent, height: heightPercent, cols: gridCols, rows: gridRows, cells = [] } = cropOptions;
-  const results = [];
-
-  if (type === 'region') {
-    const leftPx = Math.round(left * meta.width);
-    const topPx = Math.round(top * meta.height);
-    const rightPx = Math.round(right * meta.width);
-    const bottomPx = Math.round(bottom * meta.height);
-    const cropWidth = rightPx - leftPx;
-    const cropHeight = bottomPx - topPx;
-
-    sendMessage({ type: 'progress', percent: 30, message: `Cropping region ${leftPx}x${topPx} to ${cropWidth}x${cropHeight}` });
-    const cropped = await img(inputBuffer).extract({ left: leftPx, top: topPx, width: cropWidth, height: cropHeight }).toBuffer();
-    results.push({ buffer: cropped, width: cropWidth, height: cropHeight });
-  } else if (type === 'center') {
-    const pct = widthPercent || 50;
-    const heightPct = heightPercent || pct;
-    const cropWidth = Math.round(meta.width * (pct / 100));
-    const cropHeight = Math.round(meta.height * (heightPct / 100));
-    const leftPx = Math.round((meta.width - cropWidth) / 2);
-    const topPx = Math.round((meta.height - cropHeight) / 2);
-
-    sendMessage({ type: 'progress', percent: 30, message: `Center cropping to ${cropWidth}x${cropHeight}` });
-    const cropped = await img(inputBuffer).extract({ left: leftPx, top: topPx, width: cropWidth, height: cropHeight }).toBuffer();
-    results.push({ buffer: cropped, width: cropWidth, height: cropHeight });
-  } else if (type === 'grid') {
-    const cols = gridCols || 3;
-    const rows = gridRows || 3;
-    const cellWidth = Math.floor(meta.width / cols);
-    const cellHeight = Math.floor(meta.height / rows);
-    const allCells = cells.length > 0 ? cells : Array.from({ length: cols * rows }, (_, i) => i);
-
-    sendMessage({ type: 'progress', percent: 20, message: `Grid ${cols}x${rows}, extracting ${allCells.length} cells` });
-
-    for (let i = 0; i < allCells.length; i++) {
-      const cellIndex = allCells[i];
-      const col = cellIndex % cols;
-      const row = Math.floor(cellIndex / cols);
-      const leftPx = col * cellWidth;
-      const topPx = row * cellHeight;
-
-      sendMessage({ type: 'progress', percent: 20 + Math.round((i / allCells.length) * 60), message: `Extracting cell ${cellIndex}` });
-
-      const cropped = await img(inputBuffer).extract({ left: leftPx, top: topPx, width: cellWidth, height: cellHeight }).toBuffer();
-      results.push({ buffer: cropped, width: cellWidth, height: cellHeight, cellIndex });
-    }
-  }
-
-  sendMessage({ type: 'progress', percent: 85, message: 'Encoding output' });
-
-  const encoded = await Promise.all(results.map(async (r) => {
-    let pipeline = img(r.buffer);
-    if (format === 'jpeg') pipeline = pipeline.jpeg({ quality });
-    else if (format === 'png') pipeline = pipeline.png({ quality });
-    else if (format === 'webp') pipeline = pipeline.webp({ quality });
-    else if (format === 'avif') pipeline = pipeline.avif({ quality });
-    else if (format === 'gif') pipeline = pipeline.png({ quality });
-    const encodedBuffer = await pipeline.toBuffer();
-    return { buffer: encodedBuffer, width: r.width, height: r.height, cellIndex: r.cellIndex };
-  }));
-
-  sendMessage({ type: 'progress', percent: 100, message: 'Complete' });
-
-  const allBuffers = encoded.map(e => e.buffer);
-  const firstBuffer = allBuffers[0] || Buffer.alloc(0);
-
-  return {
-    buffer: firstBuffer,
-    metadata: {
-      outputSize: firstBuffer.length,
-      width: encoded[0]?.width,
-      height: encoded[0]?.height,
-      format,
-      mimeType: `image/${format === 'jpeg' ? 'jpeg' : format}`,
-      cropType: type,
-      cropCount: encoded.length,
-      crops: encoded.map((e, i) => ({
-        index: e.cellIndex ?? i,
-        width: e.width,
-        height: e.height,
-        size: e.buffer.length,
-      })),
-    },
-    extraBuffers: allBuffers.slice(1),
-  };
+  );
 }
 
 // Message handler

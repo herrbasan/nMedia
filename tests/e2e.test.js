@@ -61,7 +61,7 @@ test.before(async () => {
       PORT: String(port),
       NMEDIA_CACHE_DIR: path.join(testDir, 'cache', 'assets'),
       NMEDIA_LOGS_DIR: path.join(testDir, 'logs'),
-      NMEDIA_WORKERS_MODE: 'queue',
+      NMEDIA_WORKERS_MODE: 'process',
     },
   });
   child.stdout.on('data', (chunk) => childOutput.push(chunk));
@@ -455,6 +455,29 @@ test('SVG upload rasterizes to PNG at max_dimension and density sizes', async ()
     assert.equal(meta.width, 800, `options: ${JSON.stringify(options)}`);
     assert.equal(meta.height, 400, `options: ${JSON.stringify(options)}`);
   }
+
+  // Exact repro: 320x160 viewBox with density: 2 (-> 640x320) and width: 960, height: 480 (-> 960x480)
+  const reproSvg = Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 160">' +
+    '<rect width="320" height="160" fill="#0000ff"/>' +
+    '</svg>',
+  );
+
+  const upRepro1 = await upload(reproSvg, 'repro1.svg');
+  const jobRepro1 = await startImageJob({ fileId: upRepro1.json.fileId }, { density: 2, format: 'png' });
+  const doneRepro1 = await pollJob(jobRepro1.jobId);
+  const assetRepro1 = await download(`/v1/assets/${doneRepro1.assetId}`);
+  const metaRepro1 = await nImage(assetRepro1.buffer).metadata();
+  assert.equal(metaRepro1.width, 640);
+  assert.equal(metaRepro1.height, 320);
+
+  const upRepro2 = await upload(reproSvg, 'repro2.svg');
+  const jobRepro2 = await startImageJob({ fileId: upRepro2.json.fileId }, { width: 960, height: 480, format: 'png' });
+  const doneRepro2 = await pollJob(jobRepro2.jobId);
+  const assetRepro2 = await download(`/v1/assets/${doneRepro2.assetId}`);
+  const metaRepro2 = await nImage(assetRepro2.buffer).metadata();
+  assert.equal(metaRepro2.width, 960);
+  assert.equal(metaRepro2.height, 480);
 });
 
 // ---------------------------------------------------------------------------
