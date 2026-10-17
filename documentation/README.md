@@ -212,6 +212,10 @@ Stream raw binary upload. Returns a `fileId` for processing.
 
 Start processing from `fileId` or `input_path`. Returns immediately with `jobId`.
 
+If the requested processor failed its startup self-check, the endpoint returns `503`
+with the reason instead of queueing a job that cannot succeed. `GET /health` reports the
+same state, including the individual backends (sharp, ImageMagick, SVG browser, nVideo).
+
 **Request Body (fileId):**
 
 ```json
@@ -771,6 +775,7 @@ Crop types:
 | 413 | File too large |
 | 415 | Unsupported format |
 | 429 | Too many concurrent uploads |
+| 503 | Processor unavailable (failed its startup self-check — see `/health`) |
 | 507 | Insufficient disk space |
 | 5XX | Processing error |
 

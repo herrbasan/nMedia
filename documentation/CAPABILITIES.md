@@ -63,6 +63,20 @@ GET /v1/capabilities
       "transports": ["http", "sse", "websocket"],
       "workerModes": ["queue", "thread", "process"]
     },
+    "health": {
+      "checkedAt": "2026-08-01T10:00:00.000Z",
+      "image": {
+        "ok": true,
+        "reason": null,
+        "backends": {
+          "sharp": { "ok": true, "vips": "8.17.3" },
+          "imagemagick": { "ok": true, "path": "D:\\SRV\\nMedia\\modules\\nImage\\dist\\magick.exe" },
+          "svg": { "ok": true, "browser": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" }
+        }
+      },
+      "audio": { "ok": true, "reason": null, "backends": { "nvideo": { "ok": true, "version": "N-123950-g49a2d426e9-20260413" } } },
+      "video": { "ok": true, "reason": null, "backends": { "nvideo": { "ok": true, "version": "N-123950-g49a2d426e9-20260413" } } }
+    },
     "config": {
       "maxFileSizeMb": 512,
       "maxFileSizeBytes": 536870912,

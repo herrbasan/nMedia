@@ -210,6 +210,12 @@ Configured via `workers.mode` in `config.json`:
 
 **Process mode is strongly recommended** for audio/video. A native module panic in nVideo will kill only the child process, not the main process or other workers.
 
+Queue slot accounting: a task's slot is released from the worker's `finally` block, after
+`activeTask` is cleared. Releasing it from the completion path let the follow-up dispatch
+look for an idle worker while the finishing worker was still marked busy — that failed the
+queued task, stranded its job record and permanently shrank the pool (issue #1).
+`TaskQueue` also releases the slot when a processor rejects before a worker settles.
+
 ## Logging
 
 Logging is provided by the bundled `nLogger` submodule. `src/utils/logger.js` creates
@@ -278,6 +284,33 @@ The service handles `SIGTERM` and `SIGINT` signals for clean shutdown:
 5. Job state is persisted to disk
 6. Log streams are flushed and closed (`logger.close()`)
 7. Process exits with code 0
+
+## Processor Self-Check
+
+At startup, after the processors are registered, `src/processors/health.js` calls
+`nImage.selfCheck()` and verifies each backend against a 1×1 PNG fixture:
+
+| Backend | Check |
+|---------|-------|
+| sharp / native | decode → resize → re-encode the fixture |
+| ImageMagick | decode the fixture through `dist/magick.exe`, using the same extensionless temp-file shape as the real fallback |
+| SVG | launch Chrome/Edge and rasterize a 2×2 SVG (the browser is left warm) |
+| nVideo | `getBuildInfo()` on the native module |
+
+The results are logged once (`Processor ready: …` / `Processor unavailable: …`) and
+cached for the lifetime of the process:
+
+- `GET /health` serves the snapshot: overall status, per-processor state, backend
+  details and `checkedAt`. It does not re-probe on each request.
+- `GET /v1/capabilities` embeds the same `health` object.
+- `POST /v1/process` returns **503** when the requested processor failed its check,
+  instead of queueing a job that cannot succeed.
+
+A processor is unavailable only when its **core** backend fails (sharp for image, the
+native module for audio/video). A failing auxiliary backend — ImageMagick coders or the
+SVG browser — is reported in `/health` and `/v1/capabilities` but does not block the
+standard raster path, which does not use them. The self-check never throws; each backend
+reports `{ ok, error? }`.
 
 ## Configuration Validation
 

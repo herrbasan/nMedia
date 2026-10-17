@@ -209,6 +209,12 @@ The task system handles asynchronous processing:
 - **AssetCache** (`src/cache/AssetCache.js`) - Stores results with TTL
 - **JobStore** (`src/jobs/JobStore.js`) - Disk-backed job persistence and upload tracking
 
+A queue slot is released from the worker's `finally` block, *after* `activeTask` is
+cleared. Dispatching the next queued task from the completion path looked for an idle
+worker while the finishing worker was still marked busy, which failed the queued task and
+leaked its slot (issue #1). `TaskQueue` also releases the slot if the processor rejects
+before a worker settles the task.
+
 ### Worker Execution Modes
 
 Configured via `workers.mode` in `config.json`:
@@ -258,6 +264,37 @@ Configured via `workers.mode` in `config.json`:
 | 5XX | Processing error | Circuit breaker trips, bypass MPS |
 
 ## Recent Fixes & Notes
+
+### Queue dispatch and processor self-check (2026-10-17)
+**Issue #1 — stranded queued jobs.** `TaskQueue` freed the slot through `task._onDone`
+inside the worker's completion path, before `activeTask` was cleared. The dispatch that
+followed therefore looked for an idle worker while the finishing worker was still marked
+busy: it threw `No available worker`, failed the queued task without touching its job
+record (leaving it `queued` forever) and never removed the task from `running`, so every
+occurrence permanently shrank the pool. Cleanup now runs in the worker's `finally` after
+`activeTask = null`, and `TaskQueue` releases the slot if a processor rejects before a
+worker settles. Regression tests: `tests/task-queue.test.js`
+(`a finishing task frees its worker before the next task is dispatched` reproduces the old
+failure with one worker).
+
+**Issue #2 — processor self-check.** `nImage.selfCheck()` verifies sharp, ImageMagick and
+the SVG browser with a 1×1 PNG fixture; `src/processors/health.js` adds nVideo and caches
+the result at startup. `/health` serves the snapshot (status, per-processor state, backend
+details, `checkedAt`), `/v1/capabilities` embeds it, and `POST /v1/process` returns **503**
+for a processor whose core backend failed instead of queueing a job that cannot succeed.
+A failing auxiliary backend (ImageMagick coders, SVG browser) is reported but does not
+block the standard raster path.
+
+The 2026-09-27 ImageMagick error stream was re-tested on this host: the shipped
+`dist/magick.exe` (ImageMagick 7.1.2-18) decodes PNG/JPEG correctly, with and without a
+file extension. `UnableToOpenConfigureFile delegates.xml` is a non-fatal warning; the
+fatal `NoDecodeDelegateForThisImageFormat` is what a **non-image** input produces. The
+self-check now makes either state visible at startup.
+
+**Issues #3 and #4 — verified fixed by the Chrome renderer.** Rendering the issue's own
+minimal pair through the live service produces a transparent canvas, `#888` var()-styled
+strokes (the dark media branch does not apply), visible `#1b1b1a` text and no black fill.
+A transparent SVG now yields PNG color type 6 and WebP `VP8X`+`ALPH` — alpha is preserved.
 
 ### SVG renderer: idle-relaunch hang and stale-document capture (2026-10-17)
 The 30s `CDP Runtime.evaluate did not respond` failures were the first render after the
