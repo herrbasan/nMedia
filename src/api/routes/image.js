@@ -151,6 +151,7 @@ export async function handleHealth(ctx) {
 
   const response = {
     status: allReady ? 'ok' : 'degraded',
+    uptime: Math.round(process.uptime()),
     processors,
     checkedAt: health.checkedAt,
     backends: {

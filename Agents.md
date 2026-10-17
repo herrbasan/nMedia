@@ -68,11 +68,17 @@ the second argument drops the metadata and the stack. Full convention:
 | File | Purpose |
 |------|---------|
 | `tests/logger.test.js` | Log-level filtering, unknown-level rejection, `logError` stack/metadata retention |
+| `tests/svg-raster-options.test.js` | SVG raster option validation, sizing (`max_dimension`/`density`/`width`/`height`), colorScheme, transparency |
+| `tests/task-queue.test.js` | Queue-slot release race regression (issue #1) |
+| `tests/processor-health.test.js` | Startup backend self-check |
+| `tests/e2e.test.js` | End-to-end suite: spawns the service itself on a free port with isolated temp cache/logs, then covers health/capabilities, the unified transport (upload → process → poll → download), SSE progress, path-based processing, SVG rasterization over HTTP, the WebSocket transport (binary upload, progress subscribe, binary download), and error cases |
 
-The processor and end-to-end suites referenced by `package.json`'s `test:e2e*` scripts
-(`tests/ws-integration-test.js`, `tests/e2e.test.js`, `tests/manual-readme-test.js`) and
-the media fixtures in `tests/assets/` are **not present in the repository**. They must be
-restored before those scripts can run.
+`npm run test:e2e` runs `tests/e2e.test.js` only. The suite is self-contained:
+it starts its own service child process (`node src/index.js`) configured through
+the `PORT`, `NMEDIA_CACHE_DIR`, `NMEDIA_LOGS_DIR` and `NMEDIA_WORKERS_MODE`
+environment overrides, waits for `/health`, and cleans up afterwards — no
+running service and no committed binary fixtures are needed (PNG/SVG fixtures
+are generated at runtime through nImage).
 
 ## Core Development Maxims
 - **Priorities:** Reliability > Performance > Everything else.
@@ -396,8 +402,14 @@ Added `SIGTERM`/`SIGINT` handlers to `src/index.js`. On shutdown: HTTP server cl
 ### Dead Code Cleanup
 Removed `MultipartParser._findBoundaryFromEnd()` (never called), duplicate FLAC detection in `MagicByteDetector`, dead `handleVideoProgress()` route in `video.js`, and empty `src/api/middleware/` directory.
 
-### E2E Tests Rewritten
-`tests/e2e.test.js` now tests the unified transport flow: `POST /v1/upload` → `POST /v1/process` → `GET /v1/jobs/:id` → `GET /v1/assets/:id`. Tests image, audio, and video processing, path-based processing, job listing, and error cases. Port updated to 3501.
+### E2E Tests Rewritten (issue #6)
+`tests/e2e.test.js` is self-contained: it spawns the service on a free port with
+isolated temp cache/logs (env overrides `PORT`, `NMEDIA_CACHE_DIR`, `NMEDIA_LOGS_DIR`,
+`NMEDIA_WORKERS_MODE`), generates PNG/SVG fixtures at runtime through nImage, and covers
+the unified transport flow (`POST /v1/upload` → `POST /v1/process` → `GET /v1/jobs/:id`
+→ `GET /v1/assets/:id`), SSE progress lifecycle, path-based processing, SVG rasterization
+sizes, the WebSocket transport (binary upload/subscribe/download), and error cases
+(400/404/415, queued-job cancellation). Run with `npm run test:e2e` or as part of `npm test`.
 
 ### UUID Generation
 Replaced `Math.random()`-based UUID generator with `crypto.randomUUID()` for proper v4 UUIDs.

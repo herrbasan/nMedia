@@ -60,7 +60,9 @@ if (config.workers.maxConcurrentTasks === undefined || config.workers.maxConcurr
 }
 
 export default {
-  port: config.server.port,
+  // Env overrides let tests (and container deployments) isolate port, logs,
+  // and cache without editing config.json. See tests/e2e.test.js.
+  port: process.env.PORT ? parseInt(process.env.PORT, 10) : config.server.port,
   host: config.server.host,
   maxFileSizeMb: config.media.maxFileSizeMb,
   maxFileSizeBytes: config.media.maxFileSizeMb * 1024 * 1024,
@@ -70,14 +72,15 @@ export default {
   logLevel: String(config.logging.level).toLowerCase(),
   // Paths are resolved against the project root, not process.cwd(): the service
   // may be started from src/, and the log/cache location must not move with it.
-  logsDir: path.resolve(projectRoot, config.logging.logsDir),
+  // NMEDIA_LOGS_DIR / NMEDIA_CACHE_DIR are absolute by contract and win over config.json.
+  logsDir: process.env.NMEDIA_LOGS_DIR ? path.resolve(process.env.NMEDIA_LOGS_DIR) : path.resolve(projectRoot, config.logging.logsDir),
   sessionPrefix: config.logging.sessionPrefix,
   logRetentionDays: config.logging.retentionDays,
-  cacheDir: path.resolve(projectRoot, config.cache.dir),
+  cacheDir: process.env.NMEDIA_CACHE_DIR ? path.resolve(process.env.NMEDIA_CACHE_DIR) : path.resolve(projectRoot, config.cache.dir),
   cacheTtl: config.cache.ttl,
   cacheMaxSize: config.cache.maxSize,
   maxConcurrentTasks: config.workers.maxConcurrentTasks,
-  workersMode: config.workers.mode ?? 'queue',
+  workersMode: process.env.NMEDIA_WORKERS_MODE || config.workers.mode || 'queue',
   messageTransport: config.messaging.transport,
   allowedInputPaths: (config.media.allowedInputPaths || []).map(p => p === '*' ? '*' : path.resolve(p)),
   allowedOutputPaths: (config.media.allowedOutputPaths || []).map(p => p === '*' ? '*' : path.resolve(p)),
