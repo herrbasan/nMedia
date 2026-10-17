@@ -2,6 +2,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import config from '../../config/config.js';
+import { getProcessorHealth } from '../../processors/health.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -90,6 +91,7 @@ function buildServiceCapabilities() {
     version: '1.0.0',
     endpoints: SERVICE_ENDPOINTS,
     features: SERVICE_FEATURES,
+    health: getProcessorHealth(),
     config: {
       maxFileSizeMb: config.maxFileSizeMb,
       maxFileSizeBytes: config.maxFileSizeBytes,

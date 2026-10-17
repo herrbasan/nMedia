@@ -1,13 +1,8 @@
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
-import config from '../../config/config.js';
 import PipelineExecutor from '../../pipeline/PipelineExecutor.js';
 import ProgressReporter from '../../pipeline/ProgressReporter.js';
+import { getProcessorHealth } from '../../processors/health.js';
 import { logError } from '../../utils/logger.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 /**
  * POST /v1/process/image
@@ -137,47 +132,44 @@ export async function handleImageCrop(ctx) {
 
 /**
  * GET /health
- * Health check endpoint
+ * Health check endpoint. Serves the startup self-check snapshot: probing the
+ * backends per request would make health checks expensive and non-deterministic.
  */
 export async function handleHealth(ctx) {
-  const health = {
-    status: 'ok',
-    processors: {
-      image: 'unknown',
-      audio: 'unknown',
-      video: 'unknown',
+  const health = getProcessorHealth();
+  if (!health) {
+    ctx.error(503, 'Processor health check has not run');
+    return;
+  }
+
+  const processors = {
+    image: health.image.ok ? 'ready' : 'error',
+    audio: health.audio.ok ? 'ready' : 'error',
+    video: health.video.ok ? 'ready' : 'error',
+  };
+  const allReady = Object.values(processors).every((state) => state === 'ready');
+
+  const response = {
+    status: allReady ? 'ok' : 'degraded',
+    processors,
+    checkedAt: health.checkedAt,
+    backends: {
+      image: {
+        sharp: health.image.backends.sharp,
+        imagemagick: health.image.backends.imagemagick,
+        svg: health.image.backends.svg,
+      },
+      nvideo: health.audio.backends.nvideo,
     },
   };
 
-  // Check if nImage is available
-  try {
-    const nImagePath = path.join(__dirname, '../../../modules/nImage/lib/index.js');
-    const nImageUrl = pathToFileURL(nImagePath).href;
-    await import(nImageUrl);
-    health.processors.image = 'ready';
-  } catch (e) {
-    logError('Health check: nImage unavailable', e, { processor: 'image' });
-    health.processors.image = 'error';
+  if (!allReady) {
+    const reasons = {};
+    for (const name of ['image', 'audio', 'video']) {
+      if (!health[name].ok) reasons[name] = health[name].reason;
+    }
+    response.reasons = reasons;
   }
 
-  // Check nVideo. Probing a media file here used to make the result depend on
-  // tests/assets being deployed; calling into the native module is the actual
-  // readiness question.
-  try {
-    const nVideoPath = path.join(__dirname, '../../../modules/nVideo/lib/index.js');
-    const nVideoUrl = pathToFileURL(nVideoPath).href;
-    const nVideo = (await import(nVideoUrl)).default;
-    nVideo.getBuildInfo();
-    health.processors.audio = 'ready';
-    health.processors.video = 'ready';
-  } catch (e) {
-    logError('Health check: nVideo unavailable', e, { processors: ['audio', 'video'] });
-    health.processors.audio = 'error';
-    health.processors.video = 'error';
-  }
-
-  const allReady = Object.values(health.processors).every((s) => s === 'ready');
-  health.status = allReady ? 'ok' : 'degraded';
-
-  ctx.json(200, health);
+  ctx.json(200, response);
 }

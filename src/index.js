@@ -11,6 +11,7 @@ import { StaticFileServer } from './server/StaticFileServer.js';
 import ImageProcessor from './processors/image/ImageProcessor.js';
 import AudioProcessor from './processors/audio/AudioProcessor.js';
 import VideoProcessor from './processors/video/VideoProcessor.js';
+import { runProcessorHealthCheck, logProcessorHealth } from './processors/health.js';
 import { handleImage, handleImageCrop, handleHealth } from './api/routes/image.js';
 import { handleAudio, handleAudioProbe } from './api/routes/audio.js';
 import { handleVideo, handleVideoProbe } from './api/routes/video.js';
@@ -53,6 +54,10 @@ const __dirname = path.dirname(__filename);
 PipelineExecutor.register('image', new ImageProcessor());
 PipelineExecutor.register('audio', new AudioProcessor());
 PipelineExecutor.register('video', new VideoProcessor());
+
+// A broken backend is knowable before the first request; surface it once.
+await runProcessorHealthCheck();
+logProcessorHealth();
 
 // Create router
 const router = new Router();

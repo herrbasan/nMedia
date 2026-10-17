@@ -5,6 +5,7 @@ import { Task } from '../../tasks/Task.js';
 import ProgressReporter from '../../pipeline/ProgressReporter.js';
 import logger, { logError } from '../../utils/logger.js';
 import config from '../../config/config.js';
+import { getProcessorHealth } from '../../processors/health.js';
 
 const VALID_PROCESSORS = ['image', 'audio', 'video'];
 const VALID_VIDEO_MODES = ['extract_audio', 'extract_keyframes', 'transcode'];
@@ -32,6 +33,18 @@ export async function handleProcess(ctx) {
     // Validate processor type
     if (!processor || !VALID_PROCESSORS.includes(processor)) {
       ctx.error(400, `Invalid processor. Must be one of: ${VALID_PROCESSORS.join(', ')}`);
+      return;
+    }
+
+    // A processor whose backend failed its startup check cannot succeed.
+    // Reject now instead of queueing a job that is guaranteed to fail.
+    const health = getProcessorHealth();
+    if (!health) {
+      ctx.error(503, 'Processor health check has not run');
+      return;
+    }
+    if (!health[processor].ok) {
+      ctx.error(503, `${processor} processor unavailable: ${health[processor].reason}`);
       return;
     }
 
