@@ -6,6 +6,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const configPath = path.join(__dirname, '../../config.json');
+const projectRoot = path.join(__dirname, '../..');
+const LOG_LEVELS = ['debug', 'info', 'warn', 'error'];
 
 if (!fs.existsSync(configPath)) {
   throw new Error(`Configuration file not found: ${configPath}`);
@@ -19,6 +21,14 @@ if (!config.server?.port) {
 
 if (!config.logging?.logsDir) {
   throw new Error('logging.logsDir is required in config.json');
+}
+
+if (!config.logging?.level) {
+  throw new Error('logging.level is required in config.json (debug, info, warn, or error)');
+}
+
+if (!LOG_LEVELS.includes(String(config.logging.level).toLowerCase())) {
+  throw new Error(`logging.level must be one of: ${LOG_LEVELS.join(', ')}`);
 }
 
 if (!config.media?.gpu?.platform) {
@@ -57,11 +67,13 @@ export default {
   gpuPlatform: config.media.gpu.platform,
   gpuDevice: config.media.gpu.device ?? 0,
   gpuMaxConcurrentSessions: config.media.gpu.maxConcurrentSessions ?? 4,
-  logLevel: config.logging.level,
-  logsDir: path.resolve(process.cwd(), config.logging.logsDir),
+  logLevel: String(config.logging.level).toLowerCase(),
+  // Paths are resolved against the project root, not process.cwd(): the service
+  // may be started from src/, and the log/cache location must not move with it.
+  logsDir: path.resolve(projectRoot, config.logging.logsDir),
   sessionPrefix: config.logging.sessionPrefix,
   logRetentionDays: config.logging.retentionDays,
-  cacheDir: path.resolve(process.cwd(), config.cache.dir),
+  cacheDir: path.resolve(projectRoot, config.cache.dir),
   cacheTtl: config.cache.ttl,
   cacheMaxSize: config.cache.maxSize,
   maxConcurrentTasks: config.workers.maxConcurrentTasks,
