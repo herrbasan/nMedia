@@ -104,7 +104,7 @@ This project uses git submodules located in `/modules`. These are all **our own 
 
 | Processor | Technology | Capabilities |
 |-----------|------------|--------------|
-| ImageProcessor | nImage (native NAPI) | Resize, format conversion, cropping (region/center/grid), EXIF stripping. Supports RAW, HEIC, and 150+ formats |
+| ImageProcessor | nImage (native NAPI) | Resize, format conversion, cropping (region/center/grid), EXIF stripping. Supports RAW, HEIC, SVG/SVGZ (rasterized by headless Chrome), and 150+ formats |
 | AudioProcessor | nVideo (native NAPI) | Resampling (8-48kHz), channel conversion, format conversion (mp3/wav/ogg/m4a). Direct FFmpeg library integration. |
 | VideoProcessor | nVideo (native NAPI) | Audio extraction, keyframe extraction, full transcode, CLI passthrough. Direct FFmpeg library integration. |
 
@@ -165,6 +165,15 @@ This project uses git submodules located in `/modules`. These are all **our own 
 - `grayscale`: convert to grayscale
 - `normalize`: normalize contrast
 - `blur`: blur sigma 0-20
+
+**SVG input (`svg`, `svgz`):**
+- Rasterized by a persistent headless Chrome/Edge inside nImage, then processed like any other decoded image — resize, crop, format conversion and `strip_exif` all apply to the result
+- **Operational requirement: Chrome or Edge must be installed on the host.** Nothing ships a browser. Missing → the job fails loudly, never a silent fallback. Override the binary with `NIMAGE_CHROME_PATH`
+- Why a browser: librsvg (sharp's SVG backend) and resvg both silently drop CSS custom properties, and this ImageMagick build has no SVG support at all. Chrome is the only available renderer that resolves `var()`, `@media (prefers-color-scheme)`, `rgba()` in stylesheets and `system-ui` fonts
+- Alpha is preserved (`rgba(0,0,0,0)`); ImageMagick flattened it to opaque white
+- Colour scheme is **forced to light** (a raster has no OS theme), so output does not depend on the host's desktop theme
+- Cost: ~490ms for the first render in a process, ~75-135ms thereafter. The browser is reused and shuts down after 60s idle. One browser per worker process
+- `NIMAGE_CHROME_PATH` selects the binary; `NIMAGE_SVG_DEBUG=1` traces DevTools round trips
 
 **Audio:**
 - `sample_rate`: 8000/16000/22050/44100/48000 Hz (default 16000 for STT)
@@ -239,6 +248,13 @@ Configured via `workers.mode` in `config.json`:
 | 5XX | Processing error | Circuit breaker trips, bypass MPS |
 
 ## Recent Fixes & Notes
+
+### SVG Rendering Replaced (issues #3 and #4)
+SVG now rasterizes through a persistent headless Chrome/Edge in nImage (`modules/nImage/lib/svg-renderer.js`) instead of ImageMagick. Root cause found: this build of ImageMagick has **no SVG support at all** — no librsvg compiled in, and its `svg` delegate points at an `rsvg-convert` binary that was never shipped, so every SVG silently fell through to a primitive internal renderer (`CSS parsing error`, `Invalid UTF-8 string passed to pango_layout_set_text()`, alpha flattened to opaque white). One defect was behind issues #2, #3 and #4.
+
+Also required: `MagicByteDetector` had no SVG detection, so uploads were rejected with 415 before nImage was ever reached — SVG is XML text with no magic bytes. Both the prolog sniff and the extension map now recognise `svg`/`svgz`.
+
+Rejected alternatives, with evidence: `resvg` has no `var()` support ([linebender/resvg#821](https://github.com/linebender/resvg/issues/821)) and ships no Windows build; sharp/librsvg renders your real diagram correctly but drops `var()` (verified — a `var()` rect came back `rgba(0,0,0,255)` beside a correct literal control). Chrome at ~490ms cold / ~75-135ms warm beat the librsvg route on correctness at close to the same speed.
 
 ### Upload Handler `end`/`close` Race
 Fixed in `src/api/routes/upload.js`: the `rawRequest` `close` event was destroying the write stream after the `end` event had already fired, causing uploads to hang indefinitely. A `requestEnded` flag now prevents this.

@@ -3,7 +3,7 @@ import path from 'path';
 import { v4 as uuidv4 } from '../../utils/uuid.js';
 import { jobStore } from '../../jobs/JobStore.js';
 import { MagicByteDetector } from '../../utils/MagicByteDetector.js';
-import logger from '../../utils/logger.js';
+import logger, { logError } from '../../utils/logger.js';
 import config from '../../config/config.js';
 
 // Track active uploads for concurrency limiting
@@ -127,7 +127,7 @@ export async function handleUpload(ctx) {
 
       if (!detected) {
         fs.unlinkSync(tempPath);
-        ctx.error(415, 'Unable to detect file type. Supported formats: JPEG, PNG, GIF, WebP, AVIF, HEIC, MP3, WAV, OGG, FLAC, MP4, MOV, WebM, AVI');
+        ctx.error(415, 'Unable to detect file type. Supported formats: JPEG, PNG, GIF, WebP, AVIF, HEIC, SVG, MP3, WAV, OGG, FLAC, MP4, MOV, WebM, AVI');
         return;
       }
 
@@ -161,7 +161,12 @@ export async function handleUpload(ctx) {
       logger.debug('Upload connection aborted');
       return;
     }
-    logger.error('Upload failed', { error: error.message });
+    logError('Upload failed', error, {
+      requestId: ctx.requestId,
+      originalFilename: ctx.headers['x-original-filename'],
+      contentLength: ctx.headers['content-length'],
+      uploadId: ctx.headers['x-upload-id'],
+    });
     ctx.error(500, error.message);
   }
 }

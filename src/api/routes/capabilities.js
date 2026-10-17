@@ -76,6 +76,7 @@ export async function handleCapabilities(ctx) {
         rawFormats: nImage.RAW_FORMATS,
         heicFormats: nImage.HEIC_FORMATS,
         imagemagickFormats: nImage.IMAGEMAGICK_FORMATS,
+        svgFormats: nImage.SVG_FORMATS,
       },
     };
     ctx.json(200, { success: true, data: caps });

@@ -269,9 +269,15 @@ GET /v1/capabilities
         "formats": ["jpeg", "png", "webp", "tiff", "gif", "bmp", "jxl", "jp2"],
         "features": ["resize", "crop", "rotate", "flip", "flop", "grayscale", "composite"]
       },
+      "svg": {
+        "library": "headless-chrome",
+        "formats": ["svg", "svgz"],
+        "features": ["cssCustomProperties", "mediaQueries", "rgba", "systemFonts", "alpha", "forcedColorScheme"],
+        "note": "Requires Chrome or Edge on the host; override with NIMAGE_CHROME_PATH"
+      },
       "magick": {
         "library": "imagemagick",
-        "formats": ["psd", "pdf", "svg", "exr", "hdr", "docx", "xlsx", "pptx", "ai", "eps", "xps"],
+        "formats": ["psd", "pdf", "exr", "hdr", "docx", "xlsx", "pptx", "ai", "eps", "xps"],
         "features": ["150+ formats"],
         "note": "CLI fallback, slower"
       }
@@ -285,7 +291,8 @@ GET /v1/capabilities
     "supportedFormats": ["cr2", "nef", "arw", "heic", "jpeg", "png", "webp", ...],
     "rawFormats": ["cr2", "nef", "arw", ...],
     "heicFormats": ["heic", "heif", "avif"],
-    "imagemagickFormats": ["psd", "pdf", "svg", ...]
+    "imagemagickFormats": ["psd", "pdf", ...],
+    "svgFormats": ["svg", "svgz"]
   }
 }
 ```

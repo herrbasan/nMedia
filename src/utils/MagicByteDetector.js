@@ -63,6 +63,14 @@ export class MagicByteDetector {
       return { type: 'video', mimeType: 'video/avi' };
     }
 
+    // SVG is XML text, so it has no magic bytes — the prolog is sniffed instead.
+    // Only the first 64 bytes are available here, so detectFromExtension also
+    // recognises .svg / .svgz for documents with a longer prolog.
+    const head = buffer.subarray(0, 64).toString('utf8').replace(/^\uFEFF/, '');
+    if (/<svg[\s>]/i.test(head) && /^\s*(<\?xml|<svg|<!DOCTYPE\s+svg)/i.test(head)) {
+      return { type: 'image', mimeType: 'image/svg+xml' };
+    }
+
     return null;
   }
 
@@ -74,6 +82,8 @@ export class MagicByteDetector {
       jpeg: { type: 'image', mimeType: 'image/jpeg' },
       png: { type: 'image', mimeType: 'image/png' },
       gif: { type: 'image', mimeType: 'image/gif' },
+      svg: { type: 'image', mimeType: 'image/svg+xml' },
+      svgz: { type: 'image', mimeType: 'image/svg+xml' },
       webp: { type: 'image', mimeType: 'image/webp' },
       avif: { type: 'image', mimeType: 'image/avif' },
       tiff: { type: 'image', mimeType: 'image/tiff' },

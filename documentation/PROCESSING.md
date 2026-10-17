@@ -40,7 +40,10 @@ Format Detection (magic bytes, ~0.5µs)
 | LibRaw | libraw | CR2, NEF, ARW, ORF, RAF, RW2, DNG, PEF, SRW, RWL, CRW, MRW, NRW, ERF, 3FR, K25, KDC, MEF, MOS, MRAW, RRF, SR2, RWZ | ~400-520ms (20MP) |
 | LibHeif | libheif | HEIC, HEIF, AVIF | <100ms (12MP) |
 | Sharp | libvips | JPEG, PNG, WebP, TIFF, GIF, BMP, JXL, JP2 | ~50ms |
-| Magick | ImageMagick CLI | PDF, SVG, PSD, AI, EXR, HDR, DOCX, XLSX, PPTX, 150+ more | 1-5s |
+| Magick | ImageMagick CLI | PDF, PSD, AI, EXR, HDR, DOCX, XLSX, PPTX, 150+ more | 1-5s |
+| SVG | headless Chrome/Edge | SVG, SVGZ — browser-authored CSS (`var()`, `@media`, `rgba()`, `system-ui`) | ~490ms cold, 75-135ms warm |
+
+> **SVG requires Chrome or Edge installed on the host.** Nothing ships a browser. Missing → the job fails loudly, never silently degraded. Override the binary with `NIMAGE_CHROME_PATH`. ImageMagick cannot rasterize SVG at all in this build: no librsvg is compiled in and its `svg` delegate points at an `rsvg-convert` binary that is not shipped, so SVG used to fall through to a primitive internal renderer.
 
 ### Output Formats
 

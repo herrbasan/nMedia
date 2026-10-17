@@ -10,7 +10,7 @@ nMedia receives large multimodal payloads, aggressively compresses/downscales th
 
 - **Runtime:** Node.js 18+
 - **HTTP Server:** Native Node.js `http` module with custom Router
-- **Image Processing:** nImage (native NAPI with libraw/libheif/ImageMagick)
+- **Image Processing:** nImage (native NAPI with libraw/libheif/ImageMagick, plus headless Chrome for SVG)
 - **Audio/Video Processing:** nVideo (native NAPI with direct FFmpeg C API integration)
 - **Uploads:** Raw binary streaming to `POST /v1/upload`
 
