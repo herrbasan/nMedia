@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from '../../utils/uuid.js';
 import Processor from '../../pipeline/Processor.js';
 import config from '../../config/config.js';
-import logger from '../../utils/logger.js';
+import logger, { logError } from '../../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -104,7 +104,10 @@ class AudioProcessor extends Processor {
     try {
       sourceMetadata = await this.probe(inputPath);
     } catch (err) {
-      logger.warn('Failed to probe source audio, using defaults', { error: err.message });
+      logger.warn('Failed to probe source audio, using defaults', {
+        inputPath,
+        error: err.message,
+      });
       sourceMetadata = { sampleRate: 44100, channels: 2 };
     }
 
@@ -186,7 +189,13 @@ class AudioProcessor extends Processor {
       try { fs.unlinkSync(outputPath); } catch {}
       if (shouldCleanupInput) { try { fs.unlinkSync(inputPath); } catch {} }
 
-      logger.error('Audio processing error', { error: error.message });
+      logError('Audio processing error', error, {
+        inputPath,
+        originalSize,
+        format,
+        targetSampleRate,
+        targetChannels,
+      });
       throw error;
     }
   }

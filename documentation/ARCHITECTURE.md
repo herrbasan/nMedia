@@ -210,6 +210,63 @@ Configured via `workers.mode` in `config.json`:
 
 **Process mode is strongly recommended** for audio/video. A native module panic in nVideo will kill only the child process, not the main process or other workers.
 
+## Logging
+
+Logging is provided by the bundled `nLogger` submodule. `src/utils/logger.js` creates
+the singleton and adds one convention on top of it.
+
+**nLogger's error signature is `error(message, error, meta, type)`.** Passing a meta
+object as the second argument silently drops every field — that is why the logs used to
+show `{"error":"..."}` with no context or stack. Always use the `logError` facade:
+
+```js
+import { logError } from '../utils/logger.js';
+
+logError('Image processing failed', error, { requestId, inputBytes, options });
+```
+
+`logError` passes the stack as an array of lines because nLogger truncates metadata
+strings longer than 500 characters to 200, which would reduce a stack trace to its
+message and one frame.
+
+Rules:
+
+- Log the failure where it happens, with the ids and inputs needed to reproduce it:
+  `requestId`, `jobId`, `taskId`, `fileId`, `path`, option values, byte counts.
+- `Context.error()` logs 4xx at WARN and 5xx at ERROR; 4xx is a client error, not a
+  service fault.
+- Never swallow a caught error. Rethrow it, or log at a level matching its severity.
+  Temporary-file cleanup (`catch {}` around `unlinkSync`) is the only silent case.
+- Processors, workers and routes may add context at each layer; the origin log carries
+  the stack.
+- `logger.close()` must run before `process.exit()` — the main log is buffered and
+  would otherwise lose its last lines.
+
+Each HTTP request produces one completion line:
+
+```
+[2026-10-17T04:28:37.775Z] [INFO] [System] POST /v1/process/image 200 123ms {"requestId":"..."}
+```
+
+Aborted requests log at WARN (`... aborted after 5000ms`). `requestId` correlates the
+request line with handler and processor error logs.
+
+Worker error reporting:
+
+- `process` mode pipes child stdout/stderr. The last 4000 characters of stderr are
+  captured and logged on a non-zero exit — the only diagnostic a native crash leaves.
+- The child reports `{ type: 'error', message, stack }`. Uncaught exceptions and
+  unhandled rejections are reported the same way before the child exits.
+
+**Log levels.** `logging.level` sets the minimum level written (`debug`, `info`,
+`warn`, `error`); ERROR always passes the gate. The level is applied through
+`logger.setLevel()` at startup, so the value in `config.json` is authoritative — the
+`LOG_LEVEL` environment variable only supplies nLogger's default before that call.
+
+**Log and cache paths resolve against the project root**, not the process working
+directory. Starting the service from `src/` and from the repository root both write to
+`<project>/logs` and `<project>/cache`.
+
 ## Graceful Shutdown
 
 The service handles `SIGTERM` and `SIGINT` signals for clean shutdown:
@@ -219,7 +276,8 @@ The service handles `SIGTERM` and `SIGINT` signals for clean shutdown:
 3. Task manager stops accepting new tasks
 4. Asset cache and job store cleanup intervals are cleared
 5. Job state is persisted to disk
-6. Process exits with code 0
+6. Log streams are flushed and closed (`logger.close()`)
+7. Process exits with code 0
 
 ## Configuration Validation
 
@@ -228,10 +286,11 @@ At startup, `config.js` validates all required fields and throws immediately if 
 | Required Field | Description |
 |----------------|-------------|
 | `server.port` | HTTP server port |
-| `logging.logsDir` | Log directory path |
+| `logging.logsDir` | Log directory path (relative to the project root) |
+| `logging.level` | Log level: debug, info, warn, error |
 | `media.gpu.platform` | GPU platform: nvenc, vaapi, qsv, cpu |
 | `media.maxFileSizeMb` | Maximum upload size (MB) |
-| `cache.dir` | Asset cache directory |
+| `cache.dir` | Asset cache directory (relative to the project root) |
 | `cache.ttl` | Asset cache TTL (seconds) |
 | `cache.maxSize` | Max cache size (bytes) |
 | `workers.mode` | Worker execution mode: `queue`, `thread`, or `process` |

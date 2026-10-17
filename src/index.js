@@ -2,7 +2,7 @@ import { createServer } from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import config from './config/config.js';
-import logger from './utils/logger.js';
+import logger, { logError } from './utils/logger.js';
 import PipelineExecutor from './pipeline/PipelineExecutor.js';
 import ProgressReporter from './pipeline/ProgressReporter.js';
 import { HttpServer } from './server/HttpServer.js';
@@ -136,7 +136,7 @@ wsServer.on('connection', (conn, req) => {
   });
 
   conn.on('error', (err) => {
-    logger.error('WebSocket error', { id: conn.id, error: err.message });
+    logError('WebSocket error', err, { connectionId: conn.id });
   });
 
   // Send welcome
@@ -187,9 +187,22 @@ async function gracefulShutdown(signal) {
   assetCache.shutdown();
   jobStore.shutdown();
 
-  logger.info('nMedia shut down', {}, 'System', { console: true });
-  process.exit(0);
+  // logger.close() flushes the buffered main-log lines and ends both streams.
+  logger.close('nMedia shut down');
+  setTimeout(() => process.exit(0), 250);
 }
 
+// A fatal error must be visible in the log before the process dies — the default
+// handlers print to a stderr that nothing is listening to.
+function fatal(error, label) {
+  logError(label, error, {});
+  logger.close(`${label} — process exiting`);
+  setTimeout(() => process.exit(1), 250);
+}
+
+process.on('uncaughtException', (error) => fatal(error, 'Uncaught exception'));
+process.on('unhandledRejection', (reason) => {
+  fatal(reason instanceof Error ? reason : new Error(`Unhandled rejection: ${String(reason)}`), 'Unhandled promise rejection');
+});
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));

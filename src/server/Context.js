@@ -1,7 +1,7 @@
 import { extractBoundary, MultipartParser } from './MultipartParser.js';
 import { SseConnection } from './SseConnection.js';
 import ProgressReporter from '../pipeline/ProgressReporter.js';
-import logger from '../utils/logger.js';
+import logger, { logError } from '../utils/logger.js';
 
 /**
  * Unified context object for route handlers.
@@ -14,9 +14,11 @@ export class Context {
   #body = null;
   #file = null;
 
-  constructor(req, res) {
+  constructor(req, res, requestId) {
     this.#req = req;
     this.#res = res;
+    this.requestId = requestId;
+    this.startedAt = Date.now();
   }
 
   get method() {
@@ -165,7 +167,7 @@ export class Context {
     this.#res.writeHead(statusCode, headers);
     stream.pipe(this.#res);
     stream.on('error', (err) => {
-      logger.error('Stream error', { error: err.message });
+      logError('Response stream error', err, { path: this.path, requestId: this.requestId });
       if (!this.#res.headersSent) {
         this.#res.destroy();
       }
@@ -187,12 +189,18 @@ export class Context {
    * @param {string} message - Error message
    */
   error(statusCode, message) {
+    const meta = { statusCode, message, path: this.path, method: this.method, requestId: this.requestId };
     if (this.#res.headersSent) {
-      logger.error('Request error (headers already sent)', { statusCode, message, path: this.path });
+      logger.error('Request error (headers already sent)', null, meta);
       this.#res.destroy();
       return;
     }
-    logger.error('Request error', { statusCode, message, path: this.path });
+    // 4xx is the client's problem, not a service fault — only 5xx is an error.
+    if (statusCode >= 500) {
+      logger.error('Request error', null, meta);
+    } else {
+      logger.warn('Request rejected', meta);
+    }
     this.json(statusCode, { error: message });
   }
 

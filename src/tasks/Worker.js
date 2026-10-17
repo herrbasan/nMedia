@@ -6,7 +6,7 @@ import { fork } from 'child_process';
 import PipelineExecutor from '../pipeline/PipelineExecutor.js';
 import { assetCache } from '../cache/AssetCache.js';
 import { jobStore, JobStatus } from '../jobs/JobStore.js';
-import logger from '../utils/logger.js';
+import logger, { logError } from '../utils/logger.js';
 import config from '../config/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -165,7 +165,7 @@ export class TaskWorker {
         assetId: task.assetId,
       });
     } catch (error) {
-      task.fail(error.message);
+      task.fail(error);
 
       if (jobId) {
         jobStore.updateJob(jobId, JobStatus.FAILED, {
@@ -176,11 +176,14 @@ export class TaskWorker {
 
       task._onError?.(error);
 
-      logger.error('Task failed', {
+      logError('Task failed', error, {
         taskId: task.id,
+        jobId,
         type: task.type,
-        mode: this.mode,
-        error: error.message,
+        mode: task.options?.mode,
+        workerId: this.id,
+        workerMode: this.mode,
+        duration: task.getDuration(),
       });
     } finally {
       this.activeTask = null;
@@ -251,24 +254,33 @@ export class TaskWorker {
         workerData: { taskId: task.id },
       });
 
+      let settled = false;
+      const settle = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        fn(value);
+      };
+
       this.nativeWorker.on('message', (message) => {
         if (message.type === 'progress') {
           task.updateProgress(message.percent, message.message || String(message.metadata || ''));
         } else if (message.type === 'complete') {
-          resolve(message.result);
+          settle(resolve, message.result);
         } else if (message.type === 'error') {
-          reject(new Error(message.message));
+          const error = new Error(message.message);
+          if (message.stack) error.stack = message.stack;
+          settle(reject, error);
         }
       });
 
       this.nativeWorker.on('error', (err) => {
-        reject(err);
+        settle(reject, err);
       });
 
       this.nativeWorker.on('exit', (code) => {
-        if (code !== 0) {
-          reject(new Error(`Worker stopped with exit code ${code}`));
-        }
+        // The worker is terminated in the finally block after a settle, so only
+        // an exit that arrives first is meaningful.
+        settle(reject, new Error(`Worker thread exited without a result (code ${code})`));
       });
 
       // Send task to worker
@@ -289,33 +301,68 @@ export class TaskWorker {
     return new Promise((resolve, reject) => {
       const taskWorkerPath = path.join(__dirname, 'TaskWorker.js');
 
-      this.nativeWorker = fork(taskWorkerPath, [], {
+      const child = fork(taskWorkerPath, [], {
         env: { ...process.env, WORKER_MODE: 'process', TASK_ID: task.id },
-        serialization: 'advanced' // allow Buffer optimization
+        serialization: 'advanced', // allow Buffer optimization
+        silent: true,
+      });
+      this.nativeWorker = child;
+
+      // silent:true pipes stdout and stderr; both MUST be consumed or the child
+      // blocks on a full OS buffer. For a native crash (0xC0000005) the child's
+      // stderr is the only diagnostic that exists.
+      let stderrTail = '';
+      child.stdout.on('data', (chunk) => process.stdout.write(chunk));
+      child.stderr.on('data', (chunk) => {
+        stderrTail = (stderrTail + chunk.toString()).slice(-4000);
+        process.stderr.write(chunk);
       });
 
-      this.nativeWorker.on('message', (message) => {
+      let settled = false;
+      const settle = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        fn(value);
+      };
+
+      child.on('message', (message) => {
         if (message.type === 'progress') {
           task.updateProgress(message.percent, message.message || String(message.metadata || ''));
         } else if (message.type === 'complete') {
-          resolve(message.result);
+          settle(resolve, message.result);
         } else if (message.type === 'error') {
-          reject(new Error(message.message));
+          const error = new Error(message.message);
+          if (message.stack) error.stack = message.stack;
+          settle(reject, error);
         }
       });
 
-      this.nativeWorker.on('error', (err) => {
-        reject(err);
+      child.on('error', (err) => {
+        settle(reject, err);
       });
 
-      this.nativeWorker.on('exit', (code, signal) => {
-        if (code !== 0) {
-          const detail = signal ? `signal ${signal}` : `exit code ${code}`;
-          reject(new Error(`Native execution crashed or stopped with ${detail}`));
+      child.on('exit', (code, signal) => {
+        // The child is killed in the finally block after a settle; ignore that exit.
+        if (settled) return;
+        if (code === 0) {
+          settle(reject, new Error('Worker process exited without sending a result'));
+          return;
         }
+        const detail = signal ? `signal ${signal}` : `exit code ${code}`;
+        const message = `Worker process died with ${detail}`;
+        logError(message, new Error(message), {
+          taskId: task.id,
+          type: task.type,
+          mode: task.options?.mode,
+          exitCode: code,
+          signal,
+          stderr: stderrTail.trim().split('\n'),
+        });
+        const suffix = stderrTail.trim() ? ` — stderr: ${stderrTail.trim().slice(-800)}` : '';
+        settle(reject, new Error(`${message}${suffix}`));
       });
 
-      this.nativeWorker.send({
+      child.send({
         type: 'process',
         mediaType: task.type,
         inputSource: inputSource,

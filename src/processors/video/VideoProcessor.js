@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { v4 as uuidv4 } from '../../utils/uuid.js';
 import Processor from '../../pipeline/Processor.js';
 import config from '../../config/config.js';
-import logger from '../../utils/logger.js';
+import logger, { logError } from '../../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -55,6 +55,28 @@ class VideoProcessor extends Processor {
   }
 
   async process(input, options = {}, onProgress) {
+    try {
+      return await this._process(input, options, onProgress);
+    } catch (error) {
+      logError('Video processing failed', error, {
+        mode: options.mode,
+        inputType: Buffer.isBuffer(input) ? 'buffer' : 'path',
+        inputPath: typeof input === 'string' ? input : undefined,
+        inputBytes: Buffer.isBuffer(input) ? input.length : undefined,
+        options: {
+          format: options.format,
+          fps: options.fps,
+          max_dimension: options.max_dimension,
+          video_codec: options.video_codec,
+          audio_codec: options.audio_codec,
+          hwaccel: options.hwaccel,
+        },
+      });
+      throw error;
+    }
+  }
+
+  async _process(input, options = {}, onProgress) {
     const { mode = 'extract_audio' } = options;
     const originalSize = Buffer.isBuffer(input) ? input.length : null;
 

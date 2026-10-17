@@ -5,7 +5,7 @@ import { jobStore } from '../../jobs/JobStore.js';
 import { assetCache } from '../../cache/AssetCache.js';
 import { MagicByteDetector } from '../../utils/MagicByteDetector.js';
 import ProgressReporter from '../../pipeline/ProgressReporter.js';
-import logger from '../../utils/logger.js';
+import { logError } from '../../utils/logger.js';
 import config from '../../config/config.js';
 
 // Track upload state per WebSocket connection
@@ -148,7 +148,13 @@ function handleUploadStart(conn, payload) {
 
     conn.send({ type: 'upload_accepted', uploadId, maxSize: maxBytes });
   } catch (err) {
-    logger.error('WebSocket upload start failed', { error: err.message });
+    logError('WebSocket upload start failed', err, {
+      connectionId: conn.id,
+      uploadId,
+      filename,
+      size,
+      tempPath,
+    });
     conn.send({ type: 'error', message: 'Failed to start upload' });
   }
 }
@@ -218,7 +224,13 @@ function handleUploadComplete(conn, payload) {
         expiresAt: new Date(upload.expiresAt).toISOString(),
       });
     } catch (err) {
-      logger.error('WebSocket upload completion failed', { error: err.message });
+      logError('WebSocket upload completion failed', err, {
+        connectionId: conn.id,
+        uploadId,
+        tempPath: state.tempPath,
+        received: state.received,
+        declaredSize: state.size,
+      });
       try { fs.unlinkSync(state.tempPath); } catch {}
       conn.send({ type: 'error', message: 'Failed to finalize upload' });
     }
@@ -262,11 +274,11 @@ async function handleDownloadRequest(conn, payload) {
       assetCache.markRetrieved(assetId);
     });
     stream.on('error', (err) => {
-      logger.error('WebSocket download stream error', { error: err.message });
+      logError('WebSocket download stream error', err, { connectionId: conn.id, assetId });
       conn.send({ type: 'error', message: 'Download stream failed' });
     });
   } catch (err) {
-    logger.error('WebSocket download failed', { error: err.message });
+    logError('WebSocket download failed', err, { connectionId: conn.id, assetId });
     conn.send({ type: 'error', message: 'Failed to stream asset' });
   }
 }

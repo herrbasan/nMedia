@@ -36,6 +36,7 @@ All configuration is managed via `config.json` in the project root. Copy `config
 Required fields:
 - `server.port`
 - `logging.logsDir`
+- `logging.level` (debug, info, warn, error)
 - `media.gpu.platform`
 
 ## Logging
@@ -44,25 +45,34 @@ Logs are stored in `/logs` (configurable via `config.json`). nLogger creates:
 - **Session logs**: `{timestamp}-{sessionPrefix}-{randomId}.log` - detailed logs for each session
 - **Main logs**: `main-{n}.log` - rolling logs combining all sessions (JSON Lines format)
 
-**Primary location for recent logs:** `/logs`
+**Primary location for recent logs:** `/logs` (project root)
+
+`logging.logsDir` and `cache.dir` are resolved against the project root, not the process
+working directory. Logs written before 2026-10-17 by a service started from `src/` are in
+`src/logs/`.
+
+`logging.level` is the minimum level written (errors always pass). Levels are applied via
+nLogger's `setLevel()` at startup.
+
+Use `logError(message, error, meta)` from `src/utils/logger.js` for every failure.
+nLogger's `error()` signature is `(message, error, meta, type)`; passing a meta object as
+the second argument drops the metadata and the stack. Full convention:
+`documentation/ARCHITECTURE.md` → Logging.
 
 ## Testing
 
-Test assets are located in `/tests/assets/`:
-
-| Directory | Contents |
-|-----------|----------|
-| `tests/assets/images/` | PNG, JPG, HEIC, CR2 (Canon RAW), ORF (Olympus RAW), GIF |
-| `tests/assets/audio/` | MP3, M4A, WAV, FLAC, OGG |
-| `tests/assets/videos/` | MP4, MOV |
+`npm test` runs the suite with Node's built-in test runner
+(`node --test "tests/**/*.test.js"`). No third-party runner is involved.
 
 ### Test Files
 | File | Purpose |
 |------|---------|
-| `tests/index.js` | Unit test runner (processors) |
-| `tests/ws-integration-test.js` | WebSocket end-to-end test (spawns service, tests WS upload/process/download) |
-| `tests/e2e.test.js` | HTTP E2E tests (unified transport flow) |
-| `tests/manual-readme-test.js` | Manual nVideo transcoding test |
+| `tests/logger.test.js` | Log-level filtering, unknown-level rejection, `logError` stack/metadata retention |
+
+The processor and end-to-end suites referenced by `package.json`'s `test:e2e*` scripts
+(`tests/ws-integration-test.js`, `tests/e2e.test.js`, `tests/manual-readme-test.js`) and
+the media fixtures in `tests/assets/` are **not present in the repository**. They must be
+restored before those scripts can run.
 
 ## Core Development Maxims
 - **Priorities:** Reliability > Performance > Everything else.
@@ -248,6 +258,64 @@ Configured via `workers.mode` in `config.json`:
 | 5XX | Processing error | Circuit breaker trips, bypass MPS |
 
 ## Recent Fixes & Notes
+
+### SVG renderer: idle-relaunch hang and stale-document capture (2026-10-17)
+The 30s `CDP Runtime.evaluate did not respond` failures were the first render after the
+renderer's 60s idle shutdown: the freshly created target can lose its session, and an
+in-flight command then never receives a response. `_capture()` now rebuilds the browser
+once after any non-session render failure and retries (`_teardown({ force: true })` skips
+the graceful close a wedged renderer cannot answer). Timeouts were tightened: the paint
+probe is bounded in-page (fonts/rAF backed by timers) at 8s, and the CDP command timeout
+is no longer 30s.
+
+Two further defects were found while testing:
+- `Page.setDocumentContent` returns before the new document is active, so a fast render
+  could capture the **previous** SVG. Each document now carries a per-render marker and
+  `_waitForDocument()` confirms activation (Node-driven polling, no page timers) before
+  anything is captured.
+- The `DevToolsActivePort` readiness poll read the file as soon as it existed; Windows can
+  hold it locked mid-write, and the uncaught `EBUSY` crashed the process. Reads are now
+  retried until the deadline.
+
+Non-SVG input is rejected in ~300ms with `The rendered document contains no <svg>
+element` instead of hanging or silently capturing a blank/stale document. Malformed XML
+is rejected as well: the original bytes are re-parsed with `DOMParser` as
+`image/svg+xml`, so a document the HTML parser would silently repair now fails with
+`Invalid SVG: <parser error>` instead of producing a partial render (the behaviour
+reported in issue #5).
+
+### nLogger update and log paths (2026-10-17)
+`modules/nLogger` was pinned 7 commits behind upstream. It is now on `main` @ `8decffa`,
+which brings the level system, the `unref()`ed flush timer and the silent-log-loss /
+JSONL fixes. `logging.level` is therefore enforced again: `src/utils/logger.js` calls
+`logger.setLevel(config.logLevel)`, and the value is required and validated at startup.
+
+`logging.logsDir` and `cache.dir` now resolve against the project root instead of
+`process.cwd()`. Starting the service from `src/` (the previous deployment) and from the
+repository root both write to `<project>/logs` and `<project>/cache`; historical logs from
+the old behaviour remain in `src/logs/`.
+
+`npm test` was broken (`tests/index.js` imported a `runner.js` that does not exist). It
+now runs `node --test "tests/**/*.test.js"`; `tests/logger.test.js` covers level filtering
+and the `logError` stack/metadata behaviour.
+
+### Logging Pass (2026-10-17)
+Every `logger.error(message, metaObject)` call was passing metadata into nLogger's
+`error` slot, so the error object — message, stack and all context — was discarded. The
+logs showed bare `{}` for processor failures and the CDP timeout only appeared one layer
+up. All 44 call sites now use `logError(message, error, meta)` from `src/utils/logger.js`,
+which also preserves the full stack (nLogger truncates metadata strings to 200 chars).
+Added: one HTTP completion log per request with status, duration and `requestId`; request
+ids in handler/processor errors; child-process stderr capture and stack propagation from
+task workers; fatal `uncaughtException` / `unhandledRejection` logging; WARN for 4xx
+(instead of ERROR); logging for previously swallowed read/parse/probe failures; and
+`logger.close()` on shutdown so buffered lines are flushed. Details:
+`documentation/ARCHITECTURE.md` → Logging.
+
+The pass also fixed `/health`, which had been reporting `degraded` on any deployment
+without `tests/assets`: it probed `tests/assets/audio/Vangengel.wav` instead of asking
+nVideo whether it was loaded. The probe failure was one of the silently swallowed
+catches; the health check now calls `nVideo.getBuildInfo()`.
 
 ### SVG Rendering Replaced (issues #3 and #4)
 SVG now rasterizes through a persistent headless Chrome/Edge in nImage (`modules/nImage/lib/svg-renderer.js`) instead of ImageMagick. Root cause found: this build of ImageMagick has **no SVG support at all** — no librsvg compiled in, and its `svg` delegate points at an `rsvg-convert` binary that was never shipped, so every SVG silently fell through to a primitive internal renderer (`CSS parsing error`, `Invalid UTF-8 string passed to pango_layout_set_text()`, alpha flattened to opaque white). One defect was behind issues #2, #3 and #4.

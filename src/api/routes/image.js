@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import config from '../../config/config.js';
 import PipelineExecutor from '../../pipeline/PipelineExecutor.js';
 import ProgressReporter from '../../pipeline/ProgressReporter.js';
-import logger from '../../utils/logger.js';
+import { logError } from '../../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,7 +50,7 @@ export async function handleImage(ctx) {
     const jobId = null;
 
     // Execute processing
-    const result = await PipelineExecutor.execute('image', inputBuffer, options, ProgressReporter, jobId);
+    const result = await PipelineExecutor.execute('image', inputBuffer, options, ProgressReporter, jobId, ctx.requestId);
 
     // Send final response based on response_type
     if (responseType === 'base64') {
@@ -69,7 +69,16 @@ export async function handleImage(ctx) {
       ctx.send(200, result.buffer, result.metadata.mimeType, `processed.${result.metadata.format}`);
     }
   } catch (error) {
-    logger.error('Image processing failed', { error: error.message });
+    logError('Image processing failed', error, {
+      requestId: ctx.requestId,
+      inputBytes: ctx.file?.size ?? ctx.body?.base64?.length,
+      options: {
+        max_dimension: ctx.body?.max_dimension,
+        quality: ctx.body?.quality,
+        format: ctx.body?.format,
+        response_type: ctx.body?.response_type,
+      },
+    });
     ctx.error(500, error.message);
   }
 }
@@ -106,7 +115,7 @@ export async function handleImageCrop(ctx) {
       crop,
     };
 
-    const result = await PipelineExecutor.execute('image', inputBuffer, options, ProgressReporter);
+    const result = await PipelineExecutor.execute('image', inputBuffer, options, ProgressReporter, null, ctx.requestId);
 
     // Attach base64 data to each crop so clients can actually use the cropped images
     const buffers = [result.buffer, ...(result.extraBuffers || [])];
@@ -121,7 +130,7 @@ export async function handleImageCrop(ctx) {
       crops: cropsWithBase64,
     });
   } catch (error) {
-    logger.error('Image crop failed', { error: error.message });
+    logError('Image crop failed', error, { requestId: ctx.requestId, crop: ctx.body?.crop });
     ctx.error(500, error.message);
   }
 }
@@ -147,18 +156,22 @@ export async function handleHealth(ctx) {
     await import(nImageUrl);
     health.processors.image = 'ready';
   } catch (e) {
+    logError('Health check: nImage unavailable', e, { processor: 'image' });
     health.processors.image = 'error';
   }
 
-  // Check nVideo
+  // Check nVideo. Probing a media file here used to make the result depend on
+  // tests/assets being deployed; calling into the native module is the actual
+  // readiness question.
   try {
     const nVideoPath = path.join(__dirname, '../../../modules/nVideo/lib/index.js');
     const nVideoUrl = pathToFileURL(nVideoPath).href;
     const nVideo = (await import(nVideoUrl)).default;
-    nVideo.probe(path.join(__dirname, '../../../tests/assets/audio/Vangengel.wav'));
+    nVideo.getBuildInfo();
     health.processors.audio = 'ready';
     health.processors.video = 'ready';
   } catch (e) {
+    logError('Health check: nVideo unavailable', e, { processors: ['audio', 'video'] });
     health.processors.audio = 'error';
     health.processors.video = 'error';
   }

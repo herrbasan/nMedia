@@ -793,10 +793,11 @@ All configuration is managed via `config.json` in the project root. Copy `config
 | Field | Description |
 |-------|-------------|
 | `server.port` | HTTP server port |
-| `logging.logsDir` | Log directory path |
+| `logging.logsDir` | Log directory path (relative paths resolve against the project root) |
+| `logging.level` | Log level: `debug`, `info`, `warn`, or `error` |
 | `media.gpu.platform` | GPU platform: nvenc, vaapi, qsv, cpu |
 | `media.maxFileSizeMb` | Maximum upload size (MB) |
-| `cache.dir` | Asset cache directory |
+| `cache.dir` | Asset cache directory (relative paths resolve against the project root) |
 | `cache.ttl` | Asset cache TTL (seconds) |
 | `cache.maxSize` | Max cache size (bytes) |
 | `workers.mode` | Worker execution mode: `queue`, `thread`, or `process` |
@@ -813,7 +814,6 @@ All configuration is managed via `config.json` in the project root. Copy `config
 | `media.gpu.device` | 0 | GPU device index |
 | `media.gpu.maxConcurrentSessions` | 4 | Max concurrent GPU sessions |
 | `media.allowUncPaths` | false | Allow UNC network paths |
-| `logging.level` | info | Log level: info, warn, error, debug |
 | `logging.sessionPrefix` | ms | Session log filename prefix |
 | `logging.retentionDays` | 7 | Log retention period |
 | `messaging.transport` | sse | Default messaging transport |

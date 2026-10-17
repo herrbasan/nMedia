@@ -3,7 +3,7 @@ import { jobStore, JobStatus } from '../../jobs/JobStore.js';
 import { taskManager } from '../../tasks/TaskManager.js';
 import { Task } from '../../tasks/Task.js';
 import ProgressReporter from '../../pipeline/ProgressReporter.js';
-import logger from '../../utils/logger.js';
+import logger, { logError } from '../../utils/logger.js';
 import config from '../../config/config.js';
 
 const VALID_PROCESSORS = ['image', 'audio', 'video'];
@@ -54,7 +54,13 @@ export async function handleProcess(ctx) {
     // Pattern B: Upload-to-cache processing
     return await _handleUploadBased(ctx, fileId, processor, mode, options, output_path);
   } catch (error) {
-    logger.error('Process request failed', { error: error.message });
+    logError('Process request failed', error, {
+      requestId: ctx.requestId,
+      processor: ctx.body?.processor,
+      mode: ctx.body?.mode,
+      fileId: ctx.body?.fileId,
+      inputPath: ctx.body?.input_path,
+    });
     ctx.error(500, error.message);
   }
 }

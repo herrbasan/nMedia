@@ -96,7 +96,13 @@ class TaskManager {
       await worker.process(task);
     } else {
       // This shouldn't happen if queue is working correctly
-      logger.error('No available worker', { taskId: task.id });
+      logger.error('No available worker', null, {
+        taskId: task.id,
+        type: task.type,
+        workers: this.workers.length,
+        activeWorkers: this.workers.filter((w) => w.activeTask).length,
+        queueRunning: this.queue.getRunningCount(),
+      });
       throw new Error('No available worker');
     }
   }

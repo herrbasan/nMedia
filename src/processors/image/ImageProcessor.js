@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import Processor from '../../pipeline/Processor.js';
-import logger from '../../utils/logger.js';
+import logger, { logError } from '../../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -184,6 +184,27 @@ class ImageProcessor extends Processor {
   }
 
   async process(input, options = {}, onProgress) {
+    try {
+      return await this._process(input, options, onProgress);
+    } catch (error) {
+      logError('Image processing failed', error, {
+        inputType: Buffer.isBuffer(input) ? 'buffer' : 'path',
+        inputBytes: Buffer.isBuffer(input) ? input.length : null,
+        options: {
+          max_dimension: options.max_dimension,
+          quality: options.quality,
+          format: options.format,
+          crop: options.crop?.type,
+          rotate: options.rotate,
+          grayscale: options.grayscale,
+          blur: options.blur,
+        },
+      });
+      throw error;
+    }
+  }
+
+  async _process(input, options = {}, onProgress) {
     const {
       max_dimension = 1024,
       quality = 85,

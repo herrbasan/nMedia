@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from '../utils/uuid.js';
-import logger from '../utils/logger.js';
+import logger, { logError } from '../utils/logger.js';
 import config from '../config/config.js';
 
 /**
@@ -118,7 +118,7 @@ export class JobStore {
         }, 'System', { console: true });
       }
     } catch (err) {
-      logger.warn('Failed to load persisted jobs', { error: err.message });
+      logError('Failed to load persisted jobs', err, { path: this.persistPath });
     }
   }
 
@@ -256,7 +256,9 @@ export class JobStore {
             fs.unlinkSync(filePath);
             removed++;
           }
-        } catch {}
+        } catch (err) {
+          logger.warn('JobStore: failed to remove orphan job file', { file, error: err.message });
+        }
       }
     } catch (err) {
       logger.warn('Failed to clean orphan job files', { error: err.message });
@@ -288,7 +290,9 @@ export class JobStore {
               fs.unlinkSync(filePath);
               removed++;
             }
-          } catch {}
+          } catch (err) {
+            logger.warn('JobStore: failed to remove orphan upload file', { file, error: err.message });
+          }
         }
       }
     } catch (err) {
@@ -307,7 +311,11 @@ export class JobStore {
       };
       fs.writeFileSync(this.persistPath, JSON.stringify(data, null, 2));
     } catch (err) {
-      logger.warn('Failed to persist jobs', { error: err.message });
+      logError('Failed to persist jobs', err, {
+        path: this.persistPath,
+        uploads: this.uploads.size,
+        jobs: this.jobs.size,
+      });
     }
   }
 
@@ -319,7 +327,7 @@ export class JobStore {
         logger.info('JobStore: deleted upload file', { fileId: upload.fileId, path: upload.tempPath, size: stat.size });
       }
     } catch (err) {
-      logger.warn('Failed to delete upload file', { fileId: upload.fileId, path: upload.tempPath, error: err.message });
+      logError('Failed to delete upload file', err, { fileId: upload.fileId, path: upload.tempPath });
     }
   }
 

@@ -1,6 +1,6 @@
 import { jobStore, JobStatus } from '../../jobs/JobStore.js';
 import ProgressReporter from '../../pipeline/ProgressReporter.js';
-import logger from '../../utils/logger.js';
+import { logError } from '../../utils/logger.js';
 
 /**
  * GET /v1/jobs/:jobId/progress
@@ -65,7 +65,7 @@ export async function handleJobProgress(ctx) {
     // Link the SSE connection to the job for progress forwarding
     ProgressReporter.linkJob(sseJobId, jobId);
   } catch (error) {
-    logger.error('Job progress SSE failed', { error: error.message });
+    logError('Job progress SSE failed', error, { requestId: ctx.requestId, jobId: ctx.params.jobId });
     ctx.error(500, error.message);
   }
 }
@@ -106,7 +106,7 @@ export async function handleGetJob(ctx) {
 
     ctx.json(200, response);
   } catch (error) {
-    logger.error('Get job failed', { error: error.message });
+    logError('Get job failed', error, { requestId: ctx.requestId, jobId: ctx.params.jobId });
     ctx.error(500, error.message);
   }
 }
@@ -145,7 +145,7 @@ export async function handleCancelJob(ctx) {
       message: 'Job cancelled successfully',
     });
   } catch (error) {
-    logger.error('Cancel job failed', { error: error.message });
+    logError('Cancel job failed', error, { requestId: ctx.requestId, jobId: ctx.params.jobId });
     ctx.error(500, error.message);
   }
 }
@@ -189,7 +189,7 @@ export async function handleListActiveJobs(ctx) {
       stats: jobStore.getStats(),
     });
   } catch (error) {
-    logger.error('List active jobs failed', { error: error.message });
+    logError('List active jobs failed', error, { requestId: ctx.requestId, query: ctx.query });
     ctx.error(500, error.message);
   }
 }
@@ -236,7 +236,7 @@ export async function handleListJobs(ctx) {
       stats: jobStore.getStats(),
     });
   } catch (error) {
-    logger.error('List jobs failed', { error: error.message });
+    logError('List jobs failed', error, { requestId: ctx.requestId, query: ctx.query });
     ctx.error(500, error.message);
   }
 }

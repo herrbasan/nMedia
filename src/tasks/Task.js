@@ -69,6 +69,7 @@ export class Task {
     this.status = TaskStatus.COMPLETED;
     this.completedAt = Date.now();
     this.result = result;
+    this.assetId = assetId;
     logger.info('Task marking complete', { taskId: this.id, assetId, duration: this.getDuration() });
     this.progressReporter?.complete(this.id, { metadata: result.metadata, assetId });
   }
@@ -83,14 +84,14 @@ export class Task {
 
   /**
    * Mark task as failed
-   * @param {string} error - Error message
+   * @param {Error|string} error - Error object or message
    */
   fail(error) {
+    const message = error instanceof Error ? error.message : String(error);
     this.status = TaskStatus.FAILED;
     this.completedAt = Date.now();
-    this.error = error;
-    logger.info('Task failed', { taskId: this.id, error, duration: this.getDuration() });
-    this.progressReporter?.error(this.id, error);
+    this.error = message;
+    this.progressReporter?.error(this.id, message);
   }
 
   /**

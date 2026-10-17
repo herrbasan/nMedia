@@ -1,5 +1,5 @@
 import { assetCache } from '../../cache/AssetCache.js';
-import logger from '../../utils/logger.js';
+import { logError } from '../../utils/logger.js';
 
 /**
  * GET /v1/assets/:id
@@ -47,7 +47,7 @@ export async function handleGetAsset(ctx) {
     assetCache.markRetrieved(id);
     ctx.send(200, buffer, asset.mimeType, filename);
   } catch (error) {
-    logger.error('Get asset failed', { error: error.message });
+    logError('Get asset failed', error, { requestId: ctx.requestId, assetId: ctx.params.id });
     ctx.error(500, error.message);
   }
 }
@@ -83,7 +83,7 @@ export async function handleGetAssetMetadata(ctx) {
       metadata: asset.metadata,
     });
   } catch (error) {
-    logger.error('Get asset metadata failed', { error: error.message });
+    logError('Get asset metadata failed', error, { requestId: ctx.requestId, assetId: ctx.params.id });
     ctx.error(500, error.message);
   }
 }
@@ -113,7 +113,7 @@ export async function handleDeleteAsset(ctx) {
       message: 'Asset deleted successfully',
     });
   } catch (error) {
-    logger.error('Delete asset failed', { error: error.message });
+    logError('Delete asset failed', error, { requestId: ctx.requestId, assetId: ctx.params.id });
     ctx.error(500, error.message);
   }
 }
@@ -131,7 +131,7 @@ export async function handleClearAssets(ctx) {
       count: cleared,
     });
   } catch (error) {
-    logger.error('Clear assets failed', { error: error.message });
+    logError('Clear assets failed', error, { requestId: ctx.requestId });
     ctx.error(500, error.message);
   }
 }
@@ -171,7 +171,7 @@ export async function handleListAssets(ctx) {
       stats: assetCache.getStats(),
     });
   } catch (error) {
-    logger.error('List assets failed', { error: error.message });
+    logError('List assets failed', error, { requestId: ctx.requestId, query: ctx.query });
     ctx.error(500, error.message);
   }
 }

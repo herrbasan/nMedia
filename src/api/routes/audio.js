@@ -1,7 +1,7 @@
 import fs from 'fs';
 import PipelineExecutor from '../../pipeline/PipelineExecutor.js';
 import ProgressReporter from '../../pipeline/ProgressReporter.js';
-import logger from '../../utils/logger.js';
+import logger, { logError } from '../../utils/logger.js';
 import AudioProcessor from '../../processors/audio/AudioProcessor.js';
 
 /**
@@ -50,7 +50,11 @@ export async function handleAudioProbe(ctx) {
       metadata,
     });
   } catch (error) {
-    logger.error('Audio probe failed', { error: error.message });
+    logError('Audio probe failed', error, {
+      requestId: ctx.requestId,
+      inputBytes: ctx.file?.size ?? ctx.body?.base64?.length,
+      inputPath: ctx.body?.input_path,
+    });
     return ctx.json(500, { error: error.message });
   }
 }
@@ -96,7 +100,7 @@ export async function handleAudio(ctx) {
     const jobId = null;
 
     // Execute processing
-    const result = await PipelineExecutor.execute('audio', inputBuffer, options, ProgressReporter, jobId);
+    const result = await PipelineExecutor.execute('audio', inputBuffer, options, ProgressReporter, jobId, ctx.requestId);
 
     // Send final response based on response_type
     if (responseType === 'base64') {
@@ -118,7 +122,15 @@ export async function handleAudio(ctx) {
       return;
     }
   } catch (error) {
-    logger.error('Audio processing failed', { error: error.message });
+    logError('Audio processing failed', error, {
+      requestId: ctx.requestId,
+      inputBytes: ctx.file?.size ?? ctx.body?.base64?.length,
+      options: {
+        sample_rate: ctx.body?.sample_rate,
+        channels: ctx.body?.channels,
+        format: ctx.body?.format,
+      },
+    });
     return ctx.json(500, { error: error.message });
   }
 }

@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
 import config from '../../config/config.js';
-import logger from '../../utils/logger.js';
+import logger, { logError } from '../../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -77,8 +77,10 @@ function _detectMediaType(filePath) {
     const hasAudio = probe.streams.some(s => s.type === 'audio');
     if (hasVideo) return 'video';
     if (hasAudio) return 'audio';
-  } catch {
-    // nVideo probe failed, try nImage
+  } catch (err) {
+    // Expected for images and unknown files; kept at debug so a real probe
+    // failure is still visible with DEBUG enabled.
+    logger.debug('nVideo probe did not identify media type', { path: filePath, error: err.message });
   }
 
   // Try nImage as last resort
@@ -86,8 +88,8 @@ function _detectMediaType(filePath) {
     if (nImage.isLoaded) {
       return 'image';
     }
-  } catch {
-    // nImage not available
+  } catch (err) {
+    logger.debug('nImage availability check failed', { path: filePath, error: err.message });
   }
 
   return 'unknown';
@@ -125,7 +127,11 @@ export async function handleThumbnail(ctx) {
 
     ctx.send(200, thumbnailBuffer, mimeType, 'thumbnail.jpg');
   } catch (error) {
-    logger.error('Thumbnail failed', { error: error.message, path: ctx.params['*'] });
+    logError('Thumbnail failed', error, {
+      requestId: ctx.requestId,
+      path: ctx.params['*'],
+      width: ctx.query.width,
+    });
     if (error.message.includes('not found')) {
       ctx.error(404, error.message);
     } else if (error.message.includes('not in allowed')) {
@@ -183,6 +189,13 @@ async function _thumbnailAudio(inputPath, width) {
     child.on('close', async (code) => {
       // Exit code 0 = success, 1 = no video stream found (expected for audio without cover)
       if (data.length === 0) {
+        if (code !== 1) {
+          logger.warn('Cover art extraction produced no data', {
+            path: inputPath,
+            exitCode: code,
+            stderr: stderr.trim().slice(-500),
+          });
+        }
         resolve(null);
         return;
       }
@@ -195,13 +208,13 @@ async function _thumbnailAudio(inputPath, width) {
           .toBuffer();
         resolve(jpegBuffer);
       } catch (err) {
-        logger.error('Cover art resize failed', { error: err.message });
+        logError('Cover art resize failed', err, { path: inputPath, width, coverBytes: data.length });
         resolve(null);
       }
     });
 
     child.on('error', (err) => {
-      logger.error('Cover art extraction spawn failed', { error: err.message });
+      logError('Cover art extraction spawn failed', err, { path: inputPath, ffmpeg: ffmpegExe });
       resolve(null);
     });
   });
@@ -244,7 +257,10 @@ export async function handleInfo(ctx) {
       ...info,
     });
   } catch (error) {
-    logger.error('Info request failed', { error: error.message, path: ctx.params['*'] });
+    logError('Info request failed', error, {
+      requestId: ctx.requestId,
+      path: ctx.params['*'],
+    });
     if (error.message.includes('not found')) {
       ctx.error(404, error.message);
     } else if (error.message.includes('not in allowed')) {
@@ -392,12 +408,19 @@ async function _extractTags(inputPath) {
           raw: formatTags,
           coverArt: hasCoverArt,
         });
-      } catch {
+      } catch (err) {
+        logger.warn('Failed to parse ffprobe output', {
+          path: inputPath,
+          error: err.message,
+          stderr: stderr.trim().slice(-500),
+          stdoutBytes: data.length,
+        });
         resolve({ raw: {}, coverArt: false });
       }
     });
 
-    child.on('error', () => {
+    child.on('error', (err) => {
+      logger.warn('Failed to spawn ffprobe', { path: inputPath, ffprobe: ffprobePath, error: err.message });
       resolve({ raw: {}, coverArt: false });
     });
   });

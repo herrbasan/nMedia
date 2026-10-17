@@ -2,7 +2,7 @@ import { taskManager } from '../../tasks/TaskManager.js';
 import { TaskStatus } from '../../tasks/Task.js';
 import ProgressReporter from '../../pipeline/ProgressReporter.js';
 import { assetCache } from '../../cache/AssetCache.js';
-import logger from '../../utils/logger.js';
+import { logError } from '../../utils/logger.js';
 import config from '../../config/config.js';
 
 /**
@@ -57,7 +57,7 @@ export async function handleCreateTask(ctx) {
 
     // Submit to queue
     taskManager.submitTask(task).catch((err) => {
-      logger.error('Task submission error', { taskId: task.id, error: err.message });
+      logError('Task submission error', err, { taskId: task.id, type: task.type });
     });
 
     // Return task info immediately - processing happens async
@@ -70,7 +70,7 @@ export async function handleCreateTask(ctx) {
       progress_url: `/v1/tasks/${task.id}`,
     });
   } catch (error) {
-    logger.error('Task creation failed', { error: error.message });
+    logError('Task creation failed', error, { requestId: ctx.requestId, type: ctx.body?.type });
     ctx.error(500, error.message);
   }
 }
@@ -116,7 +116,7 @@ export async function handleListTasks(ctx) {
       stats: taskManager.getStats(),
     });
   } catch (error) {
-    logger.error('List tasks failed', { error: error.message });
+    logError('List tasks failed', error, { requestId: ctx.requestId, query: ctx.query });
     ctx.error(500, error.message);
   }
 }
@@ -143,7 +143,7 @@ export async function handleGetTask(ctx) {
 
     ctx.json(200, task.toJSON());
   } catch (error) {
-    logger.error('Get task failed', { error: error.message });
+    logError('Get task failed', error, { requestId: ctx.requestId, taskId: ctx.params.taskId });
     ctx.error(500, error.message);
   }
 }
@@ -200,7 +200,7 @@ export async function handleGetTaskResult(ctx) {
 
     ctx.send(200, buffer, mimeType, `result.${extension}`);
   } catch (error) {
-    logger.error('Get task result failed', { error: error.message });
+    logError('Get task result failed', error, { requestId: ctx.requestId, taskId: ctx.params.taskId });
     ctx.error(500, error.message);
   }
 }
@@ -243,7 +243,7 @@ export async function handleCancelTask(ctx) {
       message: 'Task cancelled successfully',
     });
   } catch (error) {
-    logger.error('Cancel task failed', { error: error.message });
+    logError('Cancel task failed', error, { requestId: ctx.requestId, taskId: ctx.params.taskId });
     ctx.error(500, error.message);
   }
 }
@@ -256,7 +256,7 @@ export async function handleTaskStats(ctx) {
   try {
     ctx.json(200, taskManager.getStats());
   } catch (error) {
-    logger.error('Get task stats failed', { error: error.message });
+    logError('Get task stats failed', error, { requestId: ctx.requestId });
     ctx.error(500, error.message);
   }
 }

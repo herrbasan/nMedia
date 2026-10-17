@@ -1,4 +1,4 @@
-import logger from '../utils/logger.js';
+import logger, { logError } from '../utils/logger.js';
 
 /**
  * FIFO task queue with concurrency control.
@@ -121,8 +121,13 @@ export class TaskQueue {
     // Call the processor if set (fire and forget, errors handled in processor)
     if (this.processor) {
       this.processor(task).catch((err) => {
-        logger.error('Processor error', { taskId: task.id, error: err.message });
-        task.fail(err.message);
+        logError('Processor error', err, {
+          taskId: task.id,
+          type: task.type,
+          running: this.running.size,
+          queueRemaining: this.queue.length,
+        });
+        task.fail(err);
       });
     }
   }

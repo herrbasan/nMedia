@@ -49,7 +49,10 @@ export class MultipartParser {
       const boundaryStr = `--${this.boundary}`;
       const firstBoundaryIdx = headerBuf.indexOf(boundaryStr);
       if (firstBoundaryIdx === -1) {
-        logger.error('No boundary found in multipart request');
+        logger.error('No boundary found in multipart request', null, {
+          boundary: this.boundary,
+          fileSize,
+        });
         return parts;
       }
       
@@ -160,7 +163,8 @@ export class MultipartParser {
     try {
       const bytesRead = fs.readSync(fd, buf, 0, length, offset);
       return bytesRead > 0 ? buf.slice(0, bytesRead) : null;
-    } catch {
+    } catch (err) {
+      logger.warn('Multipart read failed', { offset, length, error: err.message });
       return null;
     }
   }
@@ -189,7 +193,8 @@ export class MultipartParser {
         const keep = Math.min(combined.length, pattern.length - 1);
         carryBuf = combined.slice(combined.length - keep);
         pos += bytesRead;
-      } catch {
+      } catch (err) {
+        logger.warn('Multipart boundary scan failed', { pos, error: err.message });
         return -1;
       }
     }

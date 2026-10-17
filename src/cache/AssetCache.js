@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { createReadStream } from 'fs';
 import { v4 as uuidv4 } from '../utils/uuid.js';
-import logger from '../utils/logger.js';
+import logger, { logError } from '../utils/logger.js';
 import config from '../config/config.js';
 
 /**
@@ -49,12 +49,16 @@ export class AssetCache {
    */
   _loadPersisted() {
     let persisted = [];
+    let loadFailed = false;
     try {
       if (fs.existsSync(this.persistPath)) {
         persisted = JSON.parse(fs.readFileSync(this.persistPath, 'utf8'));
       }
     } catch (err) {
-      logger.warn('Failed to load persisted asset cache', { error: err.message });
+      // Without the metadata every file on disk looks like an orphan, so the
+      // orphan sweep below is skipped rather than deleting the whole cache.
+      loadFailed = true;
+      logError('Failed to load persisted asset cache', err, { path: this.persistPath });
     }
 
     const now = Date.now();
@@ -70,7 +74,9 @@ export class AssetCache {
       }
       if (now > entry.expiresAt) {
         logger.info('AssetCache: removing expired file', { id: entry.id, path: entry.storagePath, expiredAt: new Date(entry.expiresAt).toISOString() });
-        try { fs.unlinkSync(entry.storagePath); } catch {}
+        try { fs.unlinkSync(entry.storagePath); } catch (err) {
+          logger.warn('AssetCache: failed to remove expired file', { id: entry.id, path: entry.storagePath, error: err.message });
+        }
         removed++;
         continue;
       }
@@ -84,24 +90,30 @@ export class AssetCache {
     }
 
     // Remove orphaned files on disk that are not in metadata
-    try {
-      const diskFiles = fs.readdirSync(this.cacheDir);
-      for (const file of diskFiles) {
-        if (file === 'assets.json') continue;
-        if (!knownFiles.has(file)) {
-          const filePath = path.join(this.cacheDir, file);
-          try {
-            const stat = fs.statSync(filePath);
-            if (stat.isFile()) {
-              logger.info('AssetCache: removing orphan file', { file, size: stat.size });
-              fs.unlinkSync(filePath);
-              removed++;
+    if (loadFailed) {
+      logger.warn('AssetCache: skipping orphan sweep because metadata could not be loaded');
+    } else {
+      try {
+        const diskFiles = fs.readdirSync(this.cacheDir);
+        for (const file of diskFiles) {
+          if (file === 'assets.json') continue;
+          if (!knownFiles.has(file)) {
+            const filePath = path.join(this.cacheDir, file);
+            try {
+              const stat = fs.statSync(filePath);
+              if (stat.isFile()) {
+                logger.info('AssetCache: removing orphan file', { file, size: stat.size });
+                fs.unlinkSync(filePath);
+                removed++;
+              }
+            } catch (err) {
+              logger.warn('AssetCache: failed to remove orphan file', { file, error: err.message });
             }
-          } catch {}
+          }
         }
+      } catch (err) {
+        logger.warn('Failed to scan cache directory for orphans', { error: err.message });
       }
-    } catch (err) {
-      logger.warn('Failed to scan cache directory for orphans', { error: err.message });
     }
 
     // Recalculate currentSize to be accurate
@@ -129,7 +141,11 @@ export class AssetCache {
       const data = Array.from(this.assets.values());
       fs.writeFileSync(this.persistPath, JSON.stringify(data, null, 2));
     } catch (err) {
-      logger.warn('Failed to persist asset cache', { error: err.message });
+      logError('Failed to persist asset cache', err, {
+        path: this.persistPath,
+        assets: this.assets.size,
+        currentSize: this.currentSize,
+      });
     }
   }
 

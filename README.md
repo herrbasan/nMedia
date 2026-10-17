@@ -164,9 +164,9 @@ All configuration is managed via `config.json` in the project root. Copy `config
 | `media.gpu.platform` | Yes | GPU platform: `nvenc`, `vaapi`, `qsv`, `cpu` |
 | `media.gpu.device` | No | GPU device index (default: 0) |
 | `media.allowedInputPaths` | No | Allowed directories for path-based processing |
-| `logging.level` | No | Log level: error, warn, info, debug |
-| `logging.logsDir` | Yes | Directory for log files |
-| `cache.dir` | No | Cache directory |
+| `logging.level` | Yes | Log level: `debug`, `info`, `warn`, `error` |
+| `logging.logsDir` | Yes | Directory for log files (relative paths resolve against the project root) |
+| `cache.dir` | No | Cache directory (relative paths resolve against the project root) |
 | `cache.ttl` | No | Asset TTL in seconds |
 | `cache.maxSize` | No | Max cache size in bytes (e.g. 10737418240 = 10GB) |
 | `workers.maxConcurrentTasks` | No | Max parallel tasks |

@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from '../../utils/uuid.js';
 import config from '../../config/config.js';
 import PipelineExecutor from '../../pipeline/PipelineExecutor.js';
 import ProgressReporter from '../../pipeline/ProgressReporter.js';
-import logger from '../../utils/logger.js';
+import logger, { logError } from '../../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -43,13 +43,18 @@ export async function handleVideo(ctx) {
 
     // File-to-file workflow: input_path + output_path provided
     if (ctx.body.input_path && ctx.body.output_path) {
-      return handleVideoFileToFile(ctx, options);
+      return await handleVideoFileToFile(ctx, options);
     }
 
     // Upload workflow: file upload or base64
-    return handleVideoUpload(ctx, options);
+    return await handleVideoUpload(ctx, options);
   } catch (error) {
-    logger.error('Video processing failed', { error: error.message });
+    logError('Video processing failed', error, {
+      requestId: ctx.requestId,
+      inputPath: ctx.body?.input_path,
+      outputPath: ctx.body?.output_path,
+      mode: ctx.body?.mode,
+    });
     ctx.error(500, error.message);
   }
 }
@@ -85,7 +90,7 @@ async function handleVideoFileToFile(ctx, options) {
     output_path: outputPath,
   };
 
-  const result = await PipelineExecutor.execute('video', null, processorOptions, ProgressReporter, jobId);
+  const result = await PipelineExecutor.execute('video', null, processorOptions, ProgressReporter, jobId, ctx.requestId);
 
   const response = {
     success: true,
@@ -171,7 +176,7 @@ async function handleVideoUpload(ctx, options) {
       output_path: outputPath,
     };
 
-    const result = await PipelineExecutor.execute('video', null, processorOptions, ProgressReporter, null);
+    const result = await PipelineExecutor.execute('video', null, processorOptions, ProgressReporter, null, ctx.requestId);
 
     ctx.send(200, fs.readFileSync(result.outputPath), result.metadata.mimeType, `processed.${outputExt}`);
 
@@ -192,7 +197,7 @@ async function handleVideoUpload(ctx, options) {
   const jobId = null;
 
   // Execute processing
-  const result = await PipelineExecutor.execute('video', inputBuffer, options, ProgressReporter, jobId);
+  const result = await PipelineExecutor.execute('video', inputBuffer, options, ProgressReporter, jobId, ctx.requestId);
 
   // Cleanup temp file
   if (needsCleanup && inputPath) {
@@ -311,7 +316,10 @@ export async function handleVideoProbe(ctx) {
     });
   } catch (error) {
     const errStr = typeof error === 'string' ? error : (error?.message || JSON.stringify(error));
-    logger.error('Video probe failed', { error: errStr });
+    logError('Video probe failed', error instanceof Error ? error : new Error(errStr), {
+      requestId: ctx.requestId,
+      inputPath: ctx.body?.input_path,
+    });
     return ctx.json(500, { error: errStr });
   } finally {
     if (shouldCleanup && probePath) {

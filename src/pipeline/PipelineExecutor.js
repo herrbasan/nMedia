@@ -1,4 +1,4 @@
-import logger from '../utils/logger.js';
+import logger, { logError } from '../utils/logger.js';
 
 /**
  * Executes a chain of processors in sequence
@@ -34,15 +34,18 @@ class PipelineExecutor {
    * @param {Object} options - Processor options
    * @param {Object} progressReporter - ProgressReporter instance
    * @param {string} jobId - Job ID for progress
+   * @param {string} [requestId] - HTTP request ID for correlation
    * @returns {Promise<Object>} - { buffer, metadata }
    */
-  async execute(type, input, options, progressReporter, jobId) {
+  async execute(type, input, options, progressReporter, jobId, requestId = null) {
     const processor = this.processors.get(type);
     if (!processor) {
       throw new Error(`Unknown processor type: ${type}`);
     }
 
-    logger.info(`Executing ${type} processor`, { jobId, options });
+    const inputSize = Buffer.isBuffer(input) ? input.length : null;
+
+    logger.info(`Executing ${type} processor`, { jobId, requestId, inputSize, options });
 
     progressReporter.send(jobId, 'start', { processor: type });
 
@@ -59,7 +62,13 @@ class PipelineExecutor {
 
       return result;
     } catch (error) {
-      logger.error(`Processor error`, { jobId, error: error.message });
+      logError('Processor failed', error, {
+        processor: type,
+        jobId,
+        requestId,
+        inputSize,
+        options,
+      });
       progressReporter.error(jobId, error.message);
       throw error;
     }

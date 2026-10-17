@@ -482,6 +482,20 @@ messageEmitter.on('message', async (message) => {
     sendMessage({ type: 'progress', percent: 99, message: 'Finalizing result' });
     sendMessage({ type: 'complete', result });
   } catch (error) {
-    sendMessage({ type: 'error', message: error.message });
+    console.error(`[TaskWorker ${taskId}] ${error.stack || error.message}`);
+    sendMessage({ type: 'error', message: error.message, stack: error.stack });
   }
 });
+
+// A worker has no outer error handler: an uncaught throw would otherwise kill
+// the child with nothing but an exit code and no diagnostic in the logs.
+function reportFatal(error) {
+  const err = error instanceof Error ? error : new Error(String(error));
+  console.error(`[TaskWorker ${taskId}] fatal: ${err.stack || err.message}`);
+  sendMessage({ type: 'error', message: err.message, stack: err.stack, fatal: true });
+  // Inside a worker_thread process.exit() terminates only that thread.
+  setTimeout(() => process.exit(1), 50);
+}
+
+process.on('uncaughtException', reportFatal);
+process.on('unhandledRejection', reportFatal);
