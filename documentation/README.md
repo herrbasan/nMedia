@@ -685,7 +685,7 @@ WebSocket connection for progress tracking and binary transfer.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `max_dimension` | number | 1024 | Longest edge constraint (1-10000) |
+| `max_dimension` | number | 1024 | Longest edge constraint (1-10000). For SVG input this is the raster target: the intrinsic longest edge is scaled to it (up or down) unless `width`/`height`/`density` are set |
 | `quality` | number | 85 | Output quality 1-100 |
 | `format` | string | jpeg | Output format: jpeg, png, webp, avif, gif |
 | `strip_exif` | boolean | true | Strip EXIF metadata |
@@ -696,6 +696,12 @@ WebSocket connection for progress tracking and binary transfer.
 | `grayscale` | boolean | false | Convert to grayscale |
 | `normalize` | boolean | false | Normalize contrast |
 | `blur` | number | 0 | Blur sigma (0-20) |
+| `width` | number | - | SVG only: exact raster width in pixels (1-10000) |
+| `height` | number | - | SVG only: exact raster height in pixels (1-10000) |
+| `density` | number | 1 | SVG only: multiplier on intrinsic size (0 exclusive - 32) |
+| `colorScheme` | string | light | SVG only: `light` or `dark` (accepts `color_scheme`) |
+| `transparent` | boolean | true | SVG only: preserve alpha (false = opaque white canvas) |
+| `svg` | object | - | SVG raster options as an object; same keys as above, top-level wins on conflict |
 
 **Crop Options:**
 

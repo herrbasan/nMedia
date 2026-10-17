@@ -45,6 +45,32 @@ Format Detection (magic bytes, ~0.5µs)
 
 > **SVG requires Chrome or Edge installed on the host.** Nothing ships a browser. Missing → the job fails loudly, never silently degraded. Override the binary with `NIMAGE_CHROME_PATH`. ImageMagick cannot rasterize SVG at all in this build: no librsvg is compiled in and its `svg` delegate points at an `rsvg-convert` binary that is not shipped, so SVG used to fall through to a primitive internal renderer.
 
+### SVG Raster Sizing
+
+SVG is vector — Chrome renders it directly at the requested resolution. Raster size
+is fixed at render time, never resized afterwards:
+
+```json
+{
+  "density": 4,
+  "width": 1600,
+  "height": 800,
+  "colorScheme": "dark",
+  "transparent": false
+}
+```
+
+| Option | Effect |
+|--------|--------|
+| `width` / `height` | Exact raster size in pixels (1-10000) |
+| `density` | Multiplier on intrinsic size (viewBox, else width/height, else 1024) |
+| `colorScheme` | `light` (default) or `dark` — emulates `prefers-color-scheme` |
+| `transparent` | `true` (default) preserves alpha; `false` flattens onto opaque white |
+
+None of the three size options set → `max_dimension` becomes the raster target: the
+intrinsic longest edge is scaled to it proportionally (up or down). All options also
+nest under `svg: { ... }`; top-level keys win on conflict.
+
 ### Output Formats
 
 | Format | Quality Range | Notes |
