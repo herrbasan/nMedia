@@ -1,5 +1,5 @@
 import { assetCache } from '../../cache/AssetCache.js';
-import { logError } from '../../utils/logger.js';
+import logger, { logError } from '../../utils/logger.js';
 
 /**
  * GET /v1/assets/:id
