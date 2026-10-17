@@ -106,15 +106,17 @@ export class TaskQueue {
     // Resolve immediately so caller knows task has started
     resolve();
 
-    // Cleanup after task completes
+    // Cleanup after task completes. Idempotent: the queue also calls it when
+    // the processor rejects before a worker could settle the task.
     const cleanup = () => {
-      this.running.delete(task.id);
+      if (!this.running.delete(task.id)) return;
       this._processNext();
     };
 
-    // Store callbacks on task
-    task._onDone = cleanup;
-    task._onError = cleanup;
+    // The worker calls this from its finally block, after activeTask is cleared.
+    // Calling it earlier (from the completion path) let a dispatch look for an
+    // idle worker while the finishing worker was still marked busy.
+    task._onSettled = cleanup;
 
     logger.info('Task dequeued', { taskId: task.id, running: this.running.size, queueRemaining: this.queue.length });
 
@@ -128,6 +130,7 @@ export class TaskQueue {
           queueRemaining: this.queue.length,
         });
         task.fail(err);
+        cleanup();
       });
     }
   }

@@ -155,8 +155,6 @@ export class TaskWorker {
         task.complete(result);
       }
 
-      task._onDone?.(result);
-
       logger.info('Task completed', {
         taskId: task.id,
         type: task.type,
@@ -174,8 +172,6 @@ export class TaskWorker {
         });
       }
 
-      task._onError?.(error);
-
       logError('Task failed', error, {
         taskId: task.id,
         jobId,
@@ -186,6 +182,9 @@ export class TaskWorker {
         duration: task.getDuration(),
       });
     } finally {
+      // Clear the worker before the queue dispatches the next task: the
+      // dispatch looks for a worker with no activeTask, and this one is free
+      // as soon as its task has settled.
       this.activeTask = null;
       if (this.nativeWorker) {
         if (typeof this.nativeWorker.terminate === 'function') {
@@ -195,6 +194,7 @@ export class TaskWorker {
         }
         this.nativeWorker = null;
       }
+      task._onSettled?.();
     }
   }
 
