@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from '../../utils/uuid.js';
 import Processor from '../../pipeline/Processor.js';
 import config from '../../config/config.js';
 import logger, { logError } from '../../utils/logger.js';
+import { rejectUnknownAudioOptions } from '../validateOptions.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,6 +29,8 @@ class AudioProcessor extends Processor {
 
   validateOptions(options) {
     const { sample_rate, channels, format } = options;
+
+    rejectUnknownAudioOptions(options);
 
     if (sample_rate !== undefined && sample_rate !== 'source' && ![8000, 16000, 22050, 44100, 48000].includes(sample_rate)) {
       throw new Error('sample_rate must be 8000, 16000, 22050, 44100, 48000, or "source"');

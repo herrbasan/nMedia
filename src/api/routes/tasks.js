@@ -4,6 +4,7 @@ import ProgressReporter from '../../pipeline/ProgressReporter.js';
 import { assetCache } from '../../cache/AssetCache.js';
 import { logError } from '../../utils/logger.js';
 import config from '../../config/config.js';
+import PipelineExecutor from '../../pipeline/PipelineExecutor.js';
 
 /**
  * Validate task type
@@ -29,6 +30,14 @@ export async function handleCreateTask(ctx) {
 
     if (!input) {
       ctx.error(400, 'No input provided. Send base64 data or file upload.');
+      return;
+    }
+
+    // Unknown option keys fail here instead of being silently ignored (#8)
+    try {
+      PipelineExecutor.get(type).validateOptions(options || {});
+    } catch (error) {
+      ctx.error(400, error.message);
       return;
     }
 

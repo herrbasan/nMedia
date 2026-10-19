@@ -681,6 +681,8 @@ WebSocket connection for progress tracking and binary transfer.
 
 ## Processing Options
 
+Unknown option keys are rejected with **400** at request time (and at execute time for internally submitted tasks) — a typo fails loud instead of being silently ignored. Accepted keys per processor are listed below; keys prefixed with `_` are internal.
+
 ### Image Processing
 
 | Option | Type | Default | Description |
@@ -702,6 +704,7 @@ WebSocket connection for progress tracking and binary transfer.
 | `colorScheme` | string | light | SVG only: `light` or `dark` (accepts `color_scheme`) |
 | `transparent` | boolean | true | SVG only: preserve alpha (false = opaque white canvas) |
 | `svg` | object | - | SVG raster options as an object; same keys as above, top-level wins on conflict |
+| `background` | string | - | CSS colour to composite alpha onto, applied after all transforms (`'#181818'`, `'rgb(24,24,24)'`). `'transparent'` = explicit alpha-preserving no-op. Conflicts with `transparent: false`. Controls the canvas for alpha-less outputs (e.g. JPEG from transparent input) |
 
 **Crop Options:**
 

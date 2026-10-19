@@ -559,6 +559,38 @@ test('process validation: missing, duplicate and unknown inputs are rejected', a
   assert.equal(unknown.status, 400);
 });
 
+test('unknown option keys are rejected with 400, not silently ignored (#8)', async () => {
+  const png = await rawPng(10, 10, [0, 0, 0]);
+  const up = await upload(png, 'typo.png');
+  assert.equal(up.status, 200, up.text);
+
+  // The exact repro from the issue: forcedColorScheme was accepted with 200
+  // and did nothing.
+  const forced = await api('POST', '/v1/process', {
+    body: { fileId: up.json.fileId, processor: 'image', options: { forcedColorScheme: 'dark' } },
+  });
+  assert.equal(forced.status, 400);
+  assert.match(forced.json.error, /Unknown image option\(s\): forcedColorScheme/);
+
+  const svgShape = await api('POST', '/v1/process', {
+    body: { fileId: up.json.fileId, processor: 'image', options: { svg: { quaility: 90 } } },
+  });
+  assert.equal(svgShape.status, 400);
+  assert.match(svgShape.json.error, /Unknown svg option/);
+
+  const audioTypo = await api('POST', '/v1/process', {
+    body: { fileId: up.json.fileId, processor: 'audio', options: { sampleRate: 16000 } },
+  });
+  // Upload is an image, but option validation runs before the type check.
+  assert.equal(audioTypo.status, 400);
+  assert.match(audioTypo.json.error, /Unknown audio option/);
+
+  const modeMisuse = await api('POST', '/v1/process', {
+    body: { fileId: up.json.fileId, processor: 'image', mode: 'transcode' },
+  });
+  assert.equal(modeMisuse.status, 400);
+});
+
 test('upload of undetectable text is rejected with 415', async () => {
   const res = await upload(Buffer.from('hello world'), 'note.txt');
   assert.equal(res.status, 415);

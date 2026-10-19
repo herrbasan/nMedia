@@ -286,7 +286,7 @@ GET /v1/capabilities
       "svg": {
         "library": "headless-chrome",
         "formats": ["svg", "svgz"],
-        "features": ["cssCustomProperties", "mediaQueries", "rgba", "systemFonts", "alpha", "forcedColorScheme"],
+        "features": ["cssCustomProperties", "mediaQueries", "rgba", "systemFonts", "alpha", "colorScheme"],
         "note": "Requires Chrome or Edge on the host; override with NIMAGE_CHROME_PATH"
       },
       "magick": {

@@ -4,6 +4,7 @@ import zlib from 'zlib';
 import { fileURLToPath, pathToFileURL } from 'url';
 import Processor from '../../pipeline/Processor.js';
 import logger, { logError } from '../../utils/logger.js';
+import { rejectUnknownImageOptions, rejectUnknownSvgShapeKeys } from '../validateOptions.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -133,13 +134,39 @@ function svgMarkup(inputSource, kind) {
   return buffer.toString('utf8');
 }
 
+/**
+ * Parse the background option into sharp's {r,g,b,alpha} object. Hex and
+ * rgb()/rgba() only: sharp's own background parser silently falls back to
+ * black on strings it cannot read (e.g. 'rgb(24,24,24)'), and a silent
+ * default canvas is exactly the failure mode this service rejects (#8/#9).
+ */
+function parseBackground(value) {
+  const clamp = (n) => Math.max(0, Math.min(255, Math.round(n)));
+  let m = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(value);
+  if (m) {
+    const hex = m[1];
+    const short = hex.length === 3 || hex.length === 4;
+    const part = (i) => parseInt(short ? hex[i] + hex[i] : hex.substr(i * 2, 2), 16);
+    const alpha = (hex.length === 4 || hex.length === 8) ? part(3) / 255 : 1;
+    return { r: part(0), g: part(1), b: part(2), alpha };
+  }
+  m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/i.exec(value);
+  if (m) {
+    const alpha = m[4] !== undefined ? Math.max(0, Math.min(1, parseFloat(m[4]))) : 1;
+    return { r: clamp(+m[1]), g: clamp(+m[2]), b: clamp(+m[3]), alpha };
+  }
+  throw new Error(`background must be a hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba() colour, or "transparent" (got '${value}')`);
+}
+
 class ImageProcessor extends Processor {
   constructor() {
     super('image');
   }
 
   validateOptions(options) {
-    const { max_dimension, quality, format, crop, rotate, flip, flop, grayscale, normalize, blur, density, width, height, colorScheme, color_scheme, transparent, svg } = options;
+    const { max_dimension, quality, format, crop, rotate, flip, flop, grayscale, normalize, blur, density, width, height, colorScheme, color_scheme, transparent, background, svg } = options;
+
+    rejectUnknownImageOptions(options);
 
     if (max_dimension !== undefined && (max_dimension < 1 || max_dimension > 10000)) {
       throw new Error('max_dimension must be between 1 and 10000');
@@ -169,10 +196,26 @@ class ImageProcessor extends Processor {
 
     validateSvgShape({ density, width, height, colorScheme, color_scheme, transparent });
 
+    if (background !== undefined) {
+      if (typeof background !== 'string' || background.length === 0) {
+        throw new Error('background must be a non-empty CSS colour string or "transparent"');
+      }
+      // Parse at validation time so a bad colour is a 400, not a job failure.
+      if (background !== 'transparent') parseBackground(background);
+      // transparent:false bakes an opaque white canvas at render time;
+      // flatten over a fully opaque raster is a no-op, so the caller's
+      // background would silently not apply.
+      const opaqueCanvas = transparent === false || (svg !== undefined && svg.transparent === false);
+      if (background !== 'transparent' && opaqueCanvas) {
+        throw new Error('background and transparent:false conflict — background composites over alpha, transparent:false removes alpha at render');
+      }
+    }
+
     if (svg !== undefined) {
       if (typeof svg !== 'object' || svg === null || Array.isArray(svg)) {
         throw new Error('svg must be an object');
       }
+      rejectUnknownSvgShapeKeys(svg);
       validateSvgShape(svg);
     }
   }
@@ -204,7 +247,7 @@ class ImageProcessor extends Processor {
   /**
    * Process crop operations
    */
-  async processCrop(input, metadata, cropOptions, format, quality, onProgress, originalSize, nImageOptions = {}) {
+  async processCrop(input, metadata, cropOptions, format, quality, onProgress, originalSize, nImageOptions = {}, background = null) {
     const { type, left, top, right, bottom, width: widthPercent, height: heightPercent, cols: gridCols, rows: gridRows, cells: gridCells = [] } = cropOptions;
     const results = [];
 
@@ -264,7 +307,7 @@ class ImageProcessor extends Processor {
 
     onProgress?.(80, 'Encoding output');
     const encoded = await Promise.all(results.map(async (r) => {
-      const encodedBuffer = await this.encodeBuffer(r.buffer, format, quality);
+      const encodedBuffer = await this.encodeBuffer(r.buffer, format, quality, background);
       return {
         cell_index: r.index,
         buffer: encodedBuffer,
@@ -304,8 +347,11 @@ class ImageProcessor extends Processor {
   /**
    * Encode buffer to target format
    */
-  async encodeBuffer(buffer, format, quality) {
+  async encodeBuffer(buffer, format, quality, background = null) {
     const pipeline = nImage(buffer);
+    if (background && background !== 'transparent') {
+      pipeline.flatten({ background: parseBackground(background) });
+    }
     const avifQuality = Math.round(quality * 0.55);
     switch (format) {
       case 'jpeg':
@@ -349,6 +395,7 @@ class ImageProcessor extends Processor {
           height: options.height,
           colorScheme: options.colorScheme !== undefined ? options.colorScheme : options.color_scheme,
           transparent: options.transparent,
+          background: options.background,
         },
       });
       throw error;
@@ -368,6 +415,7 @@ class ImageProcessor extends Processor {
       grayscale = false,
       normalize = false,
       blur = 0,
+      background = null,
       _inputSource,
     } = options;
 
@@ -404,7 +452,7 @@ class ImageProcessor extends Processor {
       : `Detected: ${metadata.format || 'unknown'}, ${metadata.width}x${metadata.height}`);
 
     if (crop) {
-      return this.processCrop(inputSource, metadata, crop, format, quality, onProgress, originalSize, nImageOptions);
+      return this.processCrop(inputSource, metadata, crop, format, quality, onProgress, originalSize, nImageOptions, background);
     }
 
     // Apply transforms
@@ -456,6 +504,14 @@ class ImageProcessor extends Processor {
     if (blur > 0) {
       onProgress?.(48, `Applying blur (sigma: ${blur})`);
       pipeline.blur(blur);
+    }
+
+    // Composite alpha onto the requested canvas colour (#9). Applied after
+    // all transforms so the canvas keeps the exact colour asked for;
+    // 'transparent' is the explicit no-op that preserves alpha.
+    if (background && background !== 'transparent') {
+      onProgress?.(55, `Flattening onto ${background}`);
+      pipeline.flatten({ background: parseBackground(background) });
     }
 
     if (!strip_exif) {

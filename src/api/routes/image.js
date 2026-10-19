@@ -36,7 +36,6 @@ export async function handleImage(ctx) {
       quality: parseInt(ctx.body.quality) || 85,
       format: ctx.body.format || 'jpeg',
       strip_exif: ctx.body.strip_exif !== 'false',
-      response_type: ctx.body.response_type || 'base64',
     };
 
     const responseType = ctx.body.response_type || 'base64';

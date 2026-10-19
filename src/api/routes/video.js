@@ -7,6 +7,7 @@ import config from '../../config/config.js';
 import PipelineExecutor from '../../pipeline/PipelineExecutor.js';
 import ProgressReporter from '../../pipeline/ProgressReporter.js';
 import logger, { logError } from '../../utils/logger.js';
+import { pickContractKeys } from '../../processors/validateOptions.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -43,7 +44,10 @@ export async function handleVideo(ctx) {
 
     // File-to-file workflow: input_path + output_path provided
     if (ctx.body.input_path && ctx.body.output_path) {
-      return await handleVideoFileToFile(ctx, options);
+      // VideoProcessor resolves its own temp output; it never reads
+      // input_path/output_path from options (see issue: legacy file-to-file
+      // route is non-functional — this branch fails at _resolveInput(null)).
+      return await handleVideoFileToFile(ctx, pickContractKeys('video', options));
     }
 
     // Upload workflow: file upload or base64
@@ -83,14 +87,10 @@ async function handleVideoFileToFile(ctx, options) {
   // For file-to-file, open SSE for progress
   const jobId = ctx.createSseJob();
 
-  // Pass input_path and output_path in options - processor handles file-to-file directly
-  const processorOptions = {
-    ...options,
-    input_path: inputPath,
-    output_path: outputPath,
-  };
-
-  const result = await PipelineExecutor.execute('video', null, processorOptions, ProgressReporter, jobId, ctx.requestId);
+  // VideoProcessor accepts only contract options (validated at execute
+  // time); the null input makes this legacy branch fail in _resolveInput —
+  // the processor never read input_path/output_path from options.
+  const result = await PipelineExecutor.execute('video', null, options, ProgressReporter, jobId, ctx.requestId);
 
   const response = {
     success: true,
@@ -168,21 +168,16 @@ async function handleVideoUpload(ctx, options) {
   if (inputPath && responseType === 'file') {
     // No SSE - can't mix SSE headers with file streaming on same connection
     const outputExt = options.mode === 'transcode' ? (options.output_format || 'mp4') : (options.format || 'mp3');
-    const outputPath = path.join(config.cacheDir, `output-${uuidv4()}.${outputExt}`);
 
-    const processorOptions = {
-      ...options,
-      input_path: inputPath,
-      output_path: outputPath,
-    };
+    // Contract options only; the input path goes in as the input argument —
+    // the processor resolves it and writes its own output file (result.filePath).
+    const result = await PipelineExecutor.execute('video', inputPath, pickContractKeys('video', options), ProgressReporter, null, ctx.requestId);
 
-    const result = await PipelineExecutor.execute('video', null, processorOptions, ProgressReporter, null, ctx.requestId);
-
-    ctx.send(200, fs.readFileSync(result.outputPath), result.metadata.mimeType, `processed.${outputExt}`);
+    ctx.send(200, fs.readFileSync(result.filePath), result.metadata.mimeType, `processed.${outputExt}`);
 
     // Cleanup
     try { fs.unlinkSync(inputPath); } catch {}
-    try { fs.unlinkSync(result.outputPath); } catch {}
+    try { fs.unlinkSync(result.filePath); } catch {}
     return;
   }
 
@@ -197,7 +192,7 @@ async function handleVideoUpload(ctx, options) {
   const jobId = null;
 
   // Execute processing
-  const result = await PipelineExecutor.execute('video', inputBuffer, options, ProgressReporter, jobId, ctx.requestId);
+  const result = await PipelineExecutor.execute('video', inputBuffer, pickContractKeys('video', options), ProgressReporter, jobId, ctx.requestId);
 
   // Cleanup temp file
   if (needsCleanup && inputPath) {

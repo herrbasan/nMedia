@@ -5,6 +5,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { createRequire } from 'module';
 import ImageProcessor from '../processors/image/ImageProcessor.js';
+import { rejectUnknownAudioOptions, rejectUnknownVideoOptions } from '../processors/validateOptions.js';
 
 const isThreadWorker = !!parentPort;
 const isProcessWorker = !!process.send;
@@ -50,6 +51,7 @@ function validateImageOptions(options) {
 }
 
 function validateAudioOptions(options) {
+  rejectUnknownAudioOptions(options);
   const { sample_rate, channels, format } = options;
   if (sample_rate !== undefined && sample_rate !== 'source' && ![8000, 16000, 22050, 44100, 48000].includes(sample_rate)) {
     throw new Error('sample_rate must be 8000, 16000, 22050, 44100, 48000, or "source"');
@@ -63,6 +65,7 @@ function validateAudioOptions(options) {
 }
 
 function validateVideoOptions(options) {
+  rejectUnknownVideoOptions(options);
   const { mode, fps } = options;
   if (mode !== undefined && !['extract_audio', 'extract_keyframes', 'transcode', 'cli'].includes(mode)) {
     throw new Error('mode must be extract_audio, extract_keyframes, transcode, or cli');

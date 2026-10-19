@@ -149,6 +149,40 @@ test('transparent: false produces an opaque canvas', async () => {
   assert.deepEqual(transparent.at(200, 100), [255, 0, 0, 255]);
 });
 
+test('background composites transparent canvas onto the colour (#9)', async () => {
+  const px = await pixels(await renderPng(SVG_TRANSPARENT, { max_dimension: 400, background: '#00ff00' }));
+  // Flatten removes the alpha channel: the whole canvas is opaque.
+  assert.equal(px.channels, 3);
+  assert.deepEqual(px.at(5, 5), [0, 255, 0]);
+  assert.deepEqual(px.at(200, 100), [255, 0, 0]);
+});
+
+test("background 'transparent' is the explicit alpha-preserving no-op", async () => {
+  const px = await pixels(await renderPng(SVG_TRANSPARENT, { max_dimension: 400, background: 'transparent' }));
+  assert.equal(px.channels, 4);
+  assert.equal(px.at(5, 5)[3], 0);
+});
+
+test('background works with colorScheme dark for dark-canvas renders', async () => {
+  // SVG_SCHEMED covers the whole canvas, so the background can only show
+  // through the transparent canvas of SVG_TRANSPARENT.
+  const px = await pixels(await renderPng(SVG_TRANSPARENT, { max_dimension: 400, colorScheme: 'dark', background: 'rgb(24,24,24)' }));
+  assert.deepEqual(px.at(5, 5), [24, 24, 24]);
+  assert.deepEqual(px.at(200, 100), [255, 0, 0]);
+});
+
+test('background validation: non-string rejected, opaque-canvas conflict rejected', () => {
+  const processor = new ImageProcessor();
+  assert.throws(() => processor.validateOptions({ background: 24 }), /background must be a non-empty/);
+  assert.throws(() => processor.validateOptions({ background: '' }), /background must be a non-empty/);
+  assert.throws(() => processor.validateOptions({ background: 'red' }), /background must be a hex/);
+  assert.throws(() => processor.validateOptions({ background: '#181818', transparent: false }), /conflict/);
+  assert.throws(() => processor.validateOptions({ background: '#181818', svg: { transparent: false } }), /conflict/);
+  processor.validateOptions({ background: '#181818' });
+  processor.validateOptions({ background: 'rgb(24, 24, 24)' });
+  processor.validateOptions({ background: 'rgba(24,24,24,0.5)' });
+});
+
 test('SVG is rasterized exactly once per process call', async () => {
   const original = renderer.render.bind(renderer);
   let calls = 0;

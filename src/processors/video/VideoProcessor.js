@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from '../../utils/uuid.js';
 import Processor from '../../pipeline/Processor.js';
 import config from '../../config/config.js';
 import logger, { logError } from '../../utils/logger.js';
+import { rejectUnknownVideoOptions } from '../validateOptions.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,6 +47,9 @@ class VideoProcessor extends Processor {
 
   validateOptions(options) {
     const { mode, fps } = options;
+
+    rejectUnknownVideoOptions(options);
+
     if (mode !== undefined && !['extract_audio', 'extract_keyframes', 'transcode'].includes(mode)) {
       throw new Error('mode must be extract_audio, extract_keyframes, or transcode');
     }

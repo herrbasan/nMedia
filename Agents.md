@@ -68,7 +68,8 @@ the second argument drops the metadata and the stack. Full convention:
 | File | Purpose |
 |------|---------|
 | `tests/logger.test.js` | Log-level filtering, unknown-level rejection, `logError` stack/metadata retention |
-| `tests/svg-raster-options.test.js` | SVG raster option validation, sizing (`max_dimension`/`density`/`width`/`height`), colorScheme, transparency |
+| `tests/svg-raster-options.test.js` | SVG raster option validation, sizing (`max_dimension`/`density`/`width`/`height`), colorScheme, transparency, `background` flatten |
+| `tests/option-validation.test.js` | Unknown-option rejection per processor (the #8 contract), `pickContractKeys` |
 | `tests/task-queue.test.js` | Queue-slot release race regression (issue #1) |
 | `tests/processor-health.test.js` | Startup backend self-check |
 | `tests/e2e.test.js` | End-to-end suite: spawns the service itself on a free port with isolated temp cache/logs, then covers health/capabilities, the unified transport (upload → process → poll → download), SSE progress, path-based processing, SVG rasterization over HTTP, the WebSocket transport (binary upload, progress subscribe, binary download), and error cases |
@@ -170,6 +171,8 @@ This project uses git submodules located in `/modules`. These are all **our own 
 
 ### Key Processing Options
 
+Unknown option keys are **rejected with 400** (`src/processors/validateOptions.js` is the contract) — never silently ignored.
+
 **Images:**
 - `max_dimension`: Longest edge constraint (default 1024px)
 - `quality`: Output quality 1-100 (default 85)
@@ -181,13 +184,14 @@ This project uses git submodules located in `/modules`. These are all **our own 
 - `grayscale`: convert to grayscale
 - `normalize`: normalize contrast
 - `blur`: blur sigma 0-20
+- `background`: CSS colour composited over alpha after all transforms (`'#181818'`); `'transparent'` = explicit no-op. Controls the canvas for dark renders and alpha-less outputs (JPEG from transparent input). Conflicts with `transparent: false`
 
 **SVG input (`svg`, `svgz`):**
 - Rasterized by a persistent headless Chrome/Edge inside nImage, then processed like any other decoded image — resize, crop, format conversion and `strip_exif` all apply to the result
 - **Operational requirement: Chrome or Edge must be installed on the host.** Nothing ships a browser. Missing → the job fails loudly, never a silent fallback. Override the binary with `NIMAGE_CHROME_PATH`
 - Why a browser: librsvg (sharp's SVG backend) and resvg both silently drop CSS custom properties, and this ImageMagick build has no SVG support at all. Chrome is the only available renderer that resolves `var()`, `@media (prefers-color-scheme)`, `rgba()` in stylesheets and `system-ui` fonts
 - Alpha is preserved (`rgba(0,0,0,0)`); ImageMagick flattened it to opaque white
-- Colour scheme is **forced to light** (a raster has no OS theme), so output does not depend on the host's desktop theme
+- Colour scheme defaults to light (`colorScheme: 'dark'` emulates `prefers-color-scheme: dark`), so output does not depend on the host's desktop theme
 - Cost: ~490ms for the first render in a process, ~75-135ms thereafter. The browser is reused and shuts down after 60s idle. One browser per worker process
 - `NIMAGE_CHROME_PATH` selects the binary; `NIMAGE_SVG_DEBUG=1` traces DevTools round trips
 

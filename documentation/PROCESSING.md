@@ -66,6 +66,7 @@ is fixed at render time, never resized afterwards:
 | `density` | Multiplier on intrinsic size (viewBox, else width/height, else 1024) |
 | `colorScheme` | `light` (default) or `dark` — emulates `prefers-color-scheme` |
 | `transparent` | `true` (default) preserves alpha; `false` flattens onto opaque white |
+| `background` | Top-level image option (not SVG-specific): CSS colour composited over alpha after all transforms — a dark render gets a dark canvas instead of transparent/white. `'transparent'` = explicit no-op |
 
 None of the three size options set → `max_dimension` becomes the raster target: the
 intrinsic longest edge is scaled to it proportionally (up or down). All options also

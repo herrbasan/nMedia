@@ -6,6 +6,7 @@ import ProgressReporter from '../../pipeline/ProgressReporter.js';
 import logger, { logError } from '../../utils/logger.js';
 import config from '../../config/config.js';
 import { getProcessorHealth } from '../../processors/health.js';
+import PipelineExecutor from '../../pipeline/PipelineExecutor.js';
 
 const VALID_PROCESSORS = ['image', 'audio', 'video'];
 const VALID_VIDEO_MODES = ['extract_audio', 'extract_keyframes', 'transcode'];
@@ -45,6 +46,20 @@ export async function handleProcess(ctx) {
     }
     if (!health[processor].ok) {
       ctx.error(503, `${processor} processor unavailable: ${health[processor].reason}`);
+      return;
+    }
+
+    // Reject unknown option keys at the boundary instead of silently
+    // ignoring them inside a job (#8): a typo must fail loud, not return a
+    // default-processed asset that looks like success.
+    if (mode && processor !== 'video') {
+      ctx.error(400, 'mode is only valid for the video processor');
+      return;
+    }
+    try {
+      PipelineExecutor.get(processor).validateOptions(options);
+    } catch (error) {
+      ctx.error(400, error.message);
       return;
     }
 
@@ -203,11 +218,17 @@ async function _handleUploadBased(ctx, fileId, processor, mode, options, outputP
 }
 
 function _createTask(job) {
+  const options = { ...job.options };
+  // Only set mode when it has a value: an explicit `mode: undefined` key
+  // would be rejected by the option contract (unknown key for image/audio).
+  const mode = (job.mode != null && job.mode !== '') ? job.mode : job.options.mode;
+  if (mode !== undefined) options.mode = mode;
+
   const task = new Task(
     job.jobId,
     job.processor,
     job.inputPath || job.fileId,
-    { ...job.options, mode: (job.mode != null && job.mode !== '') ? job.mode : job.options.mode },
+    options,
     ProgressReporter
   );
 
