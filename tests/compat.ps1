@@ -98,6 +98,23 @@ Write-Output "== legacy synchronous =="
 $legacy = (Post-Json "$b/v1/process/image" @{ file_id = $up.fileId; max_dimension = 50; format = 'jpeg'; quality = 70 }) | ConvertFrom-Json
 Check 'legacy image returns an asset' ($legacy.success -eq $true -and $legacy.data.width -eq 50)
 
+Write-Output "== request body ceiling =="
+# Regression: axum's default 2 MB buffered-body limit rejected every real image
+# sent inline as base64. The ceiling must follow media.maxFileSizeMb (4 bytes per
+# 3 raw, plus envelope), not a framework default.
+$bigPng = Join-Path $tmp 'big.png'
+if (-not (Test-Path $bigPng)) {
+    & ffmpeg -loglevel error -y -f lavfi -i "nullsrc=s=1200x1200,format=rgb24,noise=alls=100:allf=t+u" -frames:v 1 $bigPng 2>$null
+}
+$bigBody = Join-Path $tmp 'big-body.json'
+$b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($bigPng))
+[System.IO.File]::WriteAllText($bigBody, ('{"base64":"' + $b64 + '","max_dimension":64,"format":"png"}'), (New-Object System.Text.UTF8Encoding $false))
+$bigBytes = (Get-Item $bigBody).Length
+$bigResp = curl.exe -s -w "`nHTTP:%{http_code}" -X POST "$b/v1/process/image" -H "Content-Type: application/json" --data "@$bigBody"
+Remove-Item $bigBody -Force
+$bigStatus = ($bigResp -split 'HTTP:')[-1].Trim()
+Check 'inline base64 body above 2 MB accepted' ($bigStatus -eq '200') "body=$bigBytes status=$bigStatus"
+
 Write-Output "== utilities =="
 $info = (curl.exe -s "$b/v1/info/$([uri]::EscapeDataString($png))" | ConvertFrom-Json)
 Check 'info reads dimensions' ($info.data.width -eq 400 -and $info.data.height -eq 300)

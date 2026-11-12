@@ -29,7 +29,7 @@ file:
 | port / host | `server.port`, `server.host` | `NMEDIA_PORT`, `NMEDIA_HOST` |
 | upload ceiling | `media.maxFileSizeMb` | `NMEDIA_MAX_FILE_MB` |
 | path allowlists | `media.allowedInputPaths`, `allowedOutputPaths` | `NMEDIA_ALLOWED_INPUT`, `NMEDIA_ALLOWED_OUTPUT` |
-| engines | `media.ffmpegPath`, `media.chromePath` | `NMEDIA_FFMPEG`, `NMEDIA_FFPROBE`, `NMEDIA_CHROME` |
+| engines | `media.ffmpegPath`, `media.chromePath` | `NMEDIA_FFMPEG`, `NMEDIA_FFPROBE`, `NMEDIA_CHROME`, `NMEDIA_CHROME_DIR` |
 | cache | `cache.dir`, `cache.ttl`, `cache.maxSize` | `NMEDIA_CACHE_DIR`, `NMEDIA_CACHE_TTL`, `NMEDIA_CACHE_MAX_BYTES` |
 | workers | `workers.maxConcurrentTasks` | `NMEDIA_WORKERS` |
 | logging | `logging.level`, `logsDir`, `retentionDays` | `LOG_LEVEL`, `LOG_RETENTION_DAYS` |
@@ -46,6 +46,30 @@ Nothing is reimplemented that a mature engine already does:
 | images | the `image` crate, `fast_image_resize` (SIMD), `image-webp` |
 | audio, video, HEIC | **ffmpeg** as a child process — your own build if you point `media.ffmpegPath` at it |
 | SVG | **Chromium** (exact: CSS variables, media queries, font weights) or `resvg` in-process (`engine: "resvg"`, approximate) |
+
+### The browser is ours, not the host's
+
+nMedia ships its own Chromium. `scripts/fetch-browser.ps1` downloads
+`chrome-headless-shell` from Chrome for Testing, records the version and SHA-256 in
+`runtime/browser.lock.json`, and extracts it to `runtime/`. That artifact is the
+engine; it is fetched rather than committed, and the lock refuses a download whose
+hash disagrees with the recorded one.
+
+Resolution order, published as `backends.chromeSource` in `/health`:
+
+1. `NMEDIA_CHROME` (explicit executable) or `NMEDIA_CHROME_DIR` — `configured`
+2. `runtime/chrome-headless-shell-*/`, `runtime/chrome-*/` beside the binary — `bundled`
+3. an installed Chrome/Edge, then `chrome` on `PATH` — `system`
+
+The bundled engine sits ahead of the system one on purpose: a deployment must render
+with the version it was tested against, not with whatever the host updated to
+overnight. The version string is probed at startup and reported; `resvg` is the
+fallback only when no browser resolves at all.
+
+Buffered request bodies are capped at the file ceiling plus one third — base64
+costs 4 bytes per 3 raw — so legacy inline processing keeps working for large
+media. `/v1/capabilities?section=config` publishes the exact number as
+`maxBodyBytes`; uploads stream and enforce `media.maxFileSizeMb` themselves.
 
 `GET /v1/capabilities` reports what the binary in front of it can actually do:
 ffmpeg version, hwaccels, filter count, and the encoder for each codec with

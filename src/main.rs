@@ -347,6 +347,14 @@ fn absolute(base: &Path, value: &str) -> String {    let path = PathBuf::from(va
     }
 }
 
+/// Buffered-body ceiling derived from the media file cap: base64 costs 4 bytes
+/// per 3 raw, plus the JSON around it. 1 MiB of slack covers option payloads
+/// without letting the ceiling drift away from the number it is derived from.
+pub fn body_limit_bytes(max_file_size_bytes: u64) -> usize {
+    let encoded = max_file_size_bytes.saturating_mul(4) / 3 + 4;
+    encoded.saturating_add(1024 * 1024).min(usize::MAX as u64) as usize
+}
+
 fn env_num<T>(key: &str, fallback: T) -> anyhow::Result<T>
 where
     T: std::str::FromStr + Copy,
@@ -398,12 +406,30 @@ async fn main() -> anyhow::Result<()> {
         None => tracing::warn!("no ffmpeg found — audio, video and HEIC will refuse"),
     }
     match &engine_report.chrome {
-        Some(path) => tracing::info!(chrome = %path.display(), "browser engine ready"),
-        None => tracing::warn!("no Chromium found — SVG falls back to resvg (approximate)"),
+        Some(path) => tracing::info!(
+            chrome = %path.display(),
+            source = engine_report.chrome_source.unwrap_or("unknown"),
+            version = engine_report.chrome_version.as_deref().unwrap_or("unknown"),
+            "browser engine ready"
+        ),
+        None => tracing::warn!(
+            "no browser engine — SVG falls back to resvg (approximate); \
+             run scripts/fetch-browser.ps1 to ship one"
+        ),
     }
 
     let bind = config.bind;
     let capacity = jobs.capacity();
+    // JSON media bodies carry the media as base64 — 4/3 of the raw bytes — so a
+    // body limit derived from the file cap keeps legacy base64 processing working
+    // without making the router unbounded. axum's default is 2 MB, which rejected
+    // any real image; that is the limit this replaces.
+    let body_limit = body_limit_bytes(config.max_file_size_bytes);
+    tracing::info!(
+        body_limit,
+        max_file_size = config.max_file_size_bytes,
+        "buffered request bodies up to {body_limit} bytes are accepted"
+    );
     let state = Arc::new(AppState {
         started: Instant::now(),
         config,
@@ -419,10 +445,9 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health::health))
         .route("/v1/capabilities", get(capabilities::capabilities))
-        .route(
-            "/v1/upload",
-            post(process::upload).layer(DefaultBodyLimit::disable()),
-        )
+        // Uploads stream and enforce the cap chunk by chunk, so the buffered-body
+        // limit does not apply to them; every JSON route does honour it.
+        .route("/v1/upload", post(process::upload))
         .route("/v1/process", post(process::process))
         .route("/v1/process/image", post(legacy::image))
         .route("/v1/process/image/crop", post(legacy::image_crop))
@@ -451,6 +476,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/info/*path", get(legacy::info))
         .route("/v1/ws", get(legacy::websocket_unsupported))
         .with_state(state)
+        // One limit for every buffered body. The 413 a caller sees now names the
+        // file cap it was measured against instead of a hardcoded 2 MB.
+        .layer(DefaultBodyLimit::max(body_limit))
         .layer(TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind(bind)

@@ -13,6 +13,9 @@ pub struct Engines {
     pub ffmpeg: Option<PathBuf>,
     pub ffmpeg_version: Option<String>,
     pub chrome: Option<PathBuf>,
+    /// `configured` | `bundled` | `system` — where the browser came from.
+    pub chrome_source: Option<&'static str>,
+    pub chrome_version: Option<String>,
     pub hwaccels: Vec<String>,
     /// Encoder name -> the codec it encodes, e.g. `h264_nvenc` -> `h264`.
     pub encoders: Vec<Encoder>,
@@ -29,10 +32,12 @@ pub struct Encoder {
 impl Engines {
     pub fn probe() -> Self {
         let ffmpeg = crate::ffmpeg::ffmpeg_path();
-        let chrome = crate::chromium::chrome_path();
+        let browser = crate::chromium::resolve();
         let mut engines = Self {
             ffmpeg,
-            chrome,
+            chrome: browser.as_ref().map(|b| b.path.clone()),
+            chrome_source: browser.as_ref().map(|b| b.source),
+            chrome_version: browser.as_ref().and_then(|b| b.version()),
             ..Self::default()
         };
         let Some(ref binary) = engines.ffmpeg else {

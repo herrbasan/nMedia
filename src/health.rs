@@ -68,6 +68,8 @@ pub fn snapshot(state: &AppState) -> serde_json::Value {
             "ffmpeg": state.engines.ffmpeg.as_ref().map(|p| p.display().to_string()),
             "ffmpegVersion": state.engines.ffmpeg_version,
             "chrome": state.engines.chrome.as_ref().map(|p| p.display().to_string()),
+            "chromeVersion": state.engines.chrome_version,
+            "chromeSource": state.engines.chrome_source,
         },
         "details": details,
         "implementation": {

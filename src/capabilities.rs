@@ -56,13 +56,15 @@ fn build(state: &AppState) -> serde_json::Value {
         "version": env!("CARGO_PKG_VERSION"),
         "implementation": "nmedia-server (Rust port, unified)",
         "endpoints": endpoints(),
-        "features": features(),
+        "features": features(state),
         "health": health::snapshot(state),
         "engine": {
             "ffmpeg": state.engines.ffmpeg.as_ref().map(|p| p.display().to_string()),
             "ffmpegVersion": state.engines.ffmpeg_version,
             "hwaccels": state.engines.hwaccels,
             "chrome": state.engines.chrome.as_ref().map(|p| p.display().to_string()),
+            "chromeVersion": state.engines.chrome_version,
+            "chromeSource": state.engines.chrome_source,
             "filters": state.engines.filter_count,
         },
         "video": {
@@ -82,6 +84,10 @@ fn build(state: &AppState) -> serde_json::Value {
         "config": {
             "maxFileSizeBytes": state.config.max_file_size_bytes,
             "maxFileSizeMb": state.config.max_file_size_bytes / (1024 * 1024),
+            // What a buffered JSON body may weigh; base64 media needs 4/3 of the
+            // file cap, and a caller sizing a request should read this rather
+            // than discover it as a 413.
+            "maxBodyBytes": crate::body_limit_bytes(state.config.max_file_size_bytes),
             "cacheDir": state.config.cache_dir.to_string_lossy(),
             "bind": state.config.bind.to_string(),
             "workerProcesses": state.config.workers,
@@ -104,8 +110,11 @@ fn path_list(list: &crate::util::PathList) -> Vec<String> {
 /// One processor registry. `available` is the honest field a caller should read;
 /// `engine` names what would run the ops, so a missing binary is visible before a
 /// job is queued rather than after it fails.
-fn features() -> serde_json::Value {
+fn features(state: &AppState) -> serde_json::Value {
     let ffmpeg = crate::ffmpeg::ffmpeg_path().is_some();
+    // The probed engine, not a fresh filesystem probe: /v1/capabilities must
+    // describe the binary that will actually render.
+    let chromium = state.engines.chrome.is_some();
     serde_json::json!({
         "processors": [
             {
@@ -116,12 +125,14 @@ fn features() -> serde_json::Value {
                 "formats": crate::image_processor::supported_outputs(),
                 "inputs": crate::image_processor::supported_inputs(),
                 "svg": {
-                    "defaultEngine": if crate::chromium::chrome_path().is_some() { "chromium" } else { "resvg" },
-                    "engines": if crate::chromium::chrome_path().is_some() {
+                    "defaultEngine": if chromium { "chromium" } else { "resvg" },
+                    "engines": if chromium {
                         serde_json::json!(["chromium", "resvg"])
                     } else {
                         serde_json::json!(["resvg"])
                     },
+                    "browserVersion": state.engines.chrome_version,
+                    "browserSource": state.engines.chrome_source,
                     "resvgLimits": "no CSS custom properties (var()), no @media (prefers-color-scheme), font weights degrade to regular, textLength spacing approximated",
                     "option": "engine: chromium | resvg",
                 },

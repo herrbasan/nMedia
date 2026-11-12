@@ -9,6 +9,9 @@ rust-cache/
 logs/
 config.json
 
+# bundled browser engine — fetched, not committed (scripts/fetch-browser.ps1)
+runtime/
+
 # scratch
 .test-output/
 .DS_Store
