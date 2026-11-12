@@ -1,37 +1,30 @@
 {
-  "server": {
-    "port": 3501,
-    "host": "0.0.0.0"
-  },
-  "media": {
-    "maxFileSizeMb": 2048,
-    "gpu": {
-      "platform": "nvenc",
-      "device": 0
-    },
-    "allowedInputPaths": [
-      "C:\\Media\\input"
-    ],
-    "allowedOutputPaths": [
-      "C:\\Media\\output"
-    ]
-  },
-  "logging": {
-    "level": "info",
-    "logsDir": "./logs",
-    "sessionPrefix": "ms",
-    "retentionDays": 7
-  },
-  "cache": {
-    "dir": "./cache/assets",
-    "ttl": 3600,
-    "maxSize": 10737418240
-  },
-  "workers": {
-    "maxConcurrentTasks": 4,
-    "mode": "process"
-  },
-  "messaging": {
-    "transport": "sse"
-  }
+    "media":  {
+                  "ffmpegPath":  "D:\\DEV\\ffmpeg-build\\dist\\ffmpeg.exe",
+                  "allowedOutputPaths":  [
+                                             "*"
+                                         ],
+                  "chromePath":  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+                  "allowedInputPaths":  [
+                                            "*"
+                                        ],
+                  "maxFileSizeMb":  2048
+              },
+    "cache":  {
+                  "ttl":  3600,
+                  "dir":  "./cache",
+                  "maxSize":  10737418240
+              },
+    "server":  {
+                   "host":  "0.0.0.0",
+                   "port":  3500
+               },
+    "logging":  {
+                    "logsDir":  "./logs",
+                    "level":  "info",
+                    "retentionDays":  7
+                },
+    "workers":  {
+                    "maxConcurrentTasks":  4
+                }
 }

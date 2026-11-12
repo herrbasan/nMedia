@@ -1,0 +1,45 @@
+[package]
+name = "nmedia"
+description = "Media processing service — images, audio, video, HEIC and SVG over HTTP, with jobs, assets and capability introspection"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+repository = "https://github.com/herrbasan/nMedia"
+
+[[bin]]
+name = "nmedia-server"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.7", features = ["multipart"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "sync", "fs", "signal", "time", "io-util"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+async-stream = "0.3"
+tower-http = { version = "0.6", features = ["fs", "trace"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Image work: decode with `image`, resize with SIMD, encode WebP in pure Rust.
+image = "0.25"
+fast_image_resize = "6"
+image-webp = "0.2"
+resvg = "0.50"
+
+# AVIF encoding pulls rav1e — a heavy compile, so it is opt-in.
+ravif = { version = "0.13", optional = true }
+
+[features]
+default = []
+avif = ["ravif"]
+
+[profile.release]
+# The service is CPU-bound on decode/encode; keep the optimiser on for both.
+opt-level = 3
+lto = "thin"
+codegen-units = 1

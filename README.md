@@ -1,242 +1,97 @@
 # nMedia
 
-A stateless Node.js microservice for optimizing images, audio, and video for LLM consumption.
+Media processing service: images, audio, video, HEIC and SVG over HTTP, with
+durable jobs, a cached asset store and capability introspection a caller can
+trust.
 
-## Overview
+It replaces the earlier Node implementation of the same service. The HTTP
+contract is unchanged — the same endpoints, the same `{ success, data }`
+envelopes, the same option keys — so existing consumers did not move.
 
-nMedia receives large multimodal payloads, aggressively compresses/downscales them, and returns LLM-friendly formats. It uses native N-API modules for zero-process-spawning media processing.
+## Run
 
-## Tech Stack
-
-- **Runtime:** Node.js 18+
-- **HTTP Server:** Native Node.js `http` module with custom Router
-- **Image Processing:** nImage (native NAPI with libraw/libheif/ImageMagick, plus headless Chrome for SVG)
-- **Audio/Video Processing:** nVideo (native NAPI with direct FFmpeg C API integration)
-- **Uploads:** Raw binary streaming to `POST /v1/upload`
-
-## API Endpoints
-
-### New Architecture (Recommended)
-
-#### `POST /v1/upload`
-Stream raw binary upload. Returns a `fileId` for processing.
-
-**Headers:**
-- `Content-Length` (required)
-- `X-Original-Filename` (optional)
-- `X-Upload-Id` (optional, for idempotency)
-
-**Response:**
-```json
-{
-  "fileId": "upload-abc-123",
-  "size": 52428800,
-  "detectedType": "video",
-  "detectedMimeType": "video/mp4",
-  "expiresAt": "2026-04-16T20:00:00Z",
-  "status": "ready"
-}
+```bash
+cargo build --release
+cp config.example.json config.json      # then edit the paths
+target/release/nmedia-server.exe
 ```
 
-#### `POST /v1/process`
-Unified processing endpoint. Supports two patterns:
-
-**Pattern A - Path-based:**
-```json
-{
-  "input_path": "C:\\Media\\video.mp4",
-  "processor": "video",
-  "mode": "extract_audio",
-  "options": { "format": "mp3" },
-  "output_path": "C:\\Media\\output\\audio.mp3"
-}
-```
-
-**Pattern B - Upload-based:**
-```json
-{
-  "fileId": "upload-abc-123",
-  "processor": "video",
-  "mode": "extract_audio",
-  "options": { "format": "mp3" }
-}
-```
-
-**Response:**
-```json
-{
-  "jobId": "job-xyz-789",
-  "status": "queued",
-  "progress_url": "/v1/jobs/job-xyz-789/progress",
-  "poll_url": "/v1/jobs/job-xyz-789"
-}
-```
-
-#### `GET /v1/jobs/:jobId/progress`
-SSE endpoint for real-time progress.
-
-#### `GET /v1/jobs/:jobId`
-Polling endpoint for job status.
-
-#### `DELETE /v1/jobs/:jobId`
-Cancel a queued job.
-
-### Legacy Endpoints
-
-The following legacy endpoints still work for backward compatibility:
-
-- `POST /v1/process/image` - Synchronous image processing
-- `POST /v1/process/image/crop` - Image cropping
-- `POST /v1/process/audio` - Synchronous audio processing
-- `POST /v1/process/video` - Synchronous video processing
-- `POST /v1/audio/probe` - Audio metadata probe
-
-### Capabilities
-
-- `GET /v1/capabilities` - Query native module capabilities (codecs, formats, hwaccels)
-  - Query params: `module=nvideo|nimage`, `section=...`
-
-### Asset Cache
-
-- `GET /v1/assets` - List assets
-- `GET /v1/assets/:id` - Download asset
-- `GET /v1/assets/:id/metadata` - Asset metadata
-- `DELETE /v1/assets/:id` - Delete asset
-- `DELETE /v1/assets` - Clear all assets
-
-### WebSocket
-
-- `WS /v1/ws` - Real-time progress + binary upload/download
-
-### System
-
-- `GET /health` - Health check with processor status
+Listens on `127.0.0.1:3500` by default (`config.json` → `server.port`).
 
 ## Configuration
 
-All configuration is managed via `config.json` in the project root. Copy `config.example.json` to `config.json` and adjust paths for your environment. Required fields will throw an error at startup if missing.
+`config.json` is read from `NMEDIA_CONFIG` or `./config.json`. **Every key can be
+overridden by environment**, so a process manager can drive the service without a
+file:
 
-```json
-{
-  "server": {
-    "port": 3500,
-    "host": "0.0.0.0"
-  },
-  "media": {
-    "maxFileSizeMb": 500,
-    "gpu": {
-      "platform": "nvenc",
-      "device": 0
-    },
-    "allowedInputPaths": [
-      "C:\\Users\\dave\\Media\\input"
-    ],
-    "allowedOutputPaths": [
-      "C:\\Users\\dave\\Media\\output"
-    ]
-  },
-  "logging": {
-    "level": "info",
-    "logsDir": "./logs",
-    "sessionPrefix": "ms",
-    "retentionDays": 7
-  },
-  "cache": {
-    "dir": "./cache/assets",
-    "ttl": 3600,
-    "maxSize": 10737418240
-  },
-  "workers": {
-    "maxConcurrentTasks": 4,
-    "mode": "process"
-  },
-  "messaging": {
-    "transport": "sse"
-  }
-}
+| Setting | Config | Environment |
+|---|---|---|
+| port / host | `server.port`, `server.host` | `NMEDIA_PORT`, `NMEDIA_HOST` |
+| upload ceiling | `media.maxFileSizeMb` | `NMEDIA_MAX_FILE_MB` |
+| path allowlists | `media.allowedInputPaths`, `allowedOutputPaths` | `NMEDIA_ALLOWED_INPUT`, `NMEDIA_ALLOWED_OUTPUT` |
+| engines | `media.ffmpegPath`, `media.chromePath` | `NMEDIA_FFMPEG`, `NMEDIA_FFPROBE`, `NMEDIA_CHROME` |
+| cache | `cache.dir`, `cache.ttl`, `cache.maxSize` | `NMEDIA_CACHE_DIR`, `NMEDIA_CACHE_TTL`, `NMEDIA_CACHE_MAX_BYTES` |
+| workers | `workers.maxConcurrentTasks` | `NMEDIA_WORKERS` |
+| logging | `logging.level`, `logsDir`, `retentionDays` | `LOG_LEVEL`, `LOG_RETENTION_DAYS` |
+
+Unknown keys — top level or inside a section — are reported at startup. Nothing
+is accepted and silently ignored.
+
+## Engines
+
+Nothing is reimplemented that a mature engine already does:
+
+| Work | Engine |
+|---|---|
+| images | the `image` crate, `fast_image_resize` (SIMD), `image-webp` |
+| audio, video, HEIC | **ffmpeg** as a child process — your own build if you point `media.ffmpegPath` at it |
+| SVG | **Chromium** (exact: CSS variables, media queries, font weights) or `resvg` in-process (`engine: "resvg"`, approximate) |
+
+`GET /v1/capabilities` reports what the binary in front of it can actually do:
+ffmpeg version, hwaccels, filter count, and the encoder for each codec with
+hardware first (`h264_nvenc` before `libx264`).
+
+## API
+
+Modern:
+
+```
+GET  /health                      readiness, engine identity, config source
+GET  /v1/capabilities             formats, limits, engines, encoders, retention
+POST /v1/upload                   raw body + X-Original-Filename -> fileId
+POST /v1/process                  {fileId|input_path, processor, mode?, options?} -> jobId
+GET  /v1/jobs, /v1/jobs/active, /v1/jobs/:id, DELETE /v1/jobs/:id
+GET  /v1/jobs/:id/progress        SSE; closes on the terminal event
+GET  /v1/assets, /v1/assets/:id, /v1/assets/:id/metadata, DELETE
+GET  /v1/thumbnail/*path, /v1/info/*path
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `server.port` | Yes | HTTP server port |
-| `server.host` | No | Host to bind (default: 0.0.0.0) |
-| `media.maxFileSizeMb` | No | Max upload size in MB |
-| `media.gpu.platform` | Yes | GPU platform: `nvenc`, `vaapi`, `qsv`, `cpu` |
-| `media.gpu.device` | No | GPU device index (default: 0) |
-| `media.allowedInputPaths` | No | Allowed directories for path-based processing |
-| `logging.level` | Yes | Log level: `debug`, `info`, `warn`, `error` |
-| `logging.logsDir` | Yes | Directory for log files (relative paths resolve against the project root) |
-| `cache.dir` | No | Cache directory (relative paths resolve against the project root) |
-| `cache.ttl` | No | Asset TTL in seconds |
-| `cache.maxSize` | No | Max cache size in bytes (e.g. 10737418240 = 10GB) |
-| `workers.maxConcurrentTasks` | No | Max parallel tasks |
-| `workers.mode` | No | `queue`, `thread`, or `process` (default: queue). Use `process` for audio/video |
-| `media.allowedOutputPaths` | No | Allowed directories for `output_path` writing |
+Legacy (kept because consumers still use them — a different contract, see
+`Agents.md`):
 
-## Quick Start
-
-```bash
-npm install
-npm start
+```
+POST /v1/process/image      { base64, format, max_dimension?, quality?, response_type? }
+                            -> { success, base64, format, width, height }
+POST /v1/process/image/crop { base64, crop:{left,top,right,bottom}, ... }
+                            -> { success, crops: [ { base64, format, width, height } ] }
+POST /v1/process/audio, /v1/process/video, /v1/audio/probe, /v1/video/probe
+GET/POST/DELETE /v1/tasks*   adapter over the job store
+GET  /v1/ws                  501 — progress travels over SSE
 ```
 
-## Testing
+## Logs
 
-```bash
-# Processor unit tests
-npm test
+Written to the ecosystem convention (`documentation/The Project/infra_nlogger.md`
+in MCP storage): `logs/main-0.log` as JSONL rolling at 10 MB into `main-1..9`,
+plus `logs/<session>.log` in human form. Stdout carries the same events, so a
+process manager capture and the files agree.
 
-# End-to-end HTTP tests (requires running service)
-npm run test:e2e
+## Tests
+
+```powershell
+powershell -NoProfile -File tests\compat.ps1     # 37 checks against a running service
 ```
 
-## Usage Examples
-
-### Upload then process (browser/remote clients)
-
-```bash
-# 1. Upload file
-curl -X POST http://localhost:3500/v1/upload \
-  -H "Content-Length: $(stat -c%s video.mp4)" \
-  -H "X-Original-Filename: video.mp4" \
-  --data-binary @video.mp4
-
-# 2. Process uploaded file
-curl -X POST http://localhost:3500/v1/process \
-  -H "Content-Type: application/json" \
-  -d '{"fileId":"upload-xxx","processor":"video","mode":"extract_audio","options":{"format":"mp3"}}'
-
-# 3. Stream progress
-curl -N http://localhost:3500/v1/jobs/JOB_ID/progress
-```
-
-### Path-based processing (local/Electron clients)
-
-```bash
-curl -X POST http://localhost:3500/v1/process \
-  -H "Content-Type: application/json" \
-  -d '{"input_path":"C:\\Media\\photo.CR2","processor":"image","options":{"max_dimension":1024,"format":"jpeg"}}'
-```
-
-### Legacy image processing
-
-```bash
-curl -X POST http://localhost:3500/v1/process/image \
-  -F "file=@photo.jpg" \
-  -F "max_dimension=512" \
-  -F "format=webp"
-```
-
-## Worker Modes
-
-**Queue mode** (`"queue"`, default): Tasks run serialized on the main thread. Lower memory footprint. Suitable for image processing; use `process` for audio/video to isolate native crashes.
-
-**Thread mode** (`"thread"`): Each task spawns a `worker_thread`. Native modules run off the main event loop, providing true parallelism.
-
-**Process mode** (`"process"`, recommended for audio/video): Each task spawns a `child_process.fork`. Maximum isolation — a native crash in nVideo kills only the child process, not the main process or other workers.
-
-## Web UI
-
-A web interface for testing is available at `http://localhost:3500/` when the service is running.
-
-See `nmedia-web/README.md` for UI details.
+`tests/render-charts.ps1` renders storage SVGs through both SVG engines;
+`tests/convert-to-testdir.ps1` converts files into a scratch directory with
+timings.

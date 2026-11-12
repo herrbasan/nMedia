@@ -1,38 +1,15 @@
-# Folders
+# build output
+/target
+**/target
+*.pdb
+
+# runtime state — the service creates these next to its config
 cache/
-_Archive/
-
-# Dependencies
-node_modules/
-deps/
-
-# Config
+rust-cache/
+logs/
 config.json
 
-# Claude
-.claude/
-
-# Binaries
-bin/*.exe
-!bin/.gitkeep
-
-# Temp server logs
-server*.log
-upload_debug.log
-
-# Build output
-dist/
-
-# Logs
-logs/
-*.log
-
-# OS
+# scratch
+.test-output/
 .DS_Store
 Thumbs.db
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
