@@ -175,6 +175,10 @@ pub fn sweep(state: &AppState) -> SweepReport {
                 .unwrap_or(false);
             if terminal && std::fs::remove_file(&path).is_ok() {
                 report.jobs_removed += 1;
+                // The file is the record; the in-memory copy must not outlive it.
+                if let Some(id) = path.file_stem().and_then(|stem| stem.to_str()) {
+                    state.jobs.forget(id);
+                }
             }
         }
     }

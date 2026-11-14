@@ -386,6 +386,21 @@ impl JobStore {
     pub fn subscribe(&self) -> broadcast::Receiver<Job> {
         self.events.subscribe()
     }
+
+    /// Drop a terminal record once its file has aged out. Retention deletes the
+    /// file; keeping the record in memory would answer `GET /jobs/:id` from a copy
+    /// that a restart no longer has — two answers to the same question, and a map
+    /// that grows for the lifetime of the process.
+    pub fn forget(&self, id: &str) -> bool {
+        let mut jobs = self.jobs.lock().expect("jobs lock");
+        match jobs.get(id) {
+            Some(job) if job.terminal() => {}
+            _ => return false,
+        }
+        jobs.remove(id);
+        self.order.lock().expect("order lock").retain(|x| x != id);
+        true
+    }
 }
 
 // ─── routes ──────────────────────────────────────────────────────────────
@@ -479,4 +494,46 @@ fn not_found(id: &str) -> Response {
         Json(serde_json::json!({ "success": false, "error": format!("job not found: {id}") })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(id: &str, status: &str) -> Job {
+        Job {
+            id: id.to_string(),
+            status: status.to_string(),
+            progress: 100,
+            stage: "done".into(),
+            processor: "image".into(),
+            mode: None,
+            input: "input".into(),
+            output_path: None,
+            options: serde_json::Value::Null,
+            asset_id: None,
+            error: None,
+            created_at: util::rfc3339_now(),
+            updated_at: util::rfc3339_now(),
+        }
+    }
+
+    #[test]
+    fn a_terminal_record_can_be_forgotten_once_its_file_is_gone() {
+        let dir = std::env::temp_dir().join(format!("nm-jobs-{}", util::id()));
+        let job = record("0123456789abcdef", "completed");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("{}.json", job.id)),
+            serde_json::to_string(&job).unwrap(),
+        )
+        .unwrap();
+
+        let store = JobStore::open(dir.clone(), 2).unwrap();
+        assert!(store.get(&job.id).is_some());
+        assert!(store.forget(&job.id));
+        assert!(store.get(&job.id).is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

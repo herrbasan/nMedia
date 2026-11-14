@@ -166,10 +166,12 @@ pub async fn download(
     let Some(meta) = state.assets.read(&id) else {
         return Err(not_found(&id));
     };
-    let bytes = state
-        .assets
-        .bytes(&meta)
+    // Opened before the response is built: a missing or unreadable file is still a
+    // clean 500, and only a read that fails *after* streaming starts can truncate.
+    let file = tokio::fs::File::open(state.assets.path_of(&meta))
+        .await
         .map_err(|e| server_error(&format!("cannot read asset {id}: {e}")))?;
+    let length = meta.size;
     // A raw filename in the header is both a 500 (non-ASCII) and an injection
     // surface ('"'), so the plain filename is sanitised to ASCII and the real
     // name rides along in RFC 5987 form.
@@ -185,15 +187,36 @@ pub async fn download(
         })
         .collect();
     let encoded = crate::util::percent_encode(&meta.filename);
+    // Streamed, not buffered: an asset can be a video, and reading it whole costs
+    // file size × concurrent downloads of RSS. The length is stated, so a client
+    // can tell a truncated stream from a complete one.
+    let streamed_id = id.clone();
+    let body = axum::body::Body::from_stream(async_stream::stream! {
+        use tokio::io::AsyncReadExt;
+        let mut file = file;
+        let mut buffer = vec![0u8; 64 * 1024];
+        loop {
+            match file.read(&mut buffer).await {
+                Ok(0) => break,
+                Ok(read) => yield Ok::<_, std::io::Error>(axum::body::Bytes::copy_from_slice(&buffer[..read])),
+                Err(e) => {
+                    tracing::warn!(asset = %streamed_id, error = %e, "asset stream aborted mid-body");
+                    yield Err(e);
+                    break;
+                }
+            }
+        }
+    });
     Ok((
         [
             (header::CONTENT_TYPE, meta.mime.clone()),
+            (header::CONTENT_LENGTH, length.to_string()),
             (
                 header::CONTENT_DISPOSITION,
                 format!("inline; filename=\"{ascii}\"; filename*=UTF-8''{encoded}"),
             ),
         ],
-        bytes,
+        body,
     )
         .into_response())
 }
