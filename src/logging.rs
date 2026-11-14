@@ -37,6 +37,9 @@ pub struct JsonFileLayer {
     state: Mutex<Writer>,
     session: String,
     minimum: u8,
+    /// First write failure is reported once: a full disk or a revoked directory
+    /// otherwise turns logging off with no trace at the moment logs matter most.
+    reported_failure: std::sync::atomic::AtomicBool,
 }
 
 struct Writer {
@@ -61,6 +64,7 @@ pub fn init(prefix: &str, dir: &Path, minimum: Level, retention_days: u64) -> an
         }),
         session: session.clone(),
         minimum: level_rank(minimum),
+        reported_failure: std::sync::atomic::AtomicBool::new(false),
     };
 
     use tracing_subscriber::layer::SubscriberExt;
@@ -89,6 +93,19 @@ pub fn level_rank(level: Level) -> u8 {
 }
 
 impl JsonFileLayer {
+    /// `eprintln`, not `tracing`: this *is* the logging path, and reporting a
+    /// failure through it would recurse. nPM captures the stream, so the operator
+    /// still sees it; repeats stay silent so a full disk cannot become a flood.
+    fn report_write_failure(&self, path: &Path, error: &std::io::Error) {
+        use std::sync::atomic::Ordering;
+        if !self.reported_failure.swap(true, Ordering::Relaxed) {
+            eprintln!(
+                "nmedia: cannot write {}: {error} — further log-file failures are silent",
+                path.display()
+            );
+        }
+    }
+
     fn write_line(&self, level: &Level, target: &str, fields: &Fields) {
         if level_rank(*level) < self.minimum {
             return;
@@ -131,12 +148,16 @@ impl JsonFileLayer {
         let bytes = line.len() as u64;
 
         let main_path = writer.dir.join("main-0.log");
-        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&main_path) {
-            // Count only what reached the file, or a failed write rotates away
-            // real history to make room for bytes that were never there.
-            if file.write_all(line.as_bytes()).and_then(|()| file.flush()).is_ok() {
-                writer.main_bytes += bytes;
-            }
+        // Count only what reached the file, or a failed write rotates away real
+        // history to make room for bytes that were never there.
+        match OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&main_path)
+            .and_then(|mut file| file.write_all(line.as_bytes()).and_then(|()| file.flush()))
+        {
+            Ok(()) => writer.main_bytes += bytes,
+            Err(e) => self.report_write_failure(&main_path, &e),
         }
 
         let meta_text = match &meta {
