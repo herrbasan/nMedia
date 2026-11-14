@@ -218,7 +218,9 @@ impl JobStore {
             job.updated_at = util::rfc3339_now();
             job.clone()
         };
-        self.save(&updated);
+        // Not persisted: replay() turns any non-terminal record into `interrupted`,
+        // so an intermediate snapshot is never read back as progress. The
+        // admission record already carries everything a restart needs.
         let _ = self.events.send(updated.clone());
         Some(updated)
     }
@@ -238,7 +240,8 @@ impl JobStore {
             job.updated_at = util::rfc3339_now();
             job.clone()
         };
-        self.save(&updated);
+        // Same reasoning as `begin`: a progress tick is delivered live over SSE and
+        // is never replayed from disk, so writing it is pure I/O per tick.
         let _ = self.events.send(updated.clone());
         Some(updated)
     }
@@ -413,7 +416,12 @@ pub async fn cancel_job(
 ) -> Response {
     match state.jobs.cancel(&id) {
         Some(job) => crate::ok(job).into_response(),
-        None => not_found(&id),
+        // None means the job reached a terminal state between cancel()'s status
+        // read and its transition — the job exists, so answer with its final state.
+        None => match state.jobs.get(&id) {
+            Some(job) => crate::ok(job).into_response(),
+            None => not_found(&id),
+        },
     }
 }
 

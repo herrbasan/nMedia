@@ -265,28 +265,45 @@ pub async fn extract_keyframes(
     fps: f64,
     cancel: &Notify,
 ) -> Result<usize, String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     // ffmpeg overwrites frame-0001..N but never deletes the tail of a longer
     // earlier run, so a reused directory would report frames it did not write.
-    for entry in std::fs::read_dir(dir).map_err(|e| format!("cannot read {}: {e}", dir.display()))? {
-        let stale = entry
-            .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
-            .path();
-        if stale.extension().map(|ext| ext == "jpg").unwrap_or(false) {
-            std::fs::remove_file(&stale)
-                .map_err(|e| format!("cannot clear {}: {e}", stale.display()))?;
+    // The walk is blocking, and a reused directory can hold thousands of frames,
+    // so it runs on the blocking pool rather than stalling a runtime worker.
+    let prep = dir.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        std::fs::create_dir_all(&prep)
+            .map_err(|e| format!("cannot create {}: {e}", prep.display()))?;
+        for entry in
+            std::fs::read_dir(&prep).map_err(|e| format!("cannot read {}: {e}", prep.display()))?
+        {
+            let stale = entry
+                .map_err(|e| format!("cannot read {}: {e}", prep.display()))?
+                .path();
+            if stale.extension().map(|ext| ext == "jpg").unwrap_or(false) {
+                std::fs::remove_file(&stale)
+                    .map_err(|e| format!("cannot clear {}: {e}", stale.display()))?;
+            }
         }
-    }
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| format!("cannot prepare {}: {e}", dir.display()))??;
     let mut args = base_args(input);
     args.push("-vf".into());
     args.push(format!("fps={fps}"));
     args.push(dir.join("frame-%04d.jpg").to_string_lossy().to_string());
     run(&args, cancel, Duration::from_secs(1800)).await?;
-    let count = std::fs::read_dir(dir)
-        .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.path().extension().map(|ext| ext == "jpg").unwrap_or(false))
-        .count();
+    let counted = dir.to_path_buf();
+    let count = tokio::task::spawn_blocking(move || -> Result<usize, String> {
+        let entries = std::fs::read_dir(&counted)
+            .map_err(|e| format!("cannot read {}: {e}", counted.display()))?;
+        Ok(entries
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.path().extension().map(|ext| ext == "jpg").unwrap_or(false))
+            .count())
+    })
+    .await
+    .map_err(|e| format!("cannot count {}: {e}", dir.display()))??;
     if count == 0 {
         return Err("ffmpeg produced no keyframes — check the input duration and fps".into());
     }
@@ -496,11 +513,11 @@ pub async fn decode_image_rgb(
             if detail.is_empty() { "no diagnostics".to_string() } else { detail }
         ));
     }
-    parse_ppm(&data)
+    parse_ppm(data)
 }
 
 /// Minimal binary PPM (P6) reader: magic, width, height, maxval, then RGB bytes.
-fn parse_ppm(data: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
+fn parse_ppm(mut data: Vec<u8>) -> Result<(Vec<u8>, u32, u32), String> {
     let mut fields = Vec::new();
     let mut index = 0usize;
     while fields.len() < 4 {
@@ -533,14 +550,22 @@ fn parse_ppm(data: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
     if maxval != 255 {
         return Err(format!("expected 8-bit PPM, got maxval {maxval}"));
     }
-    let expected = width as usize * height as usize * 3;
+    // The header is attacker-controlled arithmetic: overflow lands in this error
+    // path instead of wrapping (release) or panicking (debug).
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(3))
+        .ok_or_else(|| format!("PPM dimensions {width}x{height} overflow usize"))?;
     if data.len() < index + expected {
         return Err(format!(
             "PPM truncated: expected {expected} bytes, got {}",
             data.len().saturating_sub(index)
         ));
     }
-    Ok((data[index..index + expected].to_vec(), width, height))
+    // Strip the header in place: a second full copy doubles peak RSS per decode.
+    data.drain(..index);
+    data.truncate(expected);
+    Ok((data, width, height))
 }
 
 /// `ffprobe -print_format json` — the shape `/v1/info` and the probes report.
@@ -568,8 +593,8 @@ pub async fn probe(path: &Path) -> Result<serde_json::Value, String> {
     // same budget `run` uses is what keeps the request (and the pid) bounded.
     let pid = child.id();
     track(pid);
+    let _tracked = Tracked(pid);
     let output = tokio::time::timeout(Duration::from_secs(60), child.wait_with_output()).await;
-    untrack(pid);
     let output = output
         .map_err(|_| "ffprobe exceeded 60 s and was killed".to_string())?
         .map_err(|e| format!("ffprobe process error: {e}"))?;
@@ -580,4 +605,29 @@ pub async fn probe(path: &Path) -> Result<serde_json::Value, String> {
         ));
     }
     serde_json::from_slice(&output.stdout).map_err(|e| format!("ffprobe returned unreadable JSON: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ppm(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
+        let mut out = format!("P6\n{width} {height}\n255\n").into_bytes();
+        out.extend_from_slice(pixels);
+        out
+    }
+
+    #[test]
+    fn a_ppm_yields_exactly_its_pixels() {
+        let (pixels, width, height) = parse_ppm(ppm(2, 1, &[1, 2, 3, 4, 5, 6])).unwrap();
+        assert_eq!((width, height), (2, 1));
+        assert_eq!(pixels, vec![1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn a_header_claiming_more_pixels_than_it_carries_is_refused() {
+        // The dimensions are attacker-supplied; the arithmetic must land in this
+        // error path rather than wrapping into a short buffer.
+        assert!(parse_ppm(ppm(50_000, 30_000, &[0, 0, 0])).is_err());
+    }
 }

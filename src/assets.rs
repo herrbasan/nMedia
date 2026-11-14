@@ -67,11 +67,16 @@ impl AssetCache {
     /// persists, so a failed write leaves no half-registered asset behind.
     pub fn put(&self, mut meta: AssetMeta, bytes: &[u8]) -> io::Result<AssetMeta> {
         let file = self.file_for(&meta);
-        fs::write(&file, bytes)?;
         meta.size = bytes.len() as u64;
         let text = serde_json::to_string_pretty(&meta)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        fs::write(self.meta_path(&meta.id), text)?;
+        fs::write(&file, bytes)?;
+        // The sidecar is the index: without it these bytes are unreachable and
+        // nothing enumerates them, so a failed write takes the data file with it.
+        if let Err(e) = fs::write(self.meta_path(&meta.id), text) {
+            let _ = fs::remove_file(&file);
+            return Err(e);
+        }
         Ok(meta)
     }
 
@@ -91,7 +96,10 @@ impl AssetCache {
         }
         let text = serde_json::to_string_pretty(&meta)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        fs::write(self.meta_path(&meta.id), text)?;
+        if let Err(e) = fs::write(self.meta_path(&meta.id), text) {
+            let _ = fs::remove_file(&target);
+            return Err(e);
+        }
         Ok(meta)
     }
 
@@ -118,20 +126,24 @@ impl AssetCache {
         out
     }
 
-    pub fn delete(&self, id: &str) -> bool {
-        let Some(meta) = self.read(id) else { return false };
-        let _ = fs::remove_file(self.file_for(&meta));
-        let _ = fs::remove_file(self.meta_path(id));
-        true
+    /// `Ok(false)` means the id was never here. A removal that fails is an error,
+    /// not a success — otherwise a locked file is reported deleted while `list()`
+    /// keeps returning it.
+    pub fn delete(&self, id: &str) -> io::Result<bool> {
+        let Some(meta) = self.read(id) else { return Ok(false) };
+        fs::remove_file(self.file_for(&meta))?;
+        fs::remove_file(self.meta_path(id))?;
+        Ok(true)
     }
 
-    pub fn clear(&self) -> usize {
-        let assets = self.list();
-        for meta in &assets {
-            let _ = fs::remove_file(self.file_for(meta));
-            let _ = fs::remove_file(self.meta_path(&meta.id));
+    pub fn clear(&self) -> io::Result<usize> {
+        let mut removed = 0;
+        for meta in self.list() {
+            fs::remove_file(self.file_for(&meta))?;
+            fs::remove_file(self.meta_path(&meta.id))?;
+            removed += 1;
         }
-        assets.len()
+        Ok(removed)
     }
 
     pub fn path_of(&self, meta: &AssetMeta) -> PathBuf {
@@ -200,16 +212,19 @@ pub async fn delete_one(
     State(state): State<Arc<AppState>>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<Json<serde_json::Value>, Response> {
-    if state.assets.delete(&id) {
-        Ok(crate::ok(serde_json::json!({ "deleted": id })))
-    } else {
-        Err(not_found(&id))
+    match state.assets.delete(&id) {
+        Ok(true) => Ok(crate::ok(serde_json::json!({ "deleted": id }))),
+        Ok(false) => Err(not_found(&id)),
+        // A locked or read-only asset must not be reported as gone.
+        Err(e) => Err(server_error(&format!("cannot delete asset {id}: {e}"))),
     }
 }
 
-pub async fn clear_all(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    let cleared = state.assets.clear();
-    crate::ok(serde_json::json!({ "cleared": cleared }))
+pub async fn clear_all(State(state): State<Arc<AppState>>) -> Response {
+    match state.assets.clear() {
+        Ok(cleared) => crate::ok(serde_json::json!({ "cleared": cleared })).into_response(),
+        Err(e) => server_error(&format!("cannot clear assets: {e}")),
+    }
 }
 
 fn not_found(id: &str) -> Response {

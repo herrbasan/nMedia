@@ -93,9 +93,10 @@ impl JsonFileLayer {
         if level_rank(*level) < self.minimum {
             return;
         }
-        let Ok(mut writer) = self.state.lock() else {
-            return;
-        };
+        // The guarded state is a directory path and a byte counter — a panic
+        // elsewhere cannot corrupt it, and dropping every line for the rest of the
+        // process is the one failure mode that hides the panic itself.
+        let mut writer = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let timestamp = rfc3339_millis();
         let message = fields.message.clone().unwrap_or_default();
         let category = target.rsplit("::").next().unwrap_or(target).to_string();
@@ -163,13 +164,29 @@ fn rotate(writer: &mut Writer) {
         let from = dir.join(format!("main-{index}.log"));
         let to = dir.join(format!("main-{}.log", index + 1));
         if from.exists() {
-            let _ = fs::rename(&from, &to);
+            // Windows refuses to rename onto an existing file; one failed step
+            // would pin every later step, so a refusal retries with the target
+            // cleared. Unix keeps its atomic rename on the first attempt.
+            if fs::rename(&from, &to).is_err() {
+                let _ = fs::remove_file(&to);
+                if let Err(e) = fs::rename(&from, &to) {
+                    tracing::warn!(
+                        from = %from.display(),
+                        to = %to.display(),
+                        error = %e,
+                        "log rotation step failed"
+                    );
+                }
+            }
         }
     }
     // Reset only when the roll happened; otherwise the counter keeps the file
     // over the cap and the next line retries instead of growing unbounded.
-    if fs::rename(dir.join("main-0.log"), dir.join("main-1.log")).is_ok() {
-        writer.main_bytes = 0;
+    let newest = dir.join("main-1.log");
+    let _ = fs::remove_file(&newest);
+    match fs::rename(dir.join("main-0.log"), &newest) {
+        Ok(()) => writer.main_bytes = 0,
+        Err(e) => tracing::warn!(target = %newest.display(), error = %e, "log rotation failed"),
     }
 }
 

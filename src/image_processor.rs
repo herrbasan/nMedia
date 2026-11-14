@@ -177,12 +177,15 @@ fn finish(mut img: DynamicImage, opts: &ImageOptions, fallback: Target) -> Resul
         // A radius wider than the image blurs to a flat field. Unbounded, the
         // kernel is request-controlled: JSON 1e40 becomes f32::INFINITY, which
         // passes a `> 0` guard and sizes an allocation the process cannot survive.
-        let widest = img.width().max(img.height()) as f32;
+        // The kernel is separable and scales with sigma, so even a finite value is
+        // unbounded work: at 20k the convolution runs for minutes. Past a couple
+        // of hundred pixels the result is a flat field anyway.
+        const MAX_BLUR_SIGMA: f32 = 250.0;
         if !sigma.is_finite() || sigma < 0.0 {
             return Err(format!("blur must be a finite, non-negative number, got {sigma}"));
         }
-        if sigma > widest {
-            return Err(format!("blur {sigma} is wider than the image ({widest}px)"));
+        if sigma > MAX_BLUR_SIGMA {
+            return Err(format!("blur {sigma} exceeds the {MAX_BLUR_SIGMA}px maximum"));
         }
         if sigma > 0.0 {
             let blurred = image::imageops::blur(&img.to_rgba8(), sigma);
@@ -448,13 +451,25 @@ fn svg_size(bytes: &[u8]) -> Result<(u32, u32), String> {
     Ok((width, height))
 }
 
+fn font_db() -> std::sync::Arc<resvg::usvg::fontdb::Database> {
+    static DB: std::sync::OnceLock<std::sync::Arc<resvg::usvg::fontdb::Database>> =
+        std::sync::OnceLock::new();
+    DB.get_or_init(|| {
+        let mut database = resvg::usvg::fontdb::Database::new();
+        database.load_system_fonts();
+        std::sync::Arc::new(database)
+    })
+    .clone()
+}
+
 fn decode_svg_resvg(bytes: &[u8]) -> Result<DynamicImage, String> {
     const MAX_SVG_EDGE: u32 = 8_192;
     let mut options = resvg::usvg::Options::default();
-    // usvg's default font database is EMPTY. Without this, every <text> element
-    // is silently dropped: the first render of the storage charts came out with
-    // all boxes and arrows and not one label.
-    options.fontdb_mut().load_system_fonts();
+    // usvg's default font database is EMPTY. Without one, every <text> element is
+    // silently dropped: the first render of the storage charts came out with all
+    // boxes and arrows and not one label. It is loaded once per process — the
+    // walk parses every installed font, which is not per-render work.
+    options.fontdb = font_db();
     // The charts style text with `font-family: var(--nc-font, Inter, "Segoe UI",
     // ...)`; usvg does not resolve CSS variables, so the declaration is invalid
     // and falls back here. Better a real sans than usvg's serif default.
@@ -676,29 +691,51 @@ fn encode(
 ) -> Result<(), String> {
     match target {
         Target::WebP => {
-            let rgba = img.to_rgba8();
+            // An opaque image gains nothing from an alpha channel: widening it to
+            // RGBA copies the whole buffer and ships a channel that is always 255.
+            // `has_transparency` short-circuits on colour type, so an RGB buffer
+            // is never materialised as RGBA to answer the question.
+            let alpha = has_transparency(img);
+            let width = img.width();
+            let height = img.height();
+            let mut widened = None;
+            let mut narrowed = None;
+            if alpha {
+                widened = Some(img.to_rgba8());
+            } else if img.as_rgb8().is_none() {
+                narrowed = Some(img.to_rgb8());
+            }
+            let pixels: &[u8] = match (&widened, &narrowed) {
+                (Some(buffer), _) => buffer.as_raw(),
+                (None, Some(buffer)) => buffer.as_raw(),
+                (None, None) => img
+                    .as_rgb8()
+                    .expect("an opaque non-RGB buffer was narrowed above")
+                    .as_raw(),
+            };
             // `quality` is part of the promised contract for webp; the pure-Rust
             // encoder is lossless-only, so a requested quality goes to libwebp
             // and the unqualified path stays in-process and dependency-free.
             match quality {
                 Some(quality) => {
-                    let encoded = webp::Encoder::from_rgba(
-                        rgba.as_raw(),
-                        rgba.width(),
-                        rgba.height(),
-                    )
-                    .encode(quality.clamp(1, 100) as f32);
-                    out.extend_from_slice(&encoded);
+                    let encoder = if alpha {
+                        webp::Encoder::from_rgba(pixels, width, height)
+                    } else {
+                        webp::Encoder::from_rgb(pixels, width, height)
+                    };
+                    out.extend_from_slice(&encoder.encode(quality.clamp(1, 100) as f32));
                     Ok(())
                 }
-                None => image_webp::WebPEncoder::new(out)
-                    .encode(
-                        rgba.as_raw(),
-                        rgba.width(),
-                        rgba.height(),
-                        image_webp::ColorType::Rgba8,
-                    )
-                    .map_err(|e| format!("cannot encode WebP: {e}")),
+                None => {
+                    let colour = if alpha {
+                        image_webp::ColorType::Rgba8
+                    } else {
+                        image_webp::ColorType::Rgb8
+                    };
+                    image_webp::WebPEncoder::new(out)
+                        .encode(pixels, width, height, colour)
+                        .map_err(|e| format!("cannot encode WebP: {e}"))
+                }
             }
         }
         Target::Avif => encode_avif(img, quality, out),
@@ -771,6 +808,55 @@ mod tests {
         assert_eq!(svg_size(svg.as_bytes()), Ok((10, 20)));
     }
 
+    /// Not a correctness test: what caching the font database saves on this host.
+    #[test]
+    #[ignore]
+    fn bench_font_db_load() {
+        let started = std::time::Instant::now();
+        let mut database = resvg::usvg::fontdb::Database::new();
+        database.load_system_fonts();
+        println!(
+            "fontdb load_system_fonts: {:?} for {} faces",
+            started.elapsed(),
+            database.len()
+        );
+    }
+
+    /// Not a correctness test: isolates what a cached font database saves per SVG.
+    #[test]
+    #[ignore]
+    fn bench_svg_font_db() {
+        let mut svg = String::from(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"800\" height=\"400\">",
+        );
+        for index in 0..24 {
+            let x = 20 + (index * 30);
+            svg.push_str(&format!(
+                "<text x=\"{x}\" y=\"200\" font-family=\"Segoe UI\" font-size=\"13\">Jan {index}</text>"
+            ));
+        }
+        svg.push_str("</svg>");
+        let bytes = svg.as_bytes();
+
+        for _ in 0..3 {
+            let _ = decode_svg_resvg(bytes);
+        }
+        let started = std::time::Instant::now();
+        for _ in 0..20 {
+            let _ = decode_svg_resvg(bytes).unwrap();
+        }
+        println!("cached fontdb:   {:?} per render", started.elapsed() / 20);
+
+        let started = std::time::Instant::now();
+        for _ in 0..20 {
+            let mut options = resvg::usvg::Options::default();
+            options.fontdb_mut().load_system_fonts();
+            options.font_family = "Segoe UI".to_string();
+            let _ = resvg::usvg::Tree::from_data(bytes, &options).unwrap();
+        }
+        println!("fresh fontdb:    {:?} per render", started.elapsed() / 20);
+    }
+
     /// Not a correctness test: measures one 4K resize so a change to the buffer
     /// handling is compared rather than assumed. Run with
     /// `cargo test --release bench_resize_4k -- --ignored --nocapture`.
@@ -816,6 +902,48 @@ mod tests {
             high.len()
         );
         assert_eq!(&low[0..4], b"RIFF");
+    }
+
+    #[test]
+    fn an_opaque_image_is_not_encoded_with_an_alpha_channel() {
+        // Widening an opaque photo to RGBA costs a full copy and ships a channel
+        // that is 255 everywhere. An all-opaque RGBA input must narrow to exactly
+        // the stream an RGB input produces — the encoder never sees alpha.
+        let mut noise = image::RgbImage::new(64, 64);
+        let mut seed: u32 = 99;
+        for pixel in noise.pixels_mut() {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            *pixel = image::Rgb([(seed >> 24) as u8, (seed >> 16) as u8, (seed >> 8) as u8]);
+        }
+        let mut three = Vec::new();
+        let mut four = Vec::new();
+        encode(
+            &DynamicImage::ImageRgb8(noise.clone()),
+            Target::WebP,
+            Some(80),
+            &mut three,
+        )
+        .unwrap();
+        encode(
+            &DynamicImage::ImageRgba8(DynamicImage::ImageRgb8(noise).to_rgba8()),
+            Target::WebP,
+            Some(80),
+            &mut four,
+        )
+        .unwrap();
+        assert_eq!(three, four, "an opaque RGBA input must narrow to the RGB stream");
+
+        // Real transparency still has to survive.
+        let translucent = image::RgbaImage::from_pixel(64, 64, image::Rgba([10, 20, 30, 128]));
+        let mut with_alpha = Vec::new();
+        encode(
+            &DynamicImage::ImageRgba8(translucent),
+            Target::WebP,
+            Some(80),
+            &mut with_alpha,
+        )
+        .unwrap();
+        assert_ne!(three, with_alpha);
     }
 
     #[test]

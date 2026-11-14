@@ -32,15 +32,22 @@ pub fn spawn(state: Arc<AppState>) {
         // One sweep at startup (a crash can leave the cache over budget), then
         // on a timer.
         loop {
-            let report = sweep(&state);
-            if report.assets_removed + report.uploads_removed + report.jobs_removed > 0 {
-                tracing::info!(
-                    assets = report.assets_removed,
-                    uploads = report.uploads_removed,
-                    jobs = report.jobs_removed,
-                    mb = report.bytes_reclaimed / (1024 * 1024),
-                    "retention sweep"
-                );
+            // The sweep is pure std::fs over a tree that grows with the cache it
+            // cleans; on a runtime worker it would stall request handling for the
+            // length of the walk.
+            let sweeping = state.clone();
+            match tokio::task::spawn_blocking(move || sweep(&sweeping)).await {
+                Ok(report) if report.assets_removed + report.uploads_removed + report.jobs_removed > 0 => {
+                    tracing::info!(
+                        assets = report.assets_removed,
+                        uploads = report.uploads_removed,
+                        jobs = report.jobs_removed,
+                        mb = report.bytes_reclaimed / (1024 * 1024),
+                        "retention sweep"
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => tracing::error!(error = %e, "retention sweep task failed"),
             }
             tokio::time::sleep(interval).await;
         }
@@ -66,7 +73,12 @@ pub fn sweep(state: &AppState) -> SweepReport {
                 continue;
             }
             if let Ok(meta) = entry.metadata() {
-                let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+                // An unreadable mtime is not "infinitely old": stamping the epoch
+                // deletes a file that may have just been written.
+                let Ok(modified) = meta.modified() else {
+                    tracing::debug!(path = %path.display(), "retention: mtime unreadable, skipping");
+                    continue;
+                };
                 entries.push((path, meta.len(), modified));
             }
         }
@@ -82,7 +94,13 @@ pub fn sweep(state: &AppState) -> SweepReport {
             report.bytes_reclaimed += size;
         }
     }
-    let mut total: u64 = entries.iter().map(|(_, size, _)| *size).sum();
+    // The age pass already reclaimed some bytes; counting them again makes the
+    // cache look over budget and evicts live files that fit.
+    let mut total: u64 = entries
+        .iter()
+        .map(|(_, size, _)| *size)
+        .sum::<u64>()
+        .saturating_sub(report.bytes_reclaimed);
     if total > state.config.cache_max_bytes {
         let mut by_age = entries.clone();
         by_age.sort_by_key(|(_, _, modified)| *modified);
@@ -104,7 +122,10 @@ pub fn sweep(state: &AppState) -> SweepReport {
         for entry in dir.flatten() {
             let path = entry.path();
             let Ok(meta) = entry.metadata() else { continue };
-            let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+            let Ok(modified) = meta.modified() else {
+                tracing::debug!(path = %path.display(), "retention: mtime unreadable, skipping");
+                continue;
+            };
             let expired = now
                 .duration_since(modified)
                 .map(|age| age > ttl)
@@ -128,6 +149,19 @@ pub fn sweep(state: &AppState) -> SweepReport {
                 continue;
             }
             let Ok(meta) = entry.metadata() else { continue };
+            // Age first: a running job keeps a recent mtime, so the body is only
+            // read for the small expired subset instead of every record.
+            let Ok(modified) = meta.modified() else {
+                tracing::debug!(path = %path.display(), "retention: mtime unreadable, skipping");
+                continue;
+            };
+            let expired = now
+                .duration_since(modified)
+                .map(|age| age > ttl)
+                .unwrap_or(false);
+            if !expired {
+                continue;
+            }
             let Ok(text) = std::fs::read_to_string(&path) else { continue };
             let terminal = serde_json::from_str::<serde_json::Value>(&text)
                 .ok()
@@ -139,15 +173,7 @@ pub fn sweep(state: &AppState) -> SweepReport {
                     )
                 })
                 .unwrap_or(false);
-            if !terminal {
-                continue;
-            }
-            let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-            let expired = now
-                .duration_since(modified)
-                .map(|age| age > ttl)
-                .unwrap_or(false);
-            if expired && std::fs::remove_file(&path).is_ok() {
+            if terminal && std::fs::remove_file(&path).is_ok() {
                 report.jobs_removed += 1;
             }
         }
@@ -161,7 +187,7 @@ fn remove_asset(state: &AppState, path: &std::path::Path) -> bool {
     let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
         return false;
     };
-    state.assets.delete(stem)
+    state.assets.delete(stem).unwrap_or(false)
 }
 
 fn directory_size(path: &std::path::Path) -> u64 {

@@ -219,13 +219,21 @@ pub fn screenshot_html(
     }
     args.push(file_uri(&page));
 
-    let mut child = Command::new(&chrome.path)
+    let mut child = match Command::new(&chrome.path)
         .args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("cannot spawn {}: {e}", chrome.path.display()))?;
+    {
+        Ok(child) => child,
+        Err(e) => {
+            // The page file already exists; a deployment that cannot spawn would
+            // otherwise leave one orphan per attempt.
+            let _ = std::fs::remove_file(&page);
+            return Err(format!("cannot spawn {}: {e}", chrome.path.display()));
+        }
+    };
 
     // Drain stderr on its own thread so the browser can never block on a full pipe.
     let stderr = child.stderr.take();

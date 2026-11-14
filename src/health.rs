@@ -45,6 +45,9 @@ pub fn snapshot(state: &AppState) -> serde_json::Value {
             if ffmpeg_ready { None } else { Some("ffmpeg not found on PATH; set NMEDIA_FFMPEG") },
         ),
     ];
+    // `status` keeps the Node meaning ("any lane ready"), which is a constant
+    // while the image lane is local. `ready` is the honest gate: every lane up.
+    let all_ready = lanes.iter().all(|(_, _, ready, _)| *ready);
     let mut processors = serde_json::Map::new();
     let mut details = serde_json::Map::new();
     for (lane, backend, ready, reason) in lanes {
@@ -60,6 +63,7 @@ pub fn snapshot(state: &AppState) -> serde_json::Value {
 
     serde_json::json!({
         "status": if processors.values().any(|v| v == "ready") { "ok" } else { "starting" },
+        "ready": all_ready,
         "uptime": state.started.elapsed().as_secs(),
         "processors": processors,
         "checkedAt": rfc3339_now(),
@@ -93,7 +97,8 @@ fn rfc3339_now() -> String {
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
     let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    // `z` is `days + 719_468` with days from a u64, so it can never be negative.
+    let era = z / 146_097;
     let doe = (z - era * 146_097) as u64;
     let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
     let y = yoe as i64 + era * 400;

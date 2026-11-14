@@ -113,15 +113,31 @@ pub async fn image(State(state): State<Arc<AppState>>, Json(body): Json<Value>) 
     // The same endpoint also accepts a crop rectangle; resolve it against the
     // decoded size rather than making callers do the arithmetic.
     let source = if let Some(crop) = body.get("crop") {
-        match image::load_from_memory(&source) {
-            Ok(probe) => match crop_rect(crop, probe.width(), probe.height()) {
-                Ok(rect) => {
-                    opts.crop = Some(rect);
-                    source
-                }
-                Err(e) => return fail(StatusCode::BAD_REQUEST, e),
-            },
-            Err(e) => return fail(StatusCode::UNPROCESSABLE_ENTITY, format!("cannot decode image: {e}")),
+        // A full decode only to learn the dimensions: it belongs on the blocking
+        // pool, not on the runtime worker that serves every other request.
+        let probe_source = source.clone();
+        let dimensions = tokio::task::spawn_blocking(move || {
+            image::load_from_memory(&probe_source).map(|probe| (probe.width(), probe.height()))
+        })
+        .await;
+        let (width, height) = match dimensions {
+            Ok(Ok(dimensions)) => dimensions,
+            Ok(Err(e)) => {
+                return fail(StatusCode::UNPROCESSABLE_ENTITY, format!("cannot decode image: {e}"))
+            }
+            Err(e) => {
+                return fail(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("decode task failed: {e}"),
+                )
+            }
+        };
+        match crop_rect(crop, width, height) {
+            Ok(rect) => {
+                opts.crop = Some(rect);
+                source
+            }
+            Err(e) => return fail(StatusCode::BAD_REQUEST, e),
         }
     } else {
         source
@@ -159,12 +175,25 @@ pub async fn image_crop(State(state): State<Arc<AppState>>, Json(body): Json<Val
         Err(response) => return response,
     };
 
-    // Pixel geometry needs the real dimensions, so decode once up front.
-    let probe = match image::load_from_memory(&source) {
-        Ok(img) => img,
-        Err(e) => return fail(StatusCode::UNPROCESSABLE_ENTITY, format!("cannot decode image: {e}")),
+    // Pixel geometry needs the real dimensions, so decode once up front — on the
+    // blocking pool, and without keeping the decoded image alive on this thread.
+    let probe_source = source.clone();
+    let (width, height) = match tokio::task::spawn_blocking(move || {
+        image::load_from_memory(&probe_source).map(|probe| (probe.width(), probe.height()))
+    })
+    .await
+    {
+        Ok(Ok(dimensions)) => dimensions,
+        Ok(Err(e)) => {
+            return fail(StatusCode::UNPROCESSABLE_ENTITY, format!("cannot decode image: {e}"))
+        }
+        Err(e) => {
+            return fail(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("decode task failed: {e}"),
+            )
+        }
     };
-    let (width, height) = (probe.width(), probe.height());
     let Some(crop) = body.get("crop") else {
         return fail(StatusCode::BAD_REQUEST, "crop is required");
     };
@@ -172,7 +201,6 @@ pub async fn image_crop(State(state): State<Arc<AppState>>, Json(body): Json<Val
         Ok(rect) => rect,
         Err(e) => return fail(StatusCode::BAD_REQUEST, e),
     };
-    drop(probe);
     opts.crop = Some(rect);
 
     let work = state.config.cache_dir.join("work");
@@ -252,7 +280,7 @@ async fn read_source(state: &Arc<AppState>, body: &Value) -> Result<Vec<u8>, Res
         .or_else(|| body.get("inputPath"))
         .and_then(|v| v.as_str())
         .map(str::to_string);
-    let path = match resolve_any(state, file_id, input_path) {
+    let path = match resolve_any(state, file_id, input_path).await {
         Ok(path) => path,
         Err(e) => {
             return Err(fail(
@@ -352,7 +380,7 @@ pub async fn video_probe(State(state): State<Arc<AppState>>, Json(body): Json<Pr
 }
 
 async fn probe(state: Arc<AppState>, body: ProbeBody) -> Response {
-    let path = match resolve_any(&state, body.file_id, body.input_path) {
+    let path = match resolve_any(&state, body.file_id, body.input_path).await {
         Ok(path) => path,
         Err(e) => {
             return fail(
@@ -388,7 +416,7 @@ impl ResolveError {
     }
 }
 
-fn resolve_any(
+async fn resolve_any(
     state: &AppState,
     file_id: Option<String>,
     input_path: Option<String>,
@@ -400,12 +428,15 @@ fn resolve_any(
             return Err(ResolveError::UnknownId(file_id));
         }
         let dir = state.config.uploads_dir.join(&file_id);
-        return std::fs::read_dir(dir)
-            .ok()
-            .and_then(|mut entries| entries.next())
-            .and_then(|entry| entry.ok())
-            .map(|entry| entry.path())
-            .ok_or(ResolveError::UnknownId(file_id));
+        // A directory scan can sit on a network volume, so it is not run on the
+        // runtime worker.
+        return match tokio::fs::read_dir(dir).await {
+            Ok(mut entries) => match entries.next_entry().await {
+                Ok(Some(entry)) => Ok(entry.path()),
+                _ => Err(ResolveError::UnknownId(file_id)),
+            },
+            Err(_) => Err(ResolveError::UnknownId(file_id)),
+        };
     }
     input_path.map(PathBuf::from).ok_or(ResolveError::Missing)
 }
@@ -427,7 +458,7 @@ pub async fn thumbnail(
     AxumPath(relative): AxumPath<String>,
     Query(query): Query<ThumbQuery>,
 ) -> Response {
-    let path = match resolve_any(&state, None, Some(relative)) {
+    let path = match resolve_any(&state, None, Some(relative)).await {
         Ok(path) => path,
         Err(e) => return fail(StatusCode::BAD_REQUEST, e.message("a file path is required")),
     };
@@ -479,17 +510,25 @@ pub async fn info(State(state): State<Arc<AppState>>, AxumPath(relative): AxumPa
 
     // Sniff the header before reading a 500 MB video into memory to prove it is
     // not an image.
-    let head = match std::fs::File::open(&path) {
-        Ok(mut file) => {
-            use std::io::Read;
-            let mut buf = vec![0u8; 64];
-            match file.read(&mut buf) {
-                Ok(n) => buf.truncate(n),
-                Err(e) => return fail(StatusCode::INTERNAL_SERVER_ERROR, format!("cannot read: {e}")),
+    // Async open/read: the path may sit on a network volume, and the rest of this
+    // handler already uses tokio::fs.
+    let head = {
+        use tokio::io::AsyncReadExt;
+        match tokio::fs::File::open(&path).await {
+            Ok(mut file) => {
+                let mut buf = vec![0u8; 64];
+                match file.read(&mut buf).await {
+                    Ok(n) => {
+                        buf.truncate(n);
+                        buf
+                    }
+                    Err(e) => {
+                        return fail(StatusCode::INTERNAL_SERVER_ERROR, format!("cannot read: {e}"))
+                    }
+                }
             }
-            buf
+            Err(e) => return fail(StatusCode::INTERNAL_SERVER_ERROR, format!("cannot read: {e}")),
         }
-        Err(e) => return fail(StatusCode::INTERNAL_SERVER_ERROR, format!("cannot read: {e}")),
     };
 
     if let Ok(format) = image::guess_format(&head) {
@@ -538,12 +577,18 @@ pub async fn create_task(
         return (status, bytes).into_response();
     }
     let parsed: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    // An empty id is a task nobody can poll: fail like legacy_av does.
     let job_id = parsed
         .get("data")
         .and_then(|d| d.get("jobId"))
         .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_string();
+        .map(str::to_string);
+    let Some(job_id) = job_id else {
+        return fail(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "job was admitted but no id came back",
+        );
+    };
     crate::ok(serde_json::json!({
         "taskId": job_id,
         "jobId": job_id,
