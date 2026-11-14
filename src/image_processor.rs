@@ -174,6 +174,16 @@ fn finish(mut img: DynamicImage, opts: &ImageOptions, fallback: Target) -> Resul
         img = img.grayscale();
     }
     if let Some(sigma) = opts.blur {
+        // A radius wider than the image blurs to a flat field. Unbounded, the
+        // kernel is request-controlled: JSON 1e40 becomes f32::INFINITY, which
+        // passes a `> 0` guard and sizes an allocation the process cannot survive.
+        let widest = img.width().max(img.height()) as f32;
+        if !sigma.is_finite() || sigma < 0.0 {
+            return Err(format!("blur must be a finite, non-negative number, got {sigma}"));
+        }
+        if sigma > widest {
+            return Err(format!("blur {sigma} is wider than the image ({widest}px)"));
+        }
         if sigma > 0.0 {
             let blurred = image::imageops::blur(&img.to_rgba8(), sigma);
             img = DynamicImage::ImageRgba8(blurred);
@@ -323,10 +333,13 @@ fn decode(bytes: &[u8], opts: &ImageOptions, work: &std::path::Path) -> Result<D
 
 fn looks_like_svg(bytes: &[u8]) -> bool {
     let head = &bytes[..bytes.len().min(2048)];
-    match std::str::from_utf8(head) {
-        Ok(text) => text.contains("<svg") || text.trim_start().starts_with("<?xml"),
-        Err(_) => false,
-    }
+    // The cut can land inside a multibyte character; a valid SVG must not be
+    // classified as not-SVG and handed to the raster decoder.
+    let text = match std::str::from_utf8(head) {
+        Ok(text) => text,
+        Err(e) => std::str::from_utf8(&head[..e.valid_up_to()]).unwrap_or(""),
+    };
+    text.contains("<svg") || text.trim_start().starts_with("<?xml")
 }
 
 /// SVG lands here instead of a browser process: `resvg` renders it in-process.
@@ -383,11 +396,24 @@ fn svg_size(bytes: &[u8]) -> Result<(u32, u32), String> {
     let head = &text[..end];
 
     fn attr(text: &str, name: &str) -> Option<f64> {
-        let start = text.find(&format!("{name}=\""))? + name.len() + 2;
-        let rest = &text[start..];
-        let end = rest.find('"')?;
-        let value = rest[..end].trim_end_matches("px").trim();
-        value.parse::<f64>().ok()
+        // `width="` also occurs inside `stroke-width="`; only an attribute that
+        // starts a word counts, or a child's stroke reads as the canvas size.
+        let pattern = format!("{name}=\"");
+        let mut from = 0;
+        loop {
+            let at = from + text[from..].find(&pattern)?;
+            let starts_word = match text[..at].chars().next_back() {
+                None => true,
+                Some(previous) => previous.is_whitespace() || previous == '<',
+            };
+            if starts_word {
+                let rest = &text[at + pattern.len()..];
+                let end = rest.find('"')?;
+                let value = rest[..end].trim_end_matches("px").trim();
+                return value.parse::<f64>().ok();
+            }
+            from = at + text[at..].chars().next().map(char::len_utf8).unwrap_or(1);
+        }
     }
 
     let (w, h) = match (attr(head, "width"), attr(head, "height")) {
@@ -476,6 +502,13 @@ fn apply_resize(mut img: DynamicImage, opts: &ImageOptions) -> Result<DynamicIma
     if let (Some(width), Some(height)) = (opts.width, opts.height) {
         if width == 0 || height == 0 {
             return Err("width/height must be greater than zero".into());
+        }
+        // The allocation is w*h*bytes and a failed one aborts the process, not the
+        // job; a single request must not be able to ask for 10 GB.
+        if width as u64 * height as u64 > 80_000_000 {
+            return Err(format!(
+                "resize to {width}x{height} exceeds the 80 megapixel limit"
+            ));
         }
         img = resize_fast(&img, width, height)?;
         return Ok(img);
@@ -722,6 +755,25 @@ mod tests {
         svg.push('é');
         svg.push_str("</svg>");
         assert_eq!(svg_size(svg.as_bytes()), Ok((10, 20)));
+    }
+
+    #[test]
+    fn a_childs_attributes_are_not_the_canvas() {
+        // Neither root width/height is present; without the word boundary the
+        // child's stroke-width and line-height would be read as the canvas.
+        let svg = br#"<svg viewBox="0 0 100 100"><rect stroke-width="4" line-height="5"/></svg>"#;
+        assert_eq!(svg_size(svg), Ok((100, 100)));
+    }
+
+    #[test]
+    fn an_svg_survives_a_multibyte_cut() {
+        let mut svg = String::from("<svg width=\"10\" height=\"20\">");
+        while svg.len() < 2047 {
+            svg.push('x');
+        }
+        svg.push('é');
+        svg.push_str("</svg>");
+        assert!(looks_like_svg(svg.as_bytes()));
     }
 
     #[test]

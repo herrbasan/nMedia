@@ -22,14 +22,15 @@ pub fn snapshot(state: &AppState) -> serde_json::Value {
     // Readiness is a probe, not a slogan: the image lane is this binary, the
     // audio/video lanes are ffmpeg, and a missing engine is named here rather
     // than discovered at job time.
-    let ffmpeg = crate::ffmpeg::ffmpeg_path();
+    // The probed engine is the single source of truth. A per-request re-probe can
+    // disagree with backends.ffmpeg in the same payload, and costs a PATH walk.
+    let ffmpeg = state.engines.ffmpeg.as_ref();
     let ffmpeg_ready = ffmpeg.is_some();
     let lanes: [(&str, String, bool, Option<&str>); 3] = [
         ("image", "rust image crate".into(), true, None),
         (
             "audio",
             ffmpeg
-                .as_ref()
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|| "ffmpeg".into()),
             ffmpeg_ready,
@@ -38,7 +39,6 @@ pub fn snapshot(state: &AppState) -> serde_json::Value {
         (
             "video",
             ffmpeg
-                .as_ref()
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|| "ffmpeg".into()),
             ffmpeg_ready,
@@ -82,10 +82,14 @@ pub fn snapshot(state: &AppState) -> serde_json::Value {
 }
 
 fn rfc3339_now() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let secs = match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(elapsed) => elapsed.as_secs(),
+        // A pre-1970 clock makes every timestamp a plausible-looking lie; say so.
+        Err(e) => {
+            tracing::warn!(?e, "system clock is before UNIX_EPOCH; checkedAt is not meaningful");
+            0
+        }
+    };
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
     let z = days + 719_468;

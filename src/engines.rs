@@ -63,17 +63,40 @@ impl Engines {
     }
 }
 
+/// The engine was resolved but cannot run (not executable, wrong arch, broken
+/// wrapper). That is not the same as "this ffmpeg lacks the feature", and an empty
+/// capability list would read as the latter — so the failure is named.
+fn probe_output(binary: &PathBuf, args: &[&str]) -> Option<String> {
+    match Command::new(binary).args(args).output() {
+        Ok(output) if output.status.success() => Some(String::from_utf8_lossy(&output.stdout).to_string()),
+        Ok(output) => {
+            tracing::warn!(
+                binary = %binary.display(),
+                args = ?args,
+                status = %output.status,
+                "engine probe exited with a failure status; reporting no capability"
+            );
+            None
+        }
+        Err(e) => {
+            tracing::warn!(
+                binary = %binary.display(),
+                args = ?args,
+                error = %e,
+                "engine probe could not run; reporting no capability"
+            );
+            None
+        }
+    }
+}
+
 fn version_line(binary: &PathBuf) -> Option<String> {
-    let output = Command::new(binary).args(["-hide_banner", "-version"]).output().ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
+    let text = probe_output(binary, &["-hide_banner", "-version"])?;
     text.lines().next().map(|line| line.trim().to_string())
 }
 
 fn lines(binary: &PathBuf, args: &[&str], skip: usize) -> Vec<String> {
-    let output = Command::new(binary).args(args).output().ok();
-    let text = output
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-        .unwrap_or_default();
+    let text = probe_output(binary, args).unwrap_or_default();
     text.lines()
         .skip(skip)
         .map(|l| l.trim().to_string())
@@ -83,11 +106,9 @@ fn lines(binary: &PathBuf, args: &[&str], skip: usize) -> Vec<String> {
 
 /// Encoder table rows look like ` V....D h264_nvenc  NVIDIA NVENC H.264 encoder (codec h264)`.
 fn parse_encoders(binary: &PathBuf) -> Vec<Encoder> {
-    let output = match Command::new(binary).args(["-hide_banner", "-encoders"]).output() {
-        Ok(output) => output,
-        Err(_) => return Vec::new(),
+    let Some(text) = probe_output(binary, &["-hide_banner", "-encoders"]) else {
+        return Vec::new();
     };
-    let text = String::from_utf8_lossy(&output.stdout);
     let mut encoders = Vec::new();
     for line in text.lines() {
         let trimmed = line.trim_start();

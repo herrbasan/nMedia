@@ -40,23 +40,31 @@ pub struct VideoOptions {
 /// `NMEDIA_FFMPEG` wins, then the first `ffmpeg` on PATH. Returns `None` so the
 /// caller can report an unavailable processor instead of failing at job time.
 pub fn ffmpeg_path() -> Option<PathBuf> {
-    if let Ok(explicit) = std::env::var("NMEDIA_FFMPEG") {
-        if !explicit.trim().is_empty() {
-            let p = PathBuf::from(explicit);
-            return p.is_file().then_some(p);
-        }
-    }
-    which("ffmpeg")
+    configured("NMEDIA_FFMPEG").or_else(|| which("ffmpeg"))
 }
 
 pub fn ffprobe_path() -> Option<PathBuf> {
-    if let Ok(explicit) = std::env::var("NMEDIA_FFPROBE") {
-        if !explicit.trim().is_empty() {
-            let p = PathBuf::from(explicit);
-            return p.is_file().then_some(p);
-        }
+    configured("NMEDIA_FFPROBE").or_else(|| which("ffprobe"))
+}
+
+/// A pinned binary is authoritative, so a rejected override is named rather than
+/// silently swapped for whatever PATH happens to hold.
+fn configured(var: &str) -> Option<PathBuf> {
+    let Ok(explicit) = std::env::var(var) else { return None };
+    let trimmed = explicit.trim();
+    if trimmed.is_empty() {
+        return None;
     }
-    which("ffprobe")
+    let path = PathBuf::from(trimmed);
+    if path.is_file() {
+        return Some(path);
+    }
+    tracing::warn!(
+        variable = var,
+        path = %path.display(),
+        "configured binary is not a file; falling back to PATH"
+    );
+    None
 }
 
 fn which(name: &str) -> Option<PathBuf> {
@@ -68,6 +76,17 @@ fn which(name: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Tracking is an RAII pair, not a manual call at each exit: a future dropped at
+/// an await (aborted request, select branch) would otherwise leave a dead pid in
+/// the registry, and a recycled pid is what `kill_all_children` would then kill.
+struct Tracked(Option<u32>);
+
+impl Drop for Tracked {
+    fn drop(&mut self) {
+        untrack(self.0);
+    }
 }
 
 /// Live child pids, so a graceful shutdown can stop work instead of leaving an
@@ -247,14 +266,27 @@ pub async fn extract_keyframes(
     cancel: &Notify,
 ) -> Result<usize, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    // ffmpeg overwrites frame-0001..N but never deletes the tail of a longer
+    // earlier run, so a reused directory would report frames it did not write.
+    for entry in std::fs::read_dir(dir).map_err(|e| format!("cannot read {}: {e}", dir.display()))? {
+        let stale = entry
+            .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
+            .path();
+        if stale.extension().map(|ext| ext == "jpg").unwrap_or(false) {
+            std::fs::remove_file(&stale)
+                .map_err(|e| format!("cannot clear {}: {e}", stale.display()))?;
+        }
+    }
     let mut args = base_args(input);
     args.push("-vf".into());
     args.push(format!("fps={fps}"));
     args.push(dir.join("frame-%04d.jpg").to_string_lossy().to_string());
     run(&args, cancel, Duration::from_secs(1800)).await?;
     let count = std::fs::read_dir(dir)
-        .map(|rd| rd.filter_map(|e| e.ok()).count())
-        .unwrap_or(0);
+        .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().extension().map(|ext| ext == "jpg").unwrap_or(false))
+        .count();
     if count == 0 {
         return Err("ffmpeg produced no keyframes — check the input duration and fps".into());
     }
@@ -287,11 +319,19 @@ async fn run(args: &[String], cancel: &Notify, timeout: Duration) -> Result<(), 
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
+    // Registered before the child exists: a cancel issued between spawn and the
+    // first poll of the select would otherwise be lost, and the transcode would
+    // run to its full timeout instead of stopping.
+    let cancelled = cancel.notified();
+    tokio::pin!(cancelled);
+    cancelled.as_mut().enable();
+
     let mut child = command
         .spawn()
         .map_err(|e| format!("cannot spawn {}: {e}", program.display()))?;
     let pid = child.id();
     track(pid);
+    let _tracked = Tracked(pid);
 
     // Drain stderr *while* the process runs: an undrained pipe blocks ffmpeg at
     // the OS buffer size, and reading only after failure would deadlock before
@@ -321,22 +361,19 @@ async fn run(args: &[String], cancel: &Notify, timeout: Duration) -> Result<(), 
 
     let outcome = tokio::select! {
         status = child.wait() => status.map(|s| s.success()),
-        _ = cancel.notified() => {
+        _ = &mut cancelled => {
             let _ = child.start_kill();
             let _ = child.wait().await;
-            untrack(pid);
             let _ = drain.await;
             return Err("cancelled".to_string());
         }
         _ = tokio::time::sleep(timeout) => {
             let _ = child.start_kill();
             let _ = child.wait().await;
-            untrack(pid);
             let _ = drain.await;
             return Err(format!("ffmpeg exceeded {} s and was killed", timeout.as_secs()));
         }
     };
-    untrack(pid);
     let detail = drain.await.unwrap_or_default();
 
     match outcome {
@@ -378,6 +415,10 @@ pub async fn decode_image_rgb(
     let program = ffmpeg_path().ok_or_else(|| {
         "ffmpeg not found: set NMEDIA_FFMPEG or put ffmpeg on PATH (needed for HEIC/HEIF)".to_string()
     })?;
+    let cancelled = cancel.notified();
+    tokio::pin!(cancelled);
+    cancelled.as_mut().enable();
+
     let mut child = Command::new(&program)
         .args([
             "-nostdin".to_string(),
@@ -403,13 +444,17 @@ pub async fn decode_image_rgb(
 
     let pid = child.id();
     track(pid);
+    let _tracked = Tracked(pid);
     let mut stdout = child.stdout.take();
     let mut stderr = child.stderr.take();
     let stdout_task = tokio::spawn(async move {
         use tokio::io::AsyncReadExt;
+        // A still image may declare any dimensions, and ffmpeg honours them: an
+        // unbounded read is a single-request OOM for the whole process.
+        const MAX_PPM: u64 = 256 * 1024 * 1024;
         let mut buffer = Vec::new();
         if let Some(pipe) = stdout.as_mut() {
-            let _ = pipe.read_to_end(&mut buffer).await;
+            let _ = pipe.take(MAX_PPM).read_to_end(&mut buffer).await;
         }
         buffer
     });
@@ -424,10 +469,9 @@ pub async fn decode_image_rgb(
 
     let status = tokio::select! {
         result = child.wait() => result.map_err(|e| format!("ffmpeg process error: {e}"))?,
-        _ = cancel.notified() => {
+        _ = &mut cancelled => {
             let _ = child.start_kill();
             let _ = child.wait().await;
-            untrack(pid);
             let _ = stdout_task.await;
             let _ = stderr_task.await;
             return Err("cancelled".to_string());
@@ -437,13 +481,11 @@ pub async fn decode_image_rgb(
         () = tokio::time::sleep(Duration::from_secs(60)) => {
             let _ = child.start_kill();
             let _ = child.wait().await;
-            untrack(pid);
             let _ = stdout_task.await;
             let _ = stderr_task.await;
             return Err("ffmpeg image decode exceeded 60 s and was killed".to_string());
         }
     };
-    untrack(pid);
     let data = stdout_task.await.unwrap_or_default();
     let detail = stderr_task.await.unwrap_or_default();
 

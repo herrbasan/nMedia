@@ -241,8 +241,17 @@ async fn read_source(state: &Arc<AppState>, body: &Value) -> Result<Vec<u8>, Res
         return crate::util::base64_decode(payload)
             .ok_or_else(|| fail(StatusCode::BAD_REQUEST, "base64 payload is not valid base64"));
     }
-    let file_id = body.get("file_id").and_then(|v| v.as_str()).map(str::to_string);
-    let input_path = body.get("input_path").and_then(|v| v.as_str()).map(str::to_string);
+    // Either spelling: the upload response says `fileId`, the option keys say snake.
+    let file_id = body
+        .get("file_id")
+        .or_else(|| body.get("fileId"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let input_path = body
+        .get("input_path")
+        .or_else(|| body.get("inputPath"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     let path = match resolve_any(state, file_id, input_path) {
         Ok(path) => path,
         Err(e) => {
@@ -328,9 +337,9 @@ async fn legacy_av(state: Arc<AppState>, request: ProcessRequest, processor: &st
 
 #[derive(Debug, Deserialize)]
 pub struct ProbeBody {
-    #[serde(default)]
+    #[serde(default, alias = "inputPath")]
     pub input_path: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "fileId")]
     pub file_id: Option<String>,
 }
 

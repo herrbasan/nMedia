@@ -29,16 +29,19 @@ const VALID_VIDEO_MODES: [&str; 3] = ["extract_audio", "extract_keyframes", "tra
 
 #[derive(Debug, Deserialize)]
 pub struct ProcessRequest {
-    #[serde(default)]
+    // The upload response hands back `fileId`, so the documented flow says
+    // camelCase while the option keys are snake_case. Both spellings are accepted
+    // rather than making a caller guess which half of the contract is which.
+    #[serde(default, alias = "inputPath")]
     pub input_path: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "fileId")]
     pub file_id: Option<String>,
     pub processor: String,
     #[serde(default)]
     pub mode: Option<String>,
     #[serde(default)]
     pub options: Option<Value>,
-    #[serde(default)]
+    #[serde(default, alias = "outputPath")]
     pub output_path: Option<String>,
 }
 
@@ -101,12 +104,16 @@ pub async fn upload(
     while let Some(chunk) = stream.next().await {
         let chunk = match chunk {
             Ok(c) => c,
-            Err(e) => return bad(format!("upload stream failed: {e}")),
+            Err(e) => {
+                drop(file);
+                discard_upload(&dir);
+                return bad(format!("upload stream failed: {e}"));
+            }
         };
         written += chunk.len() as u64;
         if written > state.config.max_file_size_bytes {
             drop(file);
-            let _ = std::fs::remove_dir_all(&dir);
+            discard_upload(&dir);
             return (
                 StatusCode::PAYLOAD_TOO_LARGE,
                 Json(serde_json::json!({
@@ -117,10 +124,14 @@ pub async fn upload(
                 .into_response();
         }
         if let Err(e) = file.write_all(&chunk).await {
+            drop(file);
+            discard_upload(&dir);
             return internal(&format!("cannot write upload: {e}"));
         }
     }
     if let Err(e) = file.flush().await {
+        drop(file);
+        discard_upload(&dir);
         return internal(&format!("cannot flush upload: {e}"));
     }
     drop(file);
@@ -436,9 +447,25 @@ fn publish(source: &Path, destination: &Path) -> Result<(), String> {
             .map_err(|e| format!("cannot replace {}: {e}", destination.display()))?;
     }
     std::fs::rename(&temp, destination).map_err(|e| {
-        let _ = std::fs::remove_file(&temp);
+        // The temp file lives in the caller's own output tree, which nothing else
+        // sweeps, so a failed cleanup has to be visible.
+        if let Err(cleanup) = std::fs::remove_file(&temp) {
+            tracing::warn!(
+                temp = %temp.display(),
+                error = %cleanup,
+                "failed to remove publish temp file"
+            );
+        }
         format!("cannot move into place at {}: {e}", destination.display())
     })
+}
+
+/// An aborted upload is refused, not tolerated — but a failed removal would leave
+/// bytes nobody enumerates, so it is reported rather than discarded.
+fn discard_upload(dir: &std::path::Path) {
+    if let Err(e) = std::fs::remove_dir_all(dir) {
+        tracing::warn!(dir = %dir.display(), error = %e, "aborted upload left on disk");
+    }
 }
 enum Produced {
     Asset {

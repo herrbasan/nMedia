@@ -291,7 +291,19 @@ impl PathList {
                 self.assert_within(&canonical, what)?;
                 Ok(canonical)
             }
-            Err(_) => Ok(target),
+            // Only a genuinely absent leaf may be created. A dangling symlink is a
+            // link whose target cannot be seen, and creating through it writes
+            // wherever it points — so it is refused, not treated as missing.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let dangling = std::fs::symlink_metadata(&target)
+                    .map(|meta| meta.file_type().is_symlink())
+                    .unwrap_or(false);
+                if dangling {
+                    return Err(format!("{what} is a dangling symlink: {}", target.display()));
+                }
+                Ok(target)
+            }
+            Err(e) => Err(format!("{what} is not accessible: {} ({e})", target.display())),
         }
     }
 

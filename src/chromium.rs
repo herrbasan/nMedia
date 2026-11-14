@@ -107,6 +107,13 @@ fn exe_dir() -> Option<PathBuf> {
 /// the version it was built and tested against, not with whatever the machine
 /// updated to last night.
 pub fn resolve() -> Option<Chrome> {
+    // Resolving walks five layouts, the system paths and every PATH entry with a
+    // stat each. That is startup configuration, not per-render work.
+    static RESOLVED: std::sync::OnceLock<Option<Chrome>> = std::sync::OnceLock::new();
+    RESOLVED.get_or_init(resolve_once).clone()
+}
+
+fn resolve_once() -> Option<Chrome> {
     if let Ok(explicit) = std::env::var("NMEDIA_CHROME") {
         let trimmed = explicit.trim();
         if !trimmed.is_empty() {
@@ -249,8 +256,7 @@ pub fn screenshot_html(
             Ok(Some(status)) => break Some(status),
             Ok(None) => {
                 if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    kill_tree(&mut child);
                     killed = true;
                     break None;
                 }
@@ -258,7 +264,12 @@ pub fn screenshot_html(
             }
             Err(e) => {
                 let _ = child.kill();
+                let _ = child.wait();
+                // Every other exit arm cleans up; this one used to leak the whole
+                // profile directory plus the failed page and screenshot.
                 let _ = std::fs::remove_file(&page);
+                let _ = std::fs::remove_file(&png);
+                let _ = std::fs::remove_dir_all(&profile);
                 return Err(format!("chromium process error: {e}"));
             }
         }
@@ -306,5 +317,47 @@ pub fn svg_page(svg: &[u8], width: u32, height: u32, background: &str) -> String
 
 pub fn file_uri(path: &Path) -> String {
     let text = path.to_string_lossy().replace('\\', "/");
-    format!("file:///{}", text.trim_start_matches('/'))
+    let mut out = String::from("file:///");
+    for byte in text.trim_start_matches('/').bytes() {
+        match byte {
+            // Path separators and the drive colon stay literal; everything else
+            // outside the unreserved set is escaped, or '#' turns the rest of the
+            // path into a fragment and a space makes Chromium load nothing.
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b':' | b'-' | b'_' | b'.' | b'~'
+            | b'+' | b'@' => out.push(byte as char),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+/// Killing the browser alone leaves its renderer/GPU/crashpad children holding the
+/// stderr pipe and the profile directory, so the timeout would stop bounding time.
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_with_spaces_and_hashes_survives_the_uri() {
+        // Unescaped, '#' truncates the path into a fragment and the space makes
+        // Chromium render nothing.
+        assert_eq!(
+            file_uri(Path::new("C:\\work\\a b#c\\page.html")),
+            "file:///C:/work/a%20b%23c/page.html"
+        );
+        assert_eq!(file_uri(Path::new("/tmp/plain.png")), "file:///tmp/plain.png");
+    }
 }

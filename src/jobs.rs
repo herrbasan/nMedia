@@ -96,7 +96,15 @@ impl JobStore {
         let mut jobs = self.jobs.lock().expect("jobs lock");
         let mut order = self.order.lock().expect("order lock");
         for entry in fs::read_dir(&self.dir)? {
-            let entry = entry?;
+            // One unreadable dirent must not refuse startup, which is what the
+            // record-level tolerance below already promises.
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(e) => {
+                    tracing::warn!("skipping unreadable job directory entry: {e}");
+                    continue;
+                }
+            };
             if entry.path().extension().map(|e| e != "json").unwrap_or(true) {
                 continue;
             }
@@ -109,7 +117,7 @@ impl JobStore {
                 job.status = "interrupted".into();
                 job.error = Some("service restarted while the job was in flight".into());
                 job.updated_at = util::rfc3339_now();
-                let _ = self.persist(&job);
+                self.save(&job);
             }
             order.push(job.id.clone());
             jobs.insert(job.id.clone(), job);
@@ -118,13 +126,32 @@ impl JobStore {
         Ok(())
     }
 
+    /// The durability boundary, so a failed write is visible: the API may already
+    /// have told a caller "completed" while disk still holds "processing".
+    fn save(&self, job: &Job) {
+        if let Err(e) = self.persist(job) {
+            tracing::error!(
+                job = %job.id,
+                status = %job.status,
+                error = %e,
+                "job state reached memory but not disk"
+            );
+        }
+    }
+
     fn persist(&self, job: &Job) -> io::Result<()> {
         let text = serde_json::to_string_pretty(job)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         let path = self.dir.join(format!("{}.json", job.id));
-        let tmp = self.dir.join(format!("{}.json.tmp", job.id));
+        // A per-write temp name: cancel() and the executor can persist the same
+        // job concurrently, and a shared temp path lets one write truncate another.
+        let tmp = self.dir.join(format!("{}.{}.json.tmp", job.id, util::id()));
         fs::write(&tmp, text)?;
-        fs::rename(tmp, path)
+        if let Err(e) = fs::rename(&tmp, &path) {
+            let _ = fs::remove_file(&tmp);
+            return Err(e);
+        }
+        Ok(())
     }
 
     pub fn capacity(&self) -> usize {
@@ -134,8 +161,10 @@ impl JobStore {
     pub fn active_count(&self) -> usize {
         self.jobs
             .lock()
-            .map(|j| j.values().filter(|x| !x.terminal()).count())
-            .unwrap_or(0)
+            .expect("jobs lock")
+            .values()
+            .filter(|x| !x.terminal())
+            .count()
     }
 
     /// Admission **reserves** capacity: the permit travels with the job and is
@@ -169,7 +198,7 @@ impl JobStore {
             self.jobs.lock().expect("jobs lock").insert(job.id.clone(), job.clone());
             self.order.lock().expect("order lock").push(job.id.clone());
         }
-        let _ = self.persist(&job);
+        self.save(&job);
         let _ = self.events.send(job.clone());
         Ok((job, permit))
     }
@@ -189,7 +218,7 @@ impl JobStore {
             job.updated_at = util::rfc3339_now();
             job.clone()
         };
-        let _ = self.persist(&updated);
+        self.save(&updated);
         let _ = self.events.send(updated.clone());
         Some(updated)
     }
@@ -209,7 +238,7 @@ impl JobStore {
             job.updated_at = util::rfc3339_now();
             job.clone()
         };
-        let _ = self.persist(&updated);
+        self.save(&updated);
         let _ = self.events.send(updated.clone());
         Some(updated)
     }
@@ -230,7 +259,7 @@ impl JobStore {
             job.clone()
         };
         self.forget_cancel(id);
-        let _ = self.persist(&updated);
+        self.save(&updated);
         let _ = self.events.send(updated.clone());
         Some(updated)
     }
@@ -255,7 +284,7 @@ impl JobStore {
             job.clone()
         };
         self.forget_cancel(id);
-        let _ = self.persist(&updated);
+        self.save(&updated);
         let _ = self.events.send(updated.clone());
         Some(updated)
     }
@@ -274,7 +303,7 @@ impl JobStore {
             job.clone()
         };
         self.forget_cancel(id);
-        let _ = self.persist(&updated);
+        self.save(&updated);
         let _ = self.events.send(updated.clone());
         Some(updated)
     }
@@ -346,7 +375,7 @@ impl JobStore {
             job.clone()
         };
         self.forget_cancel(id);
-        let _ = self.persist(&updated);
+        self.save(&updated);
         let _ = self.events.send(updated.clone());
         Some(updated)
     }
@@ -399,10 +428,12 @@ pub async fn progress(
     Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>>,
     Response,
 > {
+    // Subscribe before reading the snapshot: an ending that lands between the two
+    // would otherwise be missed and the stream would hang on a job already done.
+    let mut rx = state.jobs.subscribe();
     let Some(job) = state.jobs.get(&id) else {
         return Err(not_found(&id));
     };
-    let mut rx = state.jobs.subscribe();
     let first = serde_json::to_string(&job).unwrap_or_default();
     let already_terminal = job.terminal();
     let job_id = id.clone();
