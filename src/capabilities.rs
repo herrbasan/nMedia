@@ -120,7 +120,7 @@ fn features(state: &AppState) -> serde_json::Value {
             {
                 "name": "image",
                 "available": true,
-                "engine": "rust image crate + fast_image_resize + image-webp + resvg + chromium",
+                "engine": "rust image crate + fast_image_resize + image-webp/libwebp + resvg + chromium",
                 "operations": ["resize", "crop", "format conversion", "rotate", "flip", "flop", "grayscale", "blur", "normalize"],
                 "formats": crate::image_processor::supported_outputs(),
                 "inputs": crate::image_processor::supported_inputs(),

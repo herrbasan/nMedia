@@ -25,10 +25,14 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Image work: decode with `image`, resize with SIMD, encode WebP in pure Rust.
+# Image work: decode with `image`, resize with SIMD, WebP both ways.
 image = "0.25"
 fast_image_resize = "6"
+# Lossless WebP in pure Rust; used when no quality is requested.
 image-webp = "0.2"
+# libwebp, for lossy WebP only — the pure-Rust encoder has no quality knob, and
+# `quality` is part of the contract for webp output.
+webp = { version = "0.3", default-features = false }
 resvg = "0.50"
 
 # AVIF encoding pulls rav1e — a heavy compile, so it is opt-in.

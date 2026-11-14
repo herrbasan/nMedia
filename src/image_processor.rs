@@ -1,6 +1,6 @@
 //! Image processor — the `image` crate for decoding, `fast_image_resize` for
-//! the operation that dominates the workload, `image-webp`/`resvg` for the
-//! formats sharp used to cover.
+//! the operation that dominates the workload, `image-webp`/libwebp/`resvg` for
+//! the formats sharp used to cover.
 //!
 //! Option keys are the Node service's contract (`validateOptions.js`). Options
 //! this build cannot honour are **refused by name**: silently ignoring one
@@ -674,18 +674,30 @@ fn encode(
 ) -> Result<(), String> {
     match target {
         Target::WebP => {
-            // image-webp is pure Rust and takes RGBA; quality is not exposed by
-            // this encoder, so a requested quality is reported as unsupported by
-            // `validate` only when another format was named.
             let rgba = img.to_rgba8();
-            image_webp::WebPEncoder::new(out)
-                .encode(
-                    rgba.as_raw(),
-                    rgba.width(),
-                    rgba.height(),
-                    image_webp::ColorType::Rgba8,
-                )
-                .map_err(|e| format!("cannot encode WebP: {e}"))
+            // `quality` is part of the promised contract for webp; the pure-Rust
+            // encoder is lossless-only, so a requested quality goes to libwebp
+            // and the unqualified path stays in-process and dependency-free.
+            match quality {
+                Some(quality) => {
+                    let encoded = webp::Encoder::from_rgba(
+                        rgba.as_raw(),
+                        rgba.width(),
+                        rgba.height(),
+                    )
+                    .encode(quality.clamp(1, 100) as f32);
+                    out.extend_from_slice(&encoded);
+                    Ok(())
+                }
+                None => image_webp::WebPEncoder::new(out)
+                    .encode(
+                        rgba.as_raw(),
+                        rgba.width(),
+                        rgba.height(),
+                        image_webp::ColorType::Rgba8,
+                    )
+                    .map_err(|e| format!("cannot encode WebP: {e}")),
+            }
         }
         Target::Avif => encode_avif(img, quality, out),
         other => {
@@ -755,6 +767,30 @@ mod tests {
         svg.push('é');
         svg.push_str("</svg>");
         assert_eq!(svg_size(svg.as_bytes()), Ok((10, 20)));
+    }
+
+    #[test]
+    fn a_requested_webp_quality_reaches_the_encoder() {
+        // Noise, so a lossy encode at q5 is unmistakably smaller than q95; before
+        // libwebp both qualities produced the same lossless bytes.
+        let mut noise = image::RgbImage::new(64, 64);
+        let mut seed: u32 = 12345;
+        for pixel in noise.pixels_mut() {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            *pixel = image::Rgb([(seed >> 24) as u8, (seed >> 16) as u8, (seed >> 8) as u8]);
+        }
+        let img = DynamicImage::ImageRgb8(noise);
+        let mut low = Vec::new();
+        let mut high = Vec::new();
+        encode(&img, Target::WebP, Some(5), &mut low).unwrap();
+        encode(&img, Target::WebP, Some(95), &mut high).unwrap();
+        assert!(
+            low.len() < high.len(),
+            "quality must change the output: q5={} q95={}",
+            low.len(),
+            high.len()
+        );
+        assert_eq!(&low[0..4], b"RIFF");
     }
 
     #[test]

@@ -73,6 +73,10 @@ purpose.
 - **Transparency:** tiny-skia hands back *premultiplied* RGBA — un-premultiply
   before encoding or translucent pixels darken. Formats that cannot carry alpha
   (JPEG, BMP) **refuse** unless `background` or `transparent:false` is given.
+- **WebP has two encoders.** No `quality` → `image-webp` (pure Rust, lossless,
+  in-process). With `quality` → libwebp through the `webp` crate, because the
+  pure-Rust encoder has no quality knob and ignoring the request would return
+  media that looks right and is not. `quality` is part of the webp contract.
 - **SVG has two engines.** Chromium is exact (CSS variables, media queries, font
   weights); resvg is in-process and approximate — its limits are published in
   `/v1/capabilities`. Default is Chromium when a browser resolves.
