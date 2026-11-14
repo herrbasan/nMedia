@@ -76,25 +76,26 @@ fn which(name: &str) -> Option<PathBuf> {
 /// build; the startup sweep in `main` is why it stays a nuisance, not a leak.
 static CHILDREN: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
 
+// A poisoned lock cannot corrupt a Vec<u32>, and losing the registry would mean
+// orphaned transcodes, so the guard is recovered rather than dropped.
 fn track(pid: Option<u32>) {
     if let Some(pid) = pid {
-        if let Ok(mut list) = CHILDREN.lock() {
-            list.push(pid);
-        }
+        CHILDREN.lock().unwrap_or_else(|e| e.into_inner()).push(pid);
     }
 }
 
 fn untrack(pid: Option<u32>) {
     if let Some(pid) = pid {
-        if let Ok(mut list) = CHILDREN.lock() {
-            list.retain(|p| *p != pid);
-        }
+        CHILDREN
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|p| *p != pid);
     }
 }
 
 /// Kill every child still running. Called on shutdown, after admission stops.
 pub fn kill_all_children() -> usize {
-    let pids: Vec<u32> = CHILDREN.lock().map(|l| l.clone()).unwrap_or_default();
+    let pids: Vec<u32> = CHILDREN.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let mut killed = 0;
     for pid in pids {
         let status = if cfg!(windows) {
@@ -431,6 +432,16 @@ pub async fn decode_image_rgb(
             let _ = stderr_task.await;
             return Err("cancelled".to_string());
         }
+        // Without this arm a stalled decode (corrupt frame, blocked pipe) never
+        // reaches an exit and the request lives until the process restarts.
+        () = tokio::time::sleep(Duration::from_secs(60)) => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            untrack(pid);
+            let _ = stdout_task.await;
+            let _ = stderr_task.await;
+            return Err("ffmpeg image decode exceeded 60 s and was killed".to_string());
+        }
     };
     untrack(pid);
     let data = stdout_task.await.unwrap_or_default();
@@ -491,10 +502,11 @@ fn parse_ppm(data: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
 }
 
 /// `ffprobe -print_format json` — the shape `/v1/info` and the probes report.
-pub async fn probe(path: &Path) -> Result<serde_json::Value, String> {    let program = ffprobe_path().ok_or_else(|| {
+pub async fn probe(path: &Path) -> Result<serde_json::Value, String> {
+    let program = ffprobe_path().ok_or_else(|| {
         "ffprobe not found: set NMEDIA_FFPROBE or put ffprobe on PATH".to_string()
     })?;
-    let output = Command::new(&program)
+    let child = Command::new(&program)
         .args([
             "-v".to_string(),
             "error".to_string(),
@@ -505,9 +517,20 @@ pub async fn probe(path: &Path) -> Result<serde_json::Value, String> {    let pr
             path.to_string_lossy().to_string(),
         ])
         .stdin(Stdio::null())
-        .output()
-        .await
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
         .map_err(|e| format!("cannot run ffprobe: {e}"))?;
+    // A pipe, a stalled mount or a half-written container blocks forever; the
+    // same budget `run` uses is what keeps the request (and the pid) bounded.
+    let pid = child.id();
+    track(pid);
+    let output = tokio::time::timeout(Duration::from_secs(60), child.wait_with_output()).await;
+    untrack(pid);
+    let output = output
+        .map_err(|_| "ffprobe exceeded 60 s and was killed".to_string())?
+        .map_err(|e| format!("ffprobe process error: {e}"))?;
     if !output.status.success() {
         return Err(format!(
             "ffprobe failed: {}",

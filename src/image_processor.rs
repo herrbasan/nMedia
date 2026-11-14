@@ -257,8 +257,13 @@ fn parse_color(value: &str) -> Option<image::Rgba<u8>> {
         "white" => [255, 255, 255, 255],
         "black" => [0, 0, 0, 255],
         _ => {
-            let hex = text.trim_start_matches('#');
-            let parse = |s: &str| u8::from_str_radix(s, 16).ok();
+            // Sliced as bytes: a byte range chosen from the length of a multibyte
+            // string lands mid-character, and `&hex[1..2]` would panic.
+            let hex = text.trim_start_matches('#').as_bytes();
+            if !hex.is_ascii() {
+                return None;
+            }
+            let parse = |s: &[u8]| std::str::from_utf8(s).ok().and_then(|s| u8::from_str_radix(s, 16).ok());
             match hex.len() {
                 3 => {
                     let (r, g, b) = (parse(&hex[0..1])?, parse(&hex[1..2])?, parse(&hex[2..3])?);
@@ -279,7 +284,15 @@ fn parse_color(value: &str) -> Option<image::Rgba<u8>> {
 }
 
 fn has_transparency(img: &DynamicImage) -> bool {
-    img.to_rgba8().pixels().any(|p| p.0[3] < 255)
+    // Only a buffer with an alpha channel can carry transparency; converting an
+    // opaque RGB photo to RGBA just to prove that costs a full-image copy.
+    match img {
+        DynamicImage::ImageRgba8(buffer) => buffer.pixels().any(|p| p.0[3] < 255),
+        DynamicImage::ImageLumaA8(buffer) => buffer.pixels().any(|p| p.0[1] < 255),
+        DynamicImage::ImageRgba16(buffer) => buffer.pixels().any(|p| p.0[3] < u16::MAX),
+        DynamicImage::ImageLumaA16(buffer) => buffer.pixels().any(|p| p.0[1] < u16::MAX),
+        _ => false,
+    }
 }
 
 fn composite_over(img: DynamicImage, background: image::Rgba<u8>) -> DynamicImage {
@@ -363,7 +376,11 @@ fn decode_svg_chromium(bytes: &[u8], work: &std::path::Path) -> Result<DynamicIm
 fn svg_size(bytes: &[u8]) -> Result<(u32, u32), String> {
     const MAX_EDGE: u32 = 8_192;
     let text = std::str::from_utf8(bytes).map_err(|_| "SVG is not UTF-8".to_string())?;
-    let head = &text[..text.len().min(4096)];
+    let mut end = text.len().min(4096);
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let head = &text[..end];
 
     fn attr(text: &str, name: &str) -> Option<f64> {
         let start = text.find(&format!("{name}=\""))? + name.len() + 2;
@@ -682,4 +699,37 @@ fn encode_avif(img: &DynamicImage, quality: Option<u8>, out: &mut Vec<u8>) -> Re
 #[cfg(not(feature = "avif"))]
 fn encode_avif(_img: &DynamicImage, _quality: Option<u8>, _out: &mut Vec<u8>) -> Result<(), String> {
     Err("avif output is compiled out of this build (cargo feature 'avif')".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_multibyte_background_is_refused_not_a_panic() {
+        assert!(parse_color("aé").is_none());
+        assert!(parse_color("abéé").is_none());
+        assert_eq!(parse_color("#fff"), Some(image::Rgba([255, 255, 255, 255])));
+        assert_eq!(parse_color("000"), Some(image::Rgba([0, 0, 0, 255])));
+    }
+
+    #[test]
+    fn a_large_svg_is_read_across_a_multibyte_cut() {
+        let mut svg = String::from("<svg width=\"10\" height=\"20\">");
+        while svg.len() < 4095 {
+            svg.push('x');
+        }
+        svg.push('é');
+        svg.push_str("</svg>");
+        assert_eq!(svg_size(svg.as_bytes()), Ok((10, 20)));
+    }
+
+    #[test]
+    fn only_alpha_buffers_can_be_transparent() {
+        let opaque = DynamicImage::ImageRgb8(image::RgbImage::from_pixel(4, 4, image::Rgb([1, 2, 3])));
+        assert!(!has_transparency(&opaque));
+        let translucent =
+            DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(4, 4, image::Rgba([1, 2, 3, 128])));
+        assert!(has_transparency(&translucent));
+    }
 }

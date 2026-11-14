@@ -243,11 +243,14 @@ async fn read_source(state: &Arc<AppState>, body: &Value) -> Result<Vec<u8>, Res
     }
     let file_id = body.get("file_id").and_then(|v| v.as_str()).map(str::to_string);
     let input_path = body.get("input_path").and_then(|v| v.as_str()).map(str::to_string);
-    let Some(path) = resolve_any(state, file_id, input_path) else {
-        return Err(fail(
-            StatusCode::BAD_REQUEST,
-            "provide base64, input_path or file_id",
-        ));
+    let path = match resolve_any(state, file_id, input_path) {
+        Ok(path) => path,
+        Err(e) => {
+            return Err(fail(
+                StatusCode::BAD_REQUEST,
+                e.message("provide base64, input_path or file_id"),
+            ))
+        }
     };
     match state.config.allowed_input.check_existing(&path, "file") {
         Ok(path) => tokio::fs::read(&path)
@@ -321,10 +324,6 @@ async fn legacy_av(state: Arc<AppState>, request: ProcessRequest, processor: &st
     fail(StatusCode::GATEWAY_TIMEOUT, format!("job {job_id} did not finish within 15 minutes"))
 }
 
-fn resolve_input(state: &AppState, file_id: Option<String>, input_path: Option<String>) -> Option<PathBuf> {
-    resolve_any(state, file_id, input_path)
-}
-
 // â”€â”€â”€ probes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[derive(Debug, Deserialize)]
@@ -344,8 +343,19 @@ pub async fn video_probe(State(state): State<Arc<AppState>>, Json(body): Json<Pr
 }
 
 async fn probe(state: Arc<AppState>, body: ProbeBody) -> Response {
-    let Some(path) = resolve_any(&state, body.file_id, body.input_path) else {
-        return fail(StatusCode::BAD_REQUEST, "either input_path or fileId is required");
+    let path = match resolve_any(&state, body.file_id, body.input_path) {
+        Ok(path) => path,
+        Err(e) => {
+            return fail(
+                StatusCode::BAD_REQUEST,
+                e.message("either input_path or fileId is required"),
+            )
+        }
+    };
+    // The same gate every processor uses: a probe must not read an arbitrary path.
+    let path = match state.config.allowed_input.check_existing(&path, "file") {
+        Ok(path) => path,
+        Err(e) => return fail(StatusCode::FORBIDDEN, e),
     };
     match ffmpeg::probe(&path).await {
         Ok(value) => crate::ok(value).into_response(),
@@ -353,12 +363,42 @@ async fn probe(state: Arc<AppState>, body: ProbeBody) -> Response {
     }
 }
 
-fn resolve_any(state: &AppState, file_id: Option<String>, input_path: Option<String>) -> Option<PathBuf> {
-    if let Some(file_id) = file_id {
-        let dir = state.config.uploads_dir.join(file_id);
-        return std::fs::read_dir(dir).ok()?.next().and_then(|e| e.ok()).map(|e| e.path());
+/// Why a request did not name a readable input. The handler owns the wording:
+/// a malformed id must never be reported as a missing one.
+enum ResolveError {
+    Missing,
+    UnknownId(String),
+}
+
+impl ResolveError {
+    fn message(&self, missing: &str) -> String {
+        match self {
+            Self::Missing => missing.to_string(),
+            Self::UnknownId(id) => format!("unknown fileId: {id}"),
+        }
     }
-    input_path.map(PathBuf::from)
+}
+
+fn resolve_any(
+    state: &AppState,
+    file_id: Option<String>,
+    input_path: Option<String>,
+) -> Result<PathBuf, ResolveError> {
+    if let Some(file_id) = file_id {
+        // Joining a caller-supplied string onto a directory is a traversal; only
+        // ids this service minted can name an upload.
+        if !crate::util::is_valid_id(&file_id) {
+            return Err(ResolveError::UnknownId(file_id));
+        }
+        let dir = state.config.uploads_dir.join(&file_id);
+        return std::fs::read_dir(dir)
+            .ok()
+            .and_then(|mut entries| entries.next())
+            .and_then(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .ok_or(ResolveError::UnknownId(file_id));
+    }
+    input_path.map(PathBuf::from).ok_or(ResolveError::Missing)
 }
 
 // â”€â”€â”€ utilities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -378,8 +418,9 @@ pub async fn thumbnail(
     AxumPath(relative): AxumPath<String>,
     Query(query): Query<ThumbQuery>,
 ) -> Response {
-    let Some(path) = resolve_any(&state, None, Some(relative)) else {
-        return fail(StatusCode::BAD_REQUEST, "a file path is required");
+    let path = match resolve_any(&state, None, Some(relative)) {
+        Ok(path) => path,
+        Err(e) => return fail(StatusCode::BAD_REQUEST, e.message("a file path is required")),
     };
     // Reading an arbitrary path through a public route is a file-disclosure bug,
     // so the same allowlist the processors use applies here.

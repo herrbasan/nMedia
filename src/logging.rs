@@ -117,8 +117,13 @@ impl JsonFileLayer {
 
         let mut line = serde_json::to_string(&Value::Object(entry)).unwrap_or_default();
         if line.len() as u64 + 1 > MAX_FILE_BYTES {
-            // Never drop a line: truncate it, and say so.
-            line.truncate((MAX_FILE_BYTES / 2) as usize);
+            // Never drop a line: truncate it, and say so. The cut is walked back
+            // to a char boundary because `truncate` panics mid-character.
+            let mut cut = (MAX_FILE_BYTES / 2) as usize;
+            while cut > 0 && !line.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            line.truncate(cut);
             line.push_str("...[TRUNCATED]");
         }
         line.push('\n');
@@ -126,10 +131,12 @@ impl JsonFileLayer {
 
         let main_path = writer.dir.join("main-0.log");
         if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&main_path) {
-            let _ = file.write_all(line.as_bytes());
-            let _ = file.flush();
+            // Count only what reached the file, or a failed write rotates away
+            // real history to make room for bytes that were never there.
+            if file.write_all(line.as_bytes()).and_then(|()| file.flush()).is_ok() {
+                writer.main_bytes += bytes;
+            }
         }
-        writer.main_bytes += bytes;
 
         let meta_text = match &meta {
             Some(value) => format!(" {}", serde_json::to_string(value).unwrap_or_default()),
@@ -159,8 +166,11 @@ fn rotate(writer: &mut Writer) {
             let _ = fs::rename(&from, &to);
         }
     }
-    let _ = fs::rename(dir.join("main-0.log"), dir.join("main-1.log"));
-    writer.main_bytes = 0;
+    // Reset only when the roll happened; otherwise the counter keeps the file
+    // over the cap and the next line retries instead of growing unbounded.
+    if fs::rename(dir.join("main-0.log"), dir.join("main-1.log")).is_ok() {
+        writer.main_bytes = 0;
+    }
 }
 
 impl<S: Subscriber> Layer<S> for JsonFileLayer {

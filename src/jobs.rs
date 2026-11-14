@@ -335,6 +335,11 @@ impl JobStore {
         let updated = {
             let mut jobs = self.jobs.lock().expect("jobs lock");
             let job = jobs.get_mut(id)?;
+            // cancel() reads the status, releases the lock, then lands here; the
+            // executor can finish in that gap, and a terminal state is final.
+            if job.terminal() {
+                return None;
+            }
             job.status = "cancelled".into();
             job.stage = "cancelled".into();
             job.updated_at = util::rfc3339_now();

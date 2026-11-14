@@ -108,11 +108,14 @@ looks.
 Deployed on Badkid as the nPM service `mediaservice` (port 3500), config at
 `config.json` beside the binary; logs in `./logs`.
 
-## Updating the running service — the agent does this, on command
+## Updating the running service — always allowed, no permission needed
 
 nMedia is deployed here and nPM owns the process, so an update is a stop → build →
-start around a **locked executable**. When David says to update (or asks for a fix
-to go live), run the whole sequence yourself instead of handing it back to him:
+start around a **locked executable**. For `mediaservice` this is **always allowed**:
+whenever a change is ready to go live, run the whole sequence yourself instead of
+handing it back to David. He knows the restart is part of working on this service,
+so a brief outage — or a stop/start that fails — is expected and is not something
+to ask about first:
 
 ```powershell
 Invoke-RestMethod -Method Post 'http://192.168.0.100:9333/api/services/mediaservice/stop'

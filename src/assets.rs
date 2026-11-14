@@ -158,10 +158,28 @@ pub async fn download(
         .assets
         .bytes(&meta)
         .map_err(|e| server_error(&format!("cannot read asset {id}: {e}")))?;
+    // A raw filename in the header is both a 500 (non-ASCII) and an injection
+    // surface ('"'), so the plain filename is sanitised to ASCII and the real
+    // name rides along in RFC 5987 form.
+    let ascii: String = meta
+        .filename
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || " .-_()".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let encoded = crate::util::percent_encode(&meta.filename);
     Ok((
         [
             (header::CONTENT_TYPE, meta.mime.clone()),
-            (header::CONTENT_DISPOSITION, format!("inline; filename=\"{}\"", meta.filename)),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("inline; filename=\"{ascii}\"; filename*=UTF-8''{encoded}"),
+            ),
         ],
         bytes,
     )

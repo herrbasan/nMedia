@@ -223,6 +223,15 @@ fn validate(
 
     let input = match (&request.file_id, &request.input_path) {
         (Some(file_id), _) => {
+            // Only an id this service minted names an upload; anything else is a
+            // path, not a name, and must never reach the join below.
+            if !crate::util::is_valid_id(file_id) {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({ "success": false, "error": format!("unknown fileId: {file_id}") })),
+                )
+                    .into_response());
+            }
             let path = state.config.uploads_dir.join(file_id);
             let found = std::fs::read_dir(&path)
                 .ok()

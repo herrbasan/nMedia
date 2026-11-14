@@ -18,6 +18,16 @@ pub fn id() -> String {
     format!("{:016x}", hasher.finish())
 }
 
+/// Ids come only from `id()`: 16 lowercase hex digits. A caller-supplied id of
+/// any other shape names nothing this service created, so it is refused before
+/// it can be joined onto a directory.
+pub fn is_valid_id(candidate: &str) -> bool {
+    candidate.len() == 16
+        && candidate
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 pub fn now_ms() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -194,6 +204,20 @@ pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Percent-encode for RFC 5987 `filename*=UTF-8''…`: everything outside the
+/// unreserved set is escaped, so no byte of a filename can break the header.
+pub fn percent_encode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.as_bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            out.push(*byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
 // ─── path allowlist ──────────────────────────────────────────────────────
 
 /// `allowedInputPaths` / `allowedOutputPaths` from the Node config, kept as a
@@ -258,7 +282,17 @@ impl PathList {
         let name = path
             .file_name()
             .ok_or_else(|| format!("{what} has no file name: {}", path.display()))?;
-        Ok(canonical_parent.join(name))
+        let target = canonical_parent.join(name);
+        // An existing leaf may itself be a symlink out of the roots, and the
+        // write follows that link — so the resolved target is what must be
+        // checked, not just its parent.
+        match std::fs::canonicalize(&target) {
+            Ok(canonical) => {
+                self.assert_within(&canonical, what)?;
+                Ok(canonical)
+            }
+            Err(_) => Ok(target),
+        }
     }
 
     fn assert_within(&self, path: &Path, what: &str) -> Result<(), String> {
@@ -280,5 +314,38 @@ impl PathList {
                 .collect::<Vec<_>>()
                 .join("; ")
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_ids_minted_here_are_names() {
+        assert!(is_valid_id(&id()));
+        for bad in [
+            "",
+            "../..",
+            "/etc",
+            "000000000000000",
+            "00000000000000000",
+            "000000000000000g",
+            "FFFFFFFFFFFFFFFF",
+        ] {
+            assert!(!is_valid_id(bad), "{bad} must be refused");
+        }
+    }
+
+    #[test]
+    fn a_header_value_survives_any_filename() {
+        for safe in percent_encode("naïve \"x\"; a.png").bytes() {
+            assert!(
+                safe.is_ascii_alphanumeric() || matches!(safe, b'-' | b'.' | b'_' | b'~' | b'%'),
+                "byte {safe} is not attr-safe"
+            );
+        }
+        assert_eq!(percent_encode("a.png"), "a.png");
+        assert_eq!(percent_encode("a b"), "a%20b");
     }
 }
