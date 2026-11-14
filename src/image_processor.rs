@@ -510,7 +510,7 @@ fn apply_resize(mut img: DynamicImage, opts: &ImageOptions) -> Result<DynamicIma
                 "resize to {width}x{height} exceeds the 80 megapixel limit"
             ));
         }
-        img = resize_fast(&img, width, height)?;
+        img = resize_fast(img, width, height)?;
         return Ok(img);
     }
     let Some(max) = opts.max_dimension.or(opts.width).or(opts.height) else {
@@ -528,26 +528,28 @@ fn apply_resize(mut img: DynamicImage, opts: &ImageOptions) -> Result<DynamicIma
     let scale = max as f64 / long as f64;
     let nw = ((w as f64 * scale).round() as u32).max(1);
     let nh = ((h as f64 * scale).round() as u32).max(1);
-    img = resize_fast(&img, nw, nh)?;
+    img = resize_fast(img, nw, nh)?;
     Ok(img)
 }
 
 /// SIMD resize. `image::resize` is ~50x slower than this on a 4K image
 /// (zune benchmark: 744 ms vs 28 ms), and resizing is what a media service
 /// spends its time doing.
-fn resize_fast(img: &DynamicImage, width: u32, height: u32) -> Result<DynamicImage, String> {
+fn resize_fast(img: DynamicImage, width: u32, height: u32) -> Result<DynamicImage, String> {
     use fast_image_resize as fr;
 
+    // Takes ownership: the caller never needs the source again, and cloning a 4K
+    // RGBA buffer just to hand it to `from_vec_u8` is a full-image copy per call.
+    let (src_w, src_h) = (img.width(), img.height());
     let (source, pixel_type) = match img {
-        DynamicImage::ImageRgb8(buf) => (buf.as_raw().clone(), fr::PixelType::U8x3),
-        DynamicImage::ImageRgba8(buf) => (buf.as_raw().clone(), fr::PixelType::U8x4),
-        DynamicImage::ImageLuma8(buf) => (buf.as_raw().clone(), fr::PixelType::U8),
+        DynamicImage::ImageRgb8(buf) => (buf.into_raw(), fr::PixelType::U8x3),
+        DynamicImage::ImageRgba8(buf) => (buf.into_raw(), fr::PixelType::U8x4),
+        DynamicImage::ImageLuma8(buf) => (buf.into_raw(), fr::PixelType::U8),
         other => {
             let rgba = other.to_rgba8();
-            (rgba.as_raw().clone(), fr::PixelType::U8x4)
+            (rgba.into_raw(), fr::PixelType::U8x4)
         }
     };
-    let (src_w, src_h) = (img.width(), img.height());
     let src = fr::images::Image::from_vec_u8(src_w, src_h, source, pixel_type)
         .map_err(|e| format!("resize source buffer rejected: {e}"))?;
     let mut dst = fr::images::Image::new(width, height, pixel_type);
@@ -767,6 +769,29 @@ mod tests {
         svg.push('é');
         svg.push_str("</svg>");
         assert_eq!(svg_size(svg.as_bytes()), Ok((10, 20)));
+    }
+
+    /// Not a correctness test: measures one 4K resize so a change to the buffer
+    /// handling is compared rather than assumed. Run with
+    /// `cargo test --release bench_resize_4k -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn bench_resize_4k() {
+        let iterations = 5;
+        let started = std::time::Instant::now();
+        for _ in 0..iterations {
+            // Built inside the loop so both variants pay the same setup cost and
+            // only the resize's own buffer handling differs.
+            let img = DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+                4096,
+                4096,
+                image::Rgba([9, 20, 30, 200]),
+            ));
+            let out = resize_fast(img, 800, 800).unwrap();
+            assert_eq!(out.width(), 800);
+        }
+        let each = started.elapsed() / iterations;
+        println!("resize 4096->800: {each:?} per call ({iterations} calls)");
     }
 
     #[test]

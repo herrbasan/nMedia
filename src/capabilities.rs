@@ -33,21 +33,21 @@ pub async fn capabilities(
     State(state): State<Arc<AppState>>,
     Query(query): Query<CapabilitiesQuery>,
 ) -> Json<serde_json::Value> {
-    let service = build(&state);
     let _ = &query.module;
 
+    // A section used to be sliced out of a fully assembled tree — endpoints,
+    // features, health, every encoder list — with the rest thrown away. Build
+    // only what was asked for; a section answers with that part of the tree.
     match query.section.as_deref() {
-        // A section answers with that part of the tree, not the whole envelope —
-        // the Node service does the same, and callers parse the slice directly.
-        Some(key @ ("endpoints" | "features" | "health" | "config")) => match service.get(key) {
-            Some(slice) => crate::ok(slice.clone()),
-            None => crate::ok(serde_json::Value::Null),
-        },
+        Some("endpoints") => crate::ok(endpoints()),
+        Some("features") => crate::ok(features(&state)),
+        Some("health") => crate::ok(health::snapshot(&state)),
+        Some("config") => crate::ok(config(&state)),
         Some(other) => Json(serde_json::json!({
             "success": false,
             "error": format!("unknown section '{other}' — one of: endpoints, features, health, config"),
         })),
-        None => crate::ok(serde_json::json!({ "service": service })),
+        None => crate::ok(serde_json::json!({ "service": build(&state) })),
     }
 }
 
@@ -81,21 +81,25 @@ fn build(state: &AppState) -> serde_json::Value {
             "ttlSeconds": state.config.ttl_seconds,
             "cacheMaxBytes": state.config.cache_max_bytes,
         },
-        "config": {
-            "maxFileSizeBytes": state.config.max_file_size_bytes,
-            "maxFileSizeMb": state.config.max_file_size_bytes / (1024 * 1024),
-            // What a buffered JSON body may weigh; base64 media needs 4/3 of the
-            // file cap, and a caller sizing a request should read this rather
-            // than discover it as a 413.
-            "maxBodyBytes": crate::body_limit_bytes(state.config.max_file_size_bytes),
-            "cacheDir": state.config.cache_dir.to_string_lossy(),
-            "bind": state.config.bind.to_string(),
-            "workerProcesses": state.config.workers,
-            "workersMode": "process",
-            "messageTransport": "sse",
-            "allowedInputPaths": path_list(&state.config.allowed_input),
-            "allowedOutputPaths": path_list(&state.config.allowed_output),
-        },
+        "config": config(state),
+    })
+}
+
+fn config(state: &AppState) -> serde_json::Value {
+    serde_json::json!({
+        "maxFileSizeBytes": state.config.max_file_size_bytes,
+        "maxFileSizeMb": state.config.max_file_size_bytes / (1024 * 1024),
+        // What a buffered JSON body may weigh; base64 media needs 4/3 of the
+        // file cap, and a caller sizing a request should read this rather than
+        // discover it as a 413.
+        "maxBodyBytes": crate::body_limit_bytes(state.config.max_file_size_bytes),
+        "cacheDir": state.config.cache_dir.to_string_lossy(),
+        "bind": state.config.bind.to_string(),
+        "workerProcesses": state.config.workers,
+        "workersMode": "process",
+        "messageTransport": "sse",
+        "allowedInputPaths": path_list(&state.config.allowed_input),
+        "allowedOutputPaths": path_list(&state.config.allowed_output),
     })
 }
 
@@ -111,7 +115,7 @@ fn path_list(list: &crate::util::PathList) -> Vec<String> {
 /// `engine` names what would run the ops, so a missing binary is visible before a
 /// job is queued rather than after it fails.
 fn features(state: &AppState) -> serde_json::Value {
-    let ffmpeg = crate::ffmpeg::ffmpeg_path().is_some();
+    let ffmpeg = state.engines.ffmpeg.is_some();
     // The probed engine, not a fresh filesystem probe: /v1/capabilities must
     // describe the binary that will actually render.
     let chromium = state.engines.chrome.is_some();
